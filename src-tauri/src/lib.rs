@@ -385,6 +385,9 @@ pub fn run() {
             commands::change_vault_password,
             commands::move_note_to_vault,
             commands::move_note_out_of_vault,
+            commands::list_snapshots,
+            commands::restore_snapshot,
+            commands::export_reminders_ics,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

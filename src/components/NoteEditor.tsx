@@ -21,6 +21,7 @@ import {
   Bell,
   Lock,
   Unlock,
+  History,
 } from "lucide-react";
 import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import type { Attachment } from "../types";
@@ -48,6 +49,7 @@ import { extractHashtagsFromNote } from "../lib/hashtags";
 import { recurrenceLabel } from "../lib/reminders";
 import { AttachmentGrid } from "./AttachmentGrid";
 import { ReminderPicker } from "./ReminderPicker";
+import { HistoryDrawer } from "./HistoryDrawer";
 import type { ChecklistItemInput, ColorKey, Note, NoteKind, NoteInput } from "../types";
 
 interface ChecklistRowProps {
@@ -200,6 +202,7 @@ export function NoteEditor() {
   // attachments on open and append optimistically on add.
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [reminderPickerOpen, setReminderPickerOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
 
   // EI-06 — Snapshot the existing note once on open. We deliberately do NOT
   // depend on the store's `notes` array because a background load() would
@@ -1118,6 +1121,14 @@ export function NoteEditor() {
               </IconBtn>
             )}
           {existing && !existing.trashed && (
+            <IconBtn
+              ariaLabel="Version history"
+              onClick={() => setHistoryOpen(true)}
+            >
+              <History size={18} aria-hidden />
+            </IconBtn>
+          )}
+          {existing && !existing.trashed && (
             <IconBtn ariaLabel="Delete" onClick={trash}>
               <Trash2 size={18} aria-hidden />
             </IconBtn>
@@ -1140,6 +1151,20 @@ export function NoteEditor() {
         onSnooze={snoozeReminderForNote}
         onClear={clearReminderForNote}
         onClose={() => setReminderPickerOpen(false)}
+      />
+
+      <HistoryDrawer
+        open={historyOpen}
+        noteId={existing?.id ?? null}
+        onClose={() => setHistoryOpen(false)}
+        onRestored={() => {
+          // Refresh the editor's view by reloading the note in the store.
+          if (existing) {
+            void api.getNote(existing.id).then((updated) => {
+              if (updated) upsertNote(updated);
+            });
+          }
+        }}
       />
     </div>
   );

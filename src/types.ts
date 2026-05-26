@@ -101,6 +101,19 @@ export type Section =
   | { kind: "trash" }
   | { kind: "label"; labelId: string };
 
+export interface NoteSnapshot {
+  id: string;
+  noteId: string;
+  kind: NoteKind;
+  title: string;
+  body: string;
+  color: ColorKey;
+  pinned: boolean;
+  checklist: ChecklistItem[];
+  vault: VaultState;
+  takenAt: string;
+}
+
 /** RRULE recurrence shapes supported by NF-V0.5-A. The Rust side
  *  whitelists these strings literally — see `ALLOWED_RRULES` in
  *  src-tauri/src/commands.rs. */

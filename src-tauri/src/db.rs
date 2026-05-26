@@ -4,7 +4,7 @@ use std::path::Path;
 
 /// Current schema version. Bump and add a new arm to `apply_migration` for every
 /// schema change. Migrations are forward-only and ordered.
-pub const SCHEMA_VERSION: i32 = 6;
+pub const SCHEMA_VERSION: i32 = 7;
 
 pub fn open(path: &Path) -> Result<Connection> {
     let mut conn = Connection::open(path)?;
@@ -51,6 +51,7 @@ fn apply_migration(tx: &rusqlite::Transaction, version: i32) -> Result<()> {
         4 => tx.execute_batch(MIGRATION_V4)?,
         5 => tx.execute_batch(MIGRATION_V5)?,
         6 => tx.execute_batch(MIGRATION_V6)?,
+        7 => tx.execute_batch(MIGRATION_V7)?,
         v => bail!("no migration defined for schema v{v}"),
     }
     Ok(())
@@ -184,6 +185,46 @@ ALTER TABLE notes ADD COLUMN vault_ciphertext TEXT;
 CREATE INDEX IF NOT EXISTS idx_notes_vault ON notes(vault);
 "#;
 
+/// v7 — Note version history (NF-V0.5-D).
+///
+/// Every `update_note` snapshots the pre-update state of the row into
+/// `note_snapshots`. A trigger trims each note's history to the most
+/// recent 20 snapshots so storage growth is bounded. Vault notes
+/// snapshot their `vault_ciphertext` directly — no DEK needed for the
+/// history path; restore swaps the ciphertext back into place.
+const MIGRATION_V7: &str = r#"
+CREATE TABLE IF NOT EXISTS note_snapshots (
+    id TEXT PRIMARY KEY,
+    note_id TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL,
+    title TEXT NOT NULL DEFAULT '',
+    body TEXT NOT NULL DEFAULT '',
+    color TEXT NOT NULL DEFAULT 'default',
+    pinned INTEGER NOT NULL DEFAULT 0,
+    checklist_json TEXT NOT NULL DEFAULT '[]',
+    vault TEXT NOT NULL DEFAULT 'plain' CHECK (vault IN ('plain','vault')),
+    vault_ciphertext TEXT,
+    taken_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_snapshots_note_taken
+    ON note_snapshots(note_id, taken_at DESC);
+
+-- Trim to last 20 snapshots per note after every insert. The subselect
+-- finds the cutoff row's taken_at; anything older is deleted.
+CREATE TRIGGER IF NOT EXISTS note_snapshots_trim_to_20
+AFTER INSERT ON note_snapshots
+BEGIN
+    DELETE FROM note_snapshots
+    WHERE note_id = NEW.note_id
+      AND id NOT IN (
+          SELECT id FROM note_snapshots
+           WHERE note_id = NEW.note_id
+           ORDER BY taken_at DESC, id DESC
+           LIMIT 20
+      );
+END;
+"#;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -263,6 +304,67 @@ mod tests {
             .unwrap();
         let err = migrate(&mut conn).unwrap_err();
         assert!(err.to_string().contains("upgrade Keepr"));
+    }
+
+    #[test]
+    fn migration_v7_creates_snapshots_table_and_trim_trigger() {
+        let conn = fresh_conn();
+        // Table exists.
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master \
+                 WHERE type='table' AND name='note_snapshots'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1);
+        // Trigger exists.
+        let tcount: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master \
+                 WHERE type='trigger' AND name='note_snapshots_trim_to_20'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(tcount, 1);
+        // The trigger trims to last 20. Seed a parent note then insert
+        // 25 snapshots and confirm we end at 20.
+        conn.execute(
+            "INSERT INTO notes (id, kind, title, body, color, pinned, archived, trashed, \
+                                position, created_at, updated_at) \
+             VALUES ('parent', 'text', '', '', 'default', 0, 0, 0, 0, \
+                     '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+        for i in 0..25 {
+            conn.execute(
+                "INSERT INTO note_snapshots (id, note_id, kind, taken_at) \
+                 VALUES (?1, 'parent', 'text', ?2)",
+                rusqlite::params![format!("s{i:02}"), format!("2026-01-{:02}T00:00:00Z", i + 1)],
+            )
+            .unwrap();
+        }
+        let remaining: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM note_snapshots WHERE note_id = 'parent'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(remaining, 20, "trigger should cap to most-recent 20");
+        // The oldest survivors should be s05..s24 (descending), i.e. s05 stays.
+        let oldest_id: String = conn
+            .query_row(
+                "SELECT id FROM note_snapshots WHERE note_id = 'parent' \
+                 ORDER BY taken_at ASC LIMIT 1",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(oldest_id, "s05");
     }
 
     #[test]

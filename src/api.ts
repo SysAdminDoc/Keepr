@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { Attachment, Note, NoteInput, Label, Reminder } from "./types";
+import type { Attachment, Note, NoteInput, NoteSnapshot, Label, Reminder } from "./types";
 
 export const api = {
   listNotes: () => invoke<Note[]>("list_notes"),
@@ -32,6 +32,8 @@ export const api = {
   clearReminder: (noteId: string) =>
     invoke<void>("clear_reminder", { noteId }),
   listReminders: () => invoke<Reminder[]>("list_reminders"),
+  exportRemindersIcs: (dest: string) =>
+    invoke<string>("export_reminders_ics", { dest }),
   exportVault: (destDir: string) =>
     invoke<string>("export_vault", { destDir }),
   importTakeout: (src: string) =>
@@ -79,4 +81,8 @@ export const api = {
     invoke<Note>("move_note_to_vault", { id }),
   moveNoteOutOfVault: (id: string) =>
     invoke<Note>("move_note_out_of_vault", { id }),
+  listSnapshots: (noteId: string) =>
+    invoke<NoteSnapshot[]>("list_snapshots", { noteId }),
+  restoreSnapshot: (snapshotId: string) =>
+    invoke<Note>("restore_snapshot", { snapshotId }),
 };

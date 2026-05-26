@@ -359,12 +359,40 @@ export function SettingsModal() {
                 >
                   <Upload size={16} aria-hidden /> Import Google Takeout…
                 </button>
+                <button
+                  disabled={busy}
+                  onClick={async () => {
+                    try {
+                      const stamp = new Date()
+                        .toISOString()
+                        .replace(/[:.]/g, "-")
+                        .slice(0, 19);
+                      const dest = await save({
+                        title: "Save reminders as iCalendar",
+                        defaultPath: `keepr-reminders-${stamp}.ics`,
+                        filters: [{ name: "iCalendar", extensions: ["ics"] }],
+                      });
+                      if (!dest) return;
+                      setBusy(true);
+                      const summary = await api.exportRemindersIcs(dest as string);
+                      showToast(summary);
+                    } catch (e) {
+                      showToast("ICS export failed: " + String(e));
+                    } finally {
+                      setBusy(false);
+                    }
+                  }}
+                  className="flex items-center gap-2 px-3 py-2 text-sm rounded border border-gray-300 dark:border-[#5f6368] hover:bg-black/5 dark:hover:bg-white/10 disabled:opacity-50"
+                >
+                  <Download size={16} aria-hidden /> Export reminders as
+                  iCalendar (.ics)…
+                </button>
               </div>
             </div>
           </div>
 
           <div className="px-5 py-3 border-t border-gray-200 dark:border-[#5f6368] text-xs text-gray-500 dark:text-gray-400">
-            Keepr v0.8.0 — offline-first Google Keep clone. MIT-licensed.
+            Keepr v0.9.0 — offline-first Google Keep clone. MIT-licensed.
           </div>
         </div>
       </div>
