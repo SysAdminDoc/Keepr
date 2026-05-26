@@ -19,6 +19,10 @@ export interface ChecklistItem {
   text: string;
   checked: boolean;
   position: number;
+  /** NF-21 (v0.14+): one-level nesting. When set, this item is indented
+   *  under the referenced sibling. Rust server-side validates that the
+   *  referenced parent itself has `parentId === null` (single level). */
+  parentId?: string | null;
 }
 
 export interface ChecklistItemInput {
@@ -26,7 +30,21 @@ export interface ChecklistItemInput {
   text: string;
   checked: boolean;
   position: number;
+  parentId?: string | null;
 }
+
+/** NF-22 (v0.14+) — Keep's 9 background patterns + "none" sentinel. */
+export type BackgroundPatternKey =
+  | ""
+  | "groceries"
+  | "food"
+  | "music"
+  | "recipes"
+  | "notes"
+  | "places"
+  | "travel"
+  | "video"
+  | "celebration";
 
 export interface Attachment {
   id: string;
@@ -66,6 +84,9 @@ export interface Note {
    *  Optional so pre-v0.8 fixtures and Rust payloads without the field
    *  (older binaries) still deserialize cleanly. */
   vault?: VaultState;
+  /** NF-22 (v0.14+): background pattern key (or "" = none). Optional so
+   *  pre-v0.14 fixtures keep working. */
+  backgroundPattern?: BackgroundPatternKey;
 }
 
 export interface NoteInput {
@@ -76,6 +97,10 @@ export interface NoteInput {
   pinned: boolean;
   checklist: ChecklistItemInput[];
   labels: string[];
+  /** NF-22 (v0.14+). Required on the wire so Rust knows whether to
+   *  clear or set the column; renderer always passes a value (defaults
+   *  to "" in `emptyDraft()`). */
+  backgroundPattern: BackgroundPatternKey;
 }
 
 export interface Label {

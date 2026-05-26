@@ -11,11 +11,18 @@ use uuid::Uuid;
 use zip::write::SimpleFileOptions;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
 pub struct ChecklistItem {
     pub id: String,
     pub text: String,
     pub checked: bool,
     pub position: i64,
+    /// NF-V0.5-21 (v0.14+): one-level nesting. When set, this item is
+    /// indented under the referenced sibling. Validated server-side so
+    /// the referenced parent itself has `parent_id = None` (Keep parity
+    /// — only one level deep). Defaults absent for plain top-level items.
+    #[serde(default)]
+    pub parent_id: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -55,6 +62,11 @@ pub struct Note {
     /// "vault" + DEK is locked, the renderer shows a "🔒 Locked" card.
     #[serde(default = "default_vault_state")]
     pub vault: String,
+    /// NF-22 (v0.14+): pattern key from the renderer-side whitelist
+    /// (`src/lib/backgroundPatterns.ts`). Empty string = no pattern.
+    /// Unknown values map to "none" client-side without error.
+    #[serde(default)]
+    pub background_pattern: String,
 }
 
 fn default_vault_state() -> String {
@@ -68,6 +80,7 @@ pub struct Label {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
 pub struct NoteInput {
     pub kind: String,
     pub title: String,
@@ -76,14 +89,26 @@ pub struct NoteInput {
     pub pinned: bool,
     pub checklist: Vec<ChecklistItemInput>,
     pub labels: Vec<String>,
+    /// NF-22 (v0.14+): pattern key or "" for none. Validated to be one
+    /// of the known whitelist values (or empty) so a renderer bug can't
+    /// land an arbitrary string in the column.
+    #[serde(default)]
+    pub background_pattern: String,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
 pub struct ChecklistItemInput {
     pub id: Option<String>,
     pub text: String,
     pub checked: bool,
     pub position: i64,
+    /// NF-V0.5-21 (v0.14+): when set, references another item in the
+    /// same `checklist` input array by its `id`. Validated by
+    /// `validate_note_input` — must be present in the same array, and
+    /// that referenced item must itself have no parent (one level).
+    #[serde(default)]
+    pub parent_id: Option<String>,
 }
 
 fn now_iso() -> String {
@@ -125,7 +150,54 @@ fn validate_note_input(input: &NoteInput) -> Result<(), String> {
             ));
         }
     }
+    // NF-22 — background_pattern is a whitelisted enum-like string.
+    // Renderer keeps the full visual list; Rust just enforces the gate.
+    if !is_valid_background_pattern(&input.background_pattern) {
+        return Err(format!(
+            "unknown background_pattern '{}'",
+            input.background_pattern
+        ));
+    }
+    // NF-21 — validate parent_id references. Collect the set of items
+    // that are themselves top-level (parent_id = None) and confirm any
+    // child's parent_id points at one of those (NOT at another child —
+    // one nesting level only). Items in the same batch reference each
+    // other by `id`, which may be either the renderer-supplied id or
+    // None (in which case the item can't be a parent — it has no
+    // stable identifier yet).
+    let top_level_ids: std::collections::HashSet<&str> = input
+        .checklist
+        .iter()
+        .filter(|it| it.parent_id.is_none())
+        .filter_map(|it| it.id.as_deref())
+        .collect();
+    for (i, item) in input.checklist.iter().enumerate() {
+        if let Some(p) = &item.parent_id {
+            if !top_level_ids.contains(p.as_str()) {
+                return Err(format!(
+                    "checklist item {i}: parent_id '{p}' must reference a top-level item in the same batch"
+                ));
+            }
+        }
+    }
     Ok(())
+}
+
+const ALLOWED_BACKGROUND_PATTERNS: &[&str] = &[
+    "",
+    "groceries",
+    "food",
+    "music",
+    "recipes",
+    "notes",
+    "places",
+    "travel",
+    "video",
+    "celebration",
+];
+
+fn is_valid_background_pattern(s: &str) -> bool {
+    ALLOWED_BACKGROUND_PATTERNS.contains(&s)
 }
 
 fn load_note(conn: &Connection, id: &str) -> Result<Option<Note>, rusqlite::Error> {
@@ -143,7 +215,8 @@ fn load_note_with_vault(
 ) -> Result<Option<Note>, rusqlite::Error> {
     let mut stmt = conn.prepare(
         "SELECT id, kind, title, body, color, pinned, archived, trashed, position,
-                created_at, updated_at, trashed_at, vault, vault_ciphertext
+                created_at, updated_at, trashed_at, vault, vault_ciphertext,
+                background_pattern
          FROM notes WHERE id = ?1",
     )?;
     let row_opt = stmt
@@ -162,6 +235,7 @@ fn load_note_with_vault(
             let trashed_at: Option<String> = row.get(11)?;
             let vault_state: String = row.get(12)?;
             let ct_hex: Option<String> = row.get(13)?;
+            let background_pattern: String = row.get(14)?;
             let mut vault_checklist: Vec<ChecklistItem> = Vec::new();
             if vault_state == "vault" {
                 match (dek, ct_hex) {
@@ -178,6 +252,7 @@ fn load_note_with_vault(
                                         text: i.text,
                                         checked: i.checked,
                                         position: i.position,
+                                        parent_id: i.parent_id,
                                     })
                                     .collect();
                             }
@@ -207,6 +282,7 @@ fn load_note_with_vault(
                     labels: vec![],
                     attachments: vec![],
                     vault: vault_state.clone(),
+                    background_pattern,
                 },
                 vault_state,
                 vault_checklist,
@@ -223,7 +299,7 @@ fn load_note_with_vault(
         note.checklist = vault_checklist;
     } else {
         let mut cstmt = conn.prepare(
-            "SELECT id, text, checked, position FROM checklist_items
+            "SELECT id, text, checked, position, parent_id FROM checklist_items
              WHERE note_id = ?1 ORDER BY position ASC, rowid ASC",
         )?;
         let items = cstmt
@@ -233,6 +309,7 @@ fn load_note_with_vault(
                     text: row.get(1)?,
                     checked: row.get::<_, i64>(2)? != 0,
                     position: row.get(3)?,
+                    parent_id: row.get(4)?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -279,7 +356,8 @@ pub fn list_notes(state: State<'_, AppState>) -> Result<Vec<Note>, String> {
     let mut nstmt = conn
         .prepare(
             "SELECT id, kind, title, body, color, pinned, archived, trashed, position,
-                    created_at, updated_at, trashed_at, vault, vault_ciphertext
+                    created_at, updated_at, trashed_at, vault, vault_ciphertext,
+                    background_pattern
              FROM notes
              ORDER BY pinned DESC, updated_at DESC",
         )
@@ -336,6 +414,7 @@ pub fn list_notes(state: State<'_, AppState>) -> Result<Vec<Note>, String> {
             labels: Vec::new(),
             attachments: Vec::new(),
             vault: vault_label,
+            background_pattern: row.get(14).map_err(err)?,
         });
     }
     drop(crows);
@@ -371,6 +450,7 @@ pub fn list_notes(state: State<'_, AppState>) -> Result<Vec<Note>, String> {
                                 text: i.text,
                                 checked: i.checked,
                                 position: i.position,
+                                parent_id: i.parent_id,
                             })
                             .collect();
                         decrypted.insert(id, items);
@@ -399,7 +479,7 @@ pub fn list_notes(state: State<'_, AppState>) -> Result<Vec<Note>, String> {
 
     let mut cstmt = conn
         .prepare(
-            "SELECT note_id, id, text, checked, position
+            "SELECT note_id, id, text, checked, position, parent_id
              FROM checklist_items
              ORDER BY position ASC, rowid ASC",
         )
@@ -413,6 +493,7 @@ pub fn list_notes(state: State<'_, AppState>) -> Result<Vec<Note>, String> {
                 text: row.get(2).map_err(err)?,
                 checked: row.get::<_, i64>(3).map_err(err)? != 0,
                 position: row.get(4).map_err(err)?,
+                parent_id: row.get(5).map_err(err)?,
             });
         }
     }
@@ -548,9 +629,9 @@ pub fn create_note(state: State<'_, AppState>, input: NoteInput) -> Result<Note,
             .clone()
             .unwrap_or_else(|| Uuid::new_v4().to_string());
         tx.execute(
-            "INSERT INTO checklist_items (id, note_id, text, checked, position)
-             VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![item_id, id, item.text, item.checked as i64, item.position],
+            "INSERT INTO checklist_items (id, note_id, text, checked, position, parent_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![item_id, id, item.text, item.checked as i64, item.position, item.parent_id],
         )
         .map_err(err)?;
         checklist_out.push(ChecklistItem {
@@ -558,12 +639,23 @@ pub fn create_note(state: State<'_, AppState>, input: NoteInput) -> Result<Note,
             text: item.text.clone(),
             checked: item.checked,
             position: item.position,
+            parent_id: item.parent_id.clone(),
         });
     }
     for label_id in &input.labels {
         tx.execute(
             "INSERT OR IGNORE INTO note_labels (note_id, label_id) VALUES (?1, ?2)",
             params![id, label_id],
+        )
+        .map_err(err)?;
+    }
+    // NF-22 — persist background_pattern (already validated in the
+    // input). Default INSERT above wrote the column-default empty string;
+    // a single UPDATE keeps the create_note SQL short.
+    if !input.background_pattern.is_empty() {
+        tx.execute(
+            "UPDATE notes SET background_pattern = ?1 WHERE id = ?2",
+            params![input.background_pattern, id],
         )
         .map_err(err)?;
     }
@@ -588,6 +680,7 @@ pub fn create_note(state: State<'_, AppState>, input: NoteInput) -> Result<Note,
         labels: input.labels,
         attachments: Vec::new(),
         vault: "plain".to_string(),
+        background_pattern: input.background_pattern,
     })
 }
 
@@ -645,6 +738,7 @@ pub fn update_note(
             text: item.text.clone(),
             checked: item.checked,
             position: item.position,
+            parent_id: item.parent_id.clone(),
         });
     }
     if is_vault {
@@ -659,6 +753,7 @@ pub fn update_note(
                     text: c.text.clone(),
                     checked: c.checked,
                     position: c.position,
+                    parent_id: c.parent_id.clone(),
                 })
                 .collect(),
         };
@@ -666,14 +761,15 @@ pub fn update_note(
         tx.execute(
             "UPDATE notes
                SET kind = ?1, title = '', body = '', color = ?2, pinned = ?3, updated_at = ?4,
-                   vault_ciphertext = ?5
-             WHERE id = ?6",
+                   vault_ciphertext = ?5, background_pattern = ?6
+             WHERE id = ?7",
             params![
                 input.kind,
                 input.color,
                 input.pinned as i64,
                 now,
                 crate::vault::to_hex(&bundle),
+                input.background_pattern,
                 id,
             ],
         )
@@ -683,8 +779,9 @@ pub fn update_note(
     } else {
         tx.execute(
             "UPDATE notes
-               SET kind = ?1, title = ?2, body = ?3, color = ?4, pinned = ?5, updated_at = ?6
-             WHERE id = ?7",
+               SET kind = ?1, title = ?2, body = ?3, color = ?4, pinned = ?5, updated_at = ?6,
+                   background_pattern = ?7
+             WHERE id = ?8",
             params![
                 input.kind,
                 input.title,
@@ -692,6 +789,7 @@ pub fn update_note(
                 input.color,
                 input.pinned as i64,
                 now,
+                input.background_pattern,
                 id,
             ],
         )
@@ -700,9 +798,9 @@ pub fn update_note(
             .map_err(err)?;
         for item in &checklist_out {
             tx.execute(
-                "INSERT INTO checklist_items (id, note_id, text, checked, position)
-                 VALUES (?1, ?2, ?3, ?4, ?5)",
-                params![item.id, id, item.text, item.checked as i64, item.position],
+                "INSERT INTO checklist_items (id, note_id, text, checked, position, parent_id)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![item.id, id, item.text, item.checked as i64, item.position, item.parent_id],
             )
             .map_err(err)?;
         }
@@ -741,6 +839,7 @@ pub fn update_note(
         labels: input.labels,
         attachments,
         vault: vault_state,
+        background_pattern: input.background_pattern,
     })
 }
 
@@ -803,13 +902,34 @@ pub fn duplicate_note(state: State<'_, AppState>, id: String) -> Result<Note, St
         params![new_id, source.kind, copy_title, source.body, source.color, now],
     )
     .map_err(err)?;
+    // Two-pass copy: first assign fresh ids, then write rows with
+    // parent_id remapped from the source-side id to the new id. NF-21
+    // sub-items would otherwise reference rows that don't exist in the
+    // duplicate.
+    let mut id_map: std::collections::HashMap<String, String> =
+        std::collections::HashMap::with_capacity(source.checklist.len());
+    for item in &source.checklist {
+        id_map.insert(item.id.clone(), Uuid::new_v4().to_string());
+    }
     let mut checklist_out: Vec<ChecklistItem> = Vec::with_capacity(source.checklist.len());
     for item in &source.checklist {
-        let item_id = Uuid::new_v4().to_string();
+        let item_id = id_map.get(&item.id).expect("just inserted").clone();
+        let new_parent = item
+            .parent_id
+            .as_ref()
+            .and_then(|p| id_map.get(p))
+            .cloned();
         tx.execute(
-            "INSERT INTO checklist_items (id, note_id, text, checked, position)
-             VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![item_id, new_id, item.text, item.checked as i64, item.position],
+            "INSERT INTO checklist_items (id, note_id, text, checked, position, parent_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                item_id,
+                new_id,
+                item.text,
+                item.checked as i64,
+                item.position,
+                new_parent
+            ],
         )
         .map_err(err)?;
         checklist_out.push(ChecklistItem {
@@ -817,6 +937,7 @@ pub fn duplicate_note(state: State<'_, AppState>, id: String) -> Result<Note, St
             text: item.text.clone(),
             checked: item.checked,
             position: item.position,
+            parent_id: new_parent,
         });
     }
     for label_id in &source.labels {
@@ -850,6 +971,7 @@ pub fn duplicate_note(state: State<'_, AppState>, id: String) -> Result<Note, St
         // it out so the absence isn't a bug.
         attachments: Vec::new(),
         vault: "plain".to_string(),
+        background_pattern: source.background_pattern,
     })
 }
 
@@ -1147,6 +1269,7 @@ pub fn import_takeout(
                         .and_then(|t| t.as_bool())
                         .unwrap_or(false),
                     position: i as i64,
+                    parent_id: None,
                 })
                 .collect();
             ("list".to_string(), items)
@@ -1172,6 +1295,7 @@ pub fn import_takeout(
             pinned,
             checklist: checklist_input,
             labels: label_ids,
+            background_pattern: String::new(),
         };
         let created = match create_note(state.clone(), input) {
             Ok(n) => n,
@@ -2517,7 +2641,7 @@ pub fn move_note_to_vault(state: State<'_, AppState>, id: String) -> Result<Note
     }
     let checklist: Vec<crate::vault::VaultChecklistItem> = tx
         .prepare(
-            "SELECT id, text, checked, position FROM checklist_items \
+            "SELECT id, text, checked, position, parent_id FROM checklist_items \
              WHERE note_id = ?1 ORDER BY position, id",
         )
         .map_err(err)?
@@ -2527,6 +2651,7 @@ pub fn move_note_to_vault(state: State<'_, AppState>, id: String) -> Result<Note
                 text: r.get(1)?,
                 checked: r.get::<_, i64>(2)? != 0,
                 position: r.get(3)?,
+                parent_id: r.get(4)?,
             })
         })
         .map_err(err)?
@@ -2617,7 +2742,7 @@ fn snapshot_current_note(
     } else {
         let items: Vec<ChecklistItem> = tx
             .prepare(
-                "SELECT id, text, checked, position FROM checklist_items \
+                "SELECT id, text, checked, position, parent_id FROM checklist_items \
                  WHERE note_id = ?1 ORDER BY position, id",
             )
             .map_err(err)?
@@ -2627,6 +2752,7 @@ fn snapshot_current_note(
                     text: r.get(1)?,
                     checked: r.get::<_, i64>(2)? != 0,
                     position: r.get(3)?,
+                    parent_id: r.get(4)?,
                 })
             })
             .map_err(err)?
@@ -2779,9 +2905,9 @@ pub fn restore_snapshot(
             serde_json::from_str(&checklist_json).unwrap_or_default();
         for item in &items {
             tx.execute(
-                "INSERT INTO checklist_items (id, note_id, text, checked, position) \
-                 VALUES (?1, ?2, ?3, ?4, ?5)",
-                params![item.id, note_id, item.text, item.checked as i64, item.position],
+                "INSERT INTO checklist_items (id, note_id, text, checked, position, parent_id) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![item.id, note_id, item.text, item.checked as i64, item.position, item.parent_id],
             )
             .map_err(err)?;
         }
@@ -2828,14 +2954,15 @@ pub fn move_note_out_of_vault(state: State<'_, AppState>, id: String) -> Result<
     // Restore checklist items.
     for item in &payload.checklist {
         tx.execute(
-            "INSERT INTO checklist_items (id, note_id, text, checked, position) \
-                 VALUES (?1, ?2, ?3, ?4, ?5)",
+            "INSERT INTO checklist_items (id, note_id, text, checked, position, parent_id) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
             params![
                 item.id,
                 id,
                 item.text,
                 if item.checked { 1 } else { 0 },
-                item.position
+                item.position,
+                item.parent_id,
             ],
         )
         .map_err(err)?;

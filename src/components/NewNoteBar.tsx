@@ -22,6 +22,7 @@ export function NewNoteBar() {
         pinned: false,
         checklist: [],
         labels: [],
+        backgroundPattern: "",
       });
       const att = await api.addImageAttachmentBytes(
         note.id,

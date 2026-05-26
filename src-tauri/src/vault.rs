@@ -49,6 +49,11 @@ pub struct VaultChecklistItem {
     pub text: String,
     pub checked: bool,
     pub position: i64,
+    /// NF-V0.5-21 (v0.14+): nested sub-item parent reference. Old
+    /// ciphertext written before v0.14 doesn't have this field; serde
+    /// `default` fills it with None on read.
+    #[serde(default)]
+    pub parent_id: Option<String>,
 }
 
 /// In-memory holder for the unlocked DEK. Zeroizes on drop. The
@@ -328,6 +333,7 @@ mod tests {
                 text: "milk".into(),
                 checked: false,
                 position: 0,
+                parent_id: None,
             }],
         };
         let bundle = encrypt_note(&dek, "note-id-123", &payload).unwrap();

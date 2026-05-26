@@ -47,10 +47,19 @@ import { ColorPicker } from "./ColorPicker";
 import { IconBtn } from "./IconBtn";
 import { extractHashtagsFromNote } from "../lib/hashtags";
 import { recurrenceLabel } from "../lib/reminders";
+import { useFlip } from "../hooks/useFlip";
 import { AttachmentGrid } from "./AttachmentGrid";
 import { ReminderPicker } from "./ReminderPicker";
 import { HistoryDrawer } from "./HistoryDrawer";
-import type { ChecklistItemInput, ColorKey, Note, NoteKind, NoteInput } from "../types";
+import type {
+  BackgroundPatternKey,
+  ChecklistItemInput,
+  ColorKey,
+  Note,
+  NoteKind,
+  NoteInput,
+} from "../types";
+import { BACKGROUND_PATTERNS, normalizePattern } from "../lib/backgroundPatterns";
 
 interface ChecklistRowProps {
   /** Sortable id — unique per row (we use the row's stable key). */
@@ -60,22 +69,35 @@ interface ChecklistRowProps {
    *  nothing the user cares about). */
   draggable: boolean;
   item: ChecklistItemInput;
+  /** NF-21 — true when this row is currently indented (parentId set).
+   *  Drives the left-padding + Shift+Tab dedent enablement. */
+  indented: boolean;
   onToggle: () => void;
   onText: (t: string) => void;
   onEnter: () => void;
   onBackspaceEmpty?: () => void;
   onRemove: () => void;
+  /** NF-21 — Tab: try to indent under the previous root sibling. */
+  onIndent: () => void;
+  /** NF-21 — Shift+Tab: drop the parentId. No-op when already at root. */
+  onDedent: () => void;
+  /** NF-20 polish — FLIP animator's per-row ref callback. */
+  flipRef?: (el: HTMLElement | null) => void;
 }
 
 function ChecklistRow({
   sortId,
   draggable,
   item,
+  indented,
   onToggle,
   onText,
   onEnter,
   onBackspaceEmpty,
   onRemove,
+  onIndent,
+  onDedent,
+  flipRef,
 }: ChecklistRowProps) {
   // NF-05 — useSortable on every row. Listeners are attached only to
   // the GripVertical handle so dragging from the input field doesn't
@@ -87,13 +109,21 @@ function ChecklistRow({
         transition: sortable.transition,
       }
     : {};
+  // NF-20 polish + NF-05 — combine the FLIP ref with dnd-kit's
+  // sortable.setNodeRef. dnd-kit's ref callback signature is the same
+  // (el | null) so chaining is just a forwarding call.
+  const mergedRef = (el: HTMLDivElement | null) => {
+    sortable.setNodeRef(el);
+    flipRef?.(el);
+  };
   return (
     <div
-      ref={sortable.setNodeRef}
+      ref={mergedRef}
       style={style}
       className={clsx(
         "group/item flex items-center gap-1 px-2 py-1",
         sortable.isDragging && "opacity-50",
+        indented && "pl-8", // NF-21 — visual indent for sub-items
       )}
     >
       {draggable ? (
@@ -137,6 +167,13 @@ function ChecklistRow({
           ) {
             e.preventDefault();
             onBackspaceEmpty();
+          } else if (e.key === "Tab") {
+            // NF-21 — Tab indents, Shift+Tab dedents. Keep parity:
+            // single level of nesting only (the indent handler is a
+            // no-op when no eligible parent exists).
+            e.preventDefault();
+            if (e.shiftKey) onDedent();
+            else onIndent();
           }
         }}
         placeholder="List item"
@@ -166,6 +203,8 @@ interface Draft {
   pinned: boolean;
   checklist: ChecklistItemInput[];
   labels: string[];
+  /** NF-22 — empty string = no pattern. */
+  backgroundPattern: BackgroundPatternKey;
 }
 
 const emptyDraft = (): Draft => ({
@@ -176,6 +215,7 @@ const emptyDraft = (): Draft => ({
   pinned: false,
   checklist: [],
   labels: [],
+  backgroundPattern: "",
 });
 
 export function NoteEditor() {
@@ -252,8 +292,10 @@ export function NoteEditor() {
           text: c.text,
           checked: c.checked,
           position: c.position,
+          parentId: c.parentId ?? null,
         })),
         labels: [...found.labels],
+        backgroundPattern: normalizePattern(found.backgroundPattern),
       });
       setAttachments([...found.attachments]);
     } else {
@@ -338,6 +380,7 @@ export function NoteEditor() {
         .filter((c) => c.text.trim().length > 0)
         .map((c, i) => ({ ...c, position: i })),
       labels: [...mergedLabelIds],
+      backgroundPattern: d.backgroundPattern,
     };
     const isEmptyNow =
       !d.title.trim() &&
@@ -484,6 +527,33 @@ export function NoteEditor() {
     setDraft({ ...draft, checklist: next });
   };
 
+  // NF-21 — Tab indents the row under the most recent top-level item
+  // above it that has an id (we need a stable parent reference). When
+  // no such candidate exists the indent is a no-op.
+  const indentItem = (idx: number) => {
+    if (idx <= 0) return; // first row can't be indented
+    let parent: ChecklistItemInput | null = null;
+    for (let i = idx - 1; i >= 0; i--) {
+      const candidate = draft.checklist[i];
+      if (!candidate.parentId && candidate.id) {
+        parent = candidate;
+        break;
+      }
+    }
+    if (!parent) return;
+    const next = [...draft.checklist];
+    next[idx] = { ...next[idx], parentId: parent.id };
+    setDraft({ ...draft, checklist: next });
+  };
+  // NF-21 — Shift+Tab drops the parentId. Idempotent at root.
+  const dedentItem = (idx: number) => {
+    const it = draft.checklist[idx];
+    if (!it.parentId) return;
+    const next = [...draft.checklist];
+    next[idx] = { ...next[idx], parentId: null };
+    setDraft({ ...draft, checklist: next });
+  };
+
   // NF-05 — sortable id per row. We mint a stable sort-id by using the
   // item's underlying id if present, falling back to its original index
   // (new items added during this editing session won't yet have an id).
@@ -491,6 +561,13 @@ export function NoteEditor() {
     const it = draft.checklist[idx];
     return it?.id ?? `__new:${idx}`;
   };
+
+  // NF-20 polish — FLIP animator for checklist rows. Keyed on the
+  // checked-state bitmap so the animator only runs when an item flips
+  // between checked/unchecked (not on every keystroke, which would
+  // be wasted work and could fight ongoing text input).
+  const flipKey = draft.checklist.map((c) => (c.checked ? "1" : "0")).join("");
+  const { register: flipRegister } = useFlip<string>(flipKey);
   // Map sort id -> original draft.checklist index, so drag-end can
   // resolve the array slot reliably even after group splitting.
   const indexOfSortId = (id: string): number => {
@@ -555,6 +632,7 @@ export function NoteEditor() {
         .filter((c) => c.text.trim().length > 0)
         .map((c, i) => ({ ...c, position: i })),
       labels: d.labels,
+      backgroundPattern: d.backgroundPattern,
     };
     return await api.updateNote(existing.id, payload);
   };
@@ -639,6 +717,7 @@ export function NoteEditor() {
           .filter((c) => c.text.trim().length > 0)
           .map((c, i) => ({ ...c, position: i })),
         labels: d.labels,
+        backgroundPattern: d.backgroundPattern,
       });
       upsertNote(created);
       setExisting(created);
@@ -822,7 +901,12 @@ export function NoteEditor() {
           "w-full max-w-xl rounded-lg border shadow-keep-hover overflow-hidden",
           dropActive && "ring-2 ring-[#1a73e8] ring-offset-2",
         )}
-        style={{ background: bg, borderColor: border }}
+        style={{
+          background: bg,
+          borderColor: border,
+          backgroundImage: BACKGROUND_PATTERNS[draft.backgroundPattern],
+          backgroundRepeat: "repeat",
+        }}
         onClick={(e) => e.stopPropagation()}
         onPaste={onPaste}
         onDragOver={onDragOver}
@@ -901,6 +985,7 @@ export function NoteEditor() {
                         sortId={sortIdFor(i)}
                         draggable
                         item={it}
+                        indented={!!it.parentId}
                         onToggle={() => setItem(i, { checked: !it.checked })}
                         onText={(t) => setItem(i, { text: t })}
                         onEnter={addItem}
@@ -910,6 +995,9 @@ export function NoteEditor() {
                             : undefined
                         }
                         onRemove={() => removeItem(i)}
+                        onIndent={() => indentItem(i)}
+                        onDedent={() => dedentItem(i)}
+                        flipRef={flipRegister(sortIdFor(i))}
                       />
                     ))}
                   </SortableContext>
@@ -950,6 +1038,7 @@ export function NoteEditor() {
                           sortId={sortIdFor(i)}
                           draggable={false}
                           item={it}
+                          indented={!!it.parentId}
                           onToggle={() => setItem(i, { checked: !it.checked })}
                           onText={(t) => setItem(i, { text: t })}
                           onEnter={addItem}
@@ -959,6 +1048,9 @@ export function NoteEditor() {
                               : undefined
                           }
                           onRemove={() => removeItem(i)}
+                          onIndent={() => indentItem(i)}
+                          onDedent={() => dedentItem(i)}
+                          flipRef={flipRegister(sortIdFor(i))}
                         />
                       ))}
                   </div>
@@ -1013,6 +1105,12 @@ export function NoteEditor() {
                 onChange={(c) => {
                   setDraft({ ...draft, color: c });
                   setColorOpen(false);
+                }}
+                patternValue={draft.backgroundPattern}
+                onPatternChange={(p) => {
+                  setDraft({ ...draft, backgroundPattern: p });
+                  // Don't close on pattern pick — let the user iterate
+                  // through the swatches without re-opening the popover.
                 }}
               />
             </div>

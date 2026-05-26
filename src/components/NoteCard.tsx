@@ -14,6 +14,7 @@ import clsx from "clsx";
 import { useRef, useState } from "react";
 import type { Note } from "../types";
 import { bgFor, borderFor } from "../colors";
+import { BACKGROUND_PATTERNS, normalizePattern } from "../lib/backgroundPatterns";
 import { useStore } from "../store";
 import { api } from "../api";
 import { ColorPicker } from "./ColorPicker";
@@ -223,7 +224,15 @@ export function NoteCard({ note }: Props) {
         isSelected && "ring-2 ring-[#1a73e8] ring-offset-1",
         sortable.isDragging && "opacity-50",
       )}
-      style={{ ...sortableStyle, background: bg, borderColor: border }}
+      style={{
+        ...sortableStyle,
+        background: bg,
+        borderColor: border,
+        // NF-22 — tiled SVG pattern overlay. Empty key → empty string,
+        // which the browser treats as "no image" so no visual change.
+        backgroundImage: BACKGROUND_PATTERNS[normalizePattern(note.backgroundPattern)],
+        backgroundRepeat: "repeat",
+      }}
       onClick={cardActivate}
       onKeyDown={onKeyDown}
       role="button"

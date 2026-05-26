@@ -4,7 +4,7 @@ use std::path::Path;
 
 /// Current schema version. Bump and add a new arm to `apply_migration` for every
 /// schema change. Migrations are forward-only and ordered.
-pub const SCHEMA_VERSION: i32 = 9;
+pub const SCHEMA_VERSION: i32 = 11;
 
 pub fn open(path: &Path) -> Result<Connection> {
     let mut conn = Connection::open(path)?;
@@ -54,6 +54,8 @@ fn apply_migration(tx: &rusqlite::Transaction, version: i32) -> Result<()> {
         7 => tx.execute_batch(MIGRATION_V7)?,
         8 => tx.execute_batch(MIGRATION_V8)?,
         9 => tx.execute_batch(MIGRATION_V9)?,
+        10 => tx.execute_batch(MIGRATION_V10)?,
+        11 => tx.execute_batch(MIGRATION_V11)?,
         v => bail!("no migration defined for schema v{v}"),
     }
     Ok(())
@@ -341,6 +343,32 @@ BEGIN
 END;
 "#;
 
+/// v10 — Sub-checklist indent (NF-21).
+///
+/// Adds an optional `parent_id` column to `checklist_items` so an item
+/// can be nested under another item in the same note. Keep parity: one
+/// nesting level only — the command-side validator rejects an input
+/// where a parent itself has a parent. The FK self-reference + ON
+/// DELETE CASCADE means removing a parent also removes its children.
+const MIGRATION_V10: &str = r#"
+ALTER TABLE checklist_items ADD COLUMN parent_id TEXT
+    REFERENCES checklist_items(id) ON DELETE CASCADE;
+CREATE INDEX IF NOT EXISTS idx_checklist_parent
+    ON checklist_items(parent_id);
+"#;
+
+/// v11 — Background image patterns (NF-22).
+///
+/// Adds a `background_pattern` column to `notes` (empty string = none).
+/// The whitelist of valid pattern keys lives renderer-side in
+/// `src/lib/backgroundPatterns.ts`; the column itself is plain TEXT so
+/// future patterns don't need a migration. CHECK kept loose for the
+/// same reason — the renderer maps unknown values to "none" instead of
+/// erroring.
+const MIGRATION_V11: &str = r#"
+ALTER TABLE notes ADD COLUMN background_pattern TEXT NOT NULL DEFAULT '';
+"#;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -420,6 +448,73 @@ mod tests {
             .unwrap();
         let err = migrate(&mut conn).unwrap_err();
         assert!(err.to_string().contains("upgrade Keepr"));
+    }
+
+    #[test]
+    fn migration_v11_adds_background_pattern_column() {
+        let conn = fresh_conn();
+        let cols: Vec<String> = conn
+            .prepare("PRAGMA table_info(notes)")
+            .unwrap()
+            .query_map([], |r| r.get::<_, String>(1))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        assert!(cols.contains(&"background_pattern".to_string()), "got {cols:?}");
+        // Defaults to empty string for existing rows.
+        conn.execute(
+            "INSERT INTO notes (id, kind, title, body, color, pinned, archived, trashed, \
+                                position, created_at, updated_at) \
+             VALUES ('n1', 'text', '', '', 'default', 0, 0, 0, 0, \
+                     '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+        let bg: String = conn
+            .query_row("SELECT background_pattern FROM notes WHERE id = 'n1'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(bg, "");
+    }
+
+    #[test]
+    fn migration_v10_adds_parent_id_to_checklist_items() {
+        let conn = fresh_conn();
+        let cols: Vec<String> = conn
+            .prepare("PRAGMA table_info(checklist_items)")
+            .unwrap()
+            .query_map([], |r| r.get::<_, String>(1))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        assert!(cols.contains(&"parent_id".to_string()), "got {cols:?}");
+        // Self-referencing FK + ON DELETE CASCADE round-trip.
+        conn.execute(
+            "INSERT INTO notes (id, kind, title, body, color, pinned, archived, trashed, \
+                                position, created_at, updated_at) \
+             VALUES ('n1', 'list', '', '', 'default', 0, 0, 0, 0, \
+                     '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO checklist_items (id, note_id, text, checked, position) \
+             VALUES ('parent', 'n1', 'shopping', 0, 0)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO checklist_items (id, note_id, text, checked, position, parent_id) \
+             VALUES ('child', 'n1', 'milk', 0, 1, 'parent')",
+            [],
+        )
+        .unwrap();
+        // Delete the parent — child should cascade.
+        conn.execute("DELETE FROM checklist_items WHERE id = 'parent'", [])
+            .unwrap();
+        let n: i64 = conn
+            .query_row("SELECT COUNT(*) FROM checklist_items WHERE id = 'child'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, 0, "child should cascade-delete with parent");
     }
 
     #[test]
