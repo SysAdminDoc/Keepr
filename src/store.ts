@@ -5,6 +5,7 @@ import { api } from "./api";
 interface UIState {
   notes: Note[];
   labels: Label[];
+  loaded: boolean;
   section: Section;
   search: string;
   dark: boolean;
@@ -28,30 +29,42 @@ interface UIState {
 
 const THEME_KEY = "keepr:theme";
 
-const initialDark =
-  typeof window !== "undefined" &&
-  (localStorage.getItem(THEME_KEY) === "dark" ||
-    (!localStorage.getItem(THEME_KEY) &&
-      window.matchMedia?.("(prefers-color-scheme: dark)").matches));
-
-if (initialDark) document.documentElement.classList.add("dark");
+// EI-37 — the inline boot script in `index.html` toggles the `.dark` class on
+// <html> BEFORE the first React paint, so there's no flash of wrong theme.
+// Here we just read the resulting class so the store's `dark` value matches.
+function readInitialDark(): boolean {
+  if (typeof document === "undefined") return false;
+  return document.documentElement.classList.contains("dark");
+}
 
 export const useStore = create<UIState>((set, get) => ({
   notes: [],
   labels: [],
+  loaded: false,
   section: { kind: "notes" },
   search: "",
-  dark: !!initialDark,
+  dark: readInitialDark(),
   editorOpen: false,
   editorNoteId: null,
   settingsOpen: false,
   labelsManagerOpen: false,
   toast: null,
   load: async () => {
-    const [notes, labels] = await Promise.all([api.listNotes(), api.listLabels()]);
-    set({ notes, labels });
+    try {
+      const [notes, labels] = await Promise.all([
+        api.listNotes(),
+        api.listLabels(),
+      ]);
+      set({ notes, labels, loaded: true });
+    } catch (e) {
+      // Even on failure we mark loaded so the user sees an error toast,
+      // not an infinite spinner.
+      set({ loaded: true });
+      get().showToast("Could not load notes: " + String(e));
+    }
   },
-  setSection: (s) => set({ section: s, search: "" }),
+  // EI-40 — don't wipe the search input when the user switches sections.
+  setSection: (s) => set({ section: s }),
   setSearch: (q) => set({ search: q }),
   toggleDark: () => {
     const next = !get().dark;

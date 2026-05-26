@@ -9,20 +9,27 @@ import {
   Check,
 } from "lucide-react";
 import clsx from "clsx";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { Note } from "../types";
 import { bgFor, borderFor } from "../colors";
 import { useStore } from "../store";
 import { api } from "../api";
 import { ColorPicker } from "./ColorPicker";
+import { useClickOutside } from "../hooks/useClickOutside";
 
 interface Props {
   note: Note;
 }
 
 export function NoteCard({ note }: Props) {
-  const { section, dark, load, openEditor, showToast } = useStore();
+  const section = useStore((s) => s.section);
+  const dark = useStore((s) => s.dark);
+  const load = useStore((s) => s.load);
+  const openEditor = useStore((s) => s.openEditor);
+  const showToast = useStore((s) => s.showToast);
   const [colorOpen, setColorOpen] = useState(false);
+  const popoverRef = useRef<HTMLDivElement>(null);
+  useClickOutside(popoverRef, colorOpen, () => setColorOpen(false));
 
   const inTrash = section.kind === "trash";
   const inArchive = section.kind === "archive";
@@ -30,71 +37,107 @@ export function NoteCard({ note }: Props) {
   const bg = bgFor(note.color, dark);
   const border = borderFor(note.color, dark);
 
-  const togglePin = async (e: React.MouseEvent) => {
-    e.stopPropagation();
-    await api.setPinned(note.id, !note.pinned);
-    await load();
+  // EI-17 — every mutation runs inside a try/catch so a Rust error reaches
+  // the user as a toast instead of an unhandled promise rejection.
+  const withToast = async (label: string, fn: () => Promise<void>) => {
+    try {
+      await fn();
+    } catch (e) {
+      showToast(`Could not ${label}: ${String(e)}`);
+    }
   };
 
-  const toggleArchive = async (e: React.MouseEvent) => {
+  const togglePin = (e: React.MouseEvent) => {
     e.stopPropagation();
-    await api.setArchived(note.id, !note.archived);
-    await load();
-    showToast(note.archived ? "Note unarchived" : "Note archived");
+    return withToast("update note", async () => {
+      await api.setPinned(note.id, !note.pinned);
+      await load();
+    });
   };
 
-  const trash = async (e: React.MouseEvent) => {
+  const toggleArchive = (e: React.MouseEvent) => {
     e.stopPropagation();
-    await api.setTrashed(note.id, true);
-    await load();
-    showToast("Note moved to Trash");
+    return withToast("archive note", async () => {
+      const becomingArchived = !note.archived;
+      await api.setArchived(note.id, becomingArchived);
+      await load();
+      showToast(becomingArchived ? "Note archived" : "Note unarchived");
+    });
   };
 
-  const restore = async (e: React.MouseEvent) => {
+  const trash = (e: React.MouseEvent) => {
     e.stopPropagation();
-    await api.setTrashed(note.id, false);
-    await load();
-    showToast("Note restored");
+    return withToast("trash note", async () => {
+      await api.setTrashed(note.id, true);
+      await load();
+      showToast("Note moved to Trash");
+    });
   };
 
-  const deleteForever = async (e: React.MouseEvent) => {
+  const restore = (e: React.MouseEvent) => {
     e.stopPropagation();
-    await api.deleteNotePermanent(note.id);
-    await load();
-    showToast("Note deleted");
+    return withToast("restore note", async () => {
+      await api.setTrashed(note.id, false);
+      await load();
+      showToast("Note restored");
+    });
   };
 
-  const onCardClick = () => {
+  const deleteForever = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    return withToast("delete note", async () => {
+      await api.deleteNotePermanent(note.id);
+      await load();
+      showToast("Note deleted");
+    });
+  };
+
+  const openIfNotTrash = () => {
     if (inTrash) return;
     openEditor(note.id);
   };
 
-  const setColor = async (color: string) => {
-    await api.setColor(note.id, color);
-    setColorOpen(false);
-    await load();
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      openIfNotTrash();
+    }
   };
+
+  const setColor = (color: string) =>
+    withToast("change color", async () => {
+      await api.setColor(note.id, color);
+      setColorOpen(false);
+      await load();
+    });
+
+  const cardLabel = note.title || (note.body ? note.body.slice(0, 60) : "Untitled note");
 
   return (
     <div
       className={clsx(
         "note-card group relative rounded-lg border shadow-keep hover:shadow-keep-hover cursor-default",
-        "transition-shadow",
+        "transition-shadow motion-reduce:transition-none",
       )}
       style={{ background: bg, borderColor: border }}
-      onClick={onCardClick}
+      onClick={openIfNotTrash}
+      onKeyDown={onKeyDown}
+      role="button"
       tabIndex={0}
+      aria-label={cardLabel}
     >
       {!inTrash && (
         <button
           onClick={togglePin}
-          className={clsx(
-            "absolute top-2 right-2 p-1.5 rounded-full hover:bg-black/10 dark:hover:bg-white/10 transition-opacity",
-            note.pinned ? "opacity-100" : "opacity-0 group-hover:opacity-100",
-          )}
+          aria-label={note.pinned ? "Unpin note" : "Pin note"}
+          aria-pressed={note.pinned}
           title={note.pinned ? "Unpin" : "Pin"}
+          className={clsx(
+            "absolute top-2 right-2 p-1.5 rounded-full hover:bg-black/10 dark:hover:bg-white/10 transition-opacity motion-reduce:transition-none",
+            note.pinned ? "opacity-100" : "opacity-0 group-hover:opacity-100 focus:opacity-100",
+          )}
         >
-          {note.pinned ? <Pin size={18} /> : <PinOff size={18} />}
+          {note.pinned ? <Pin size={18} aria-hidden /> : <PinOff size={18} aria-hidden />}
         </button>
       )}
 
@@ -119,8 +162,12 @@ export function NoteCard({ note }: Props) {
               key={it.id}
               className="flex items-start gap-2 px-2 py-1 text-[14px]"
             >
-              <span className="w-4 h-4 mt-0.5 grid place-items-center border rounded-sm border-current opacity-70">
-                {it.checked && <Check size={12} />}
+              <span
+                className="w-4 h-4 mt-0.5 grid place-items-center border rounded-sm border-current opacity-70"
+                role="img"
+                aria-label={it.checked ? "Checked" : "Unchecked"}
+              >
+                {it.checked && <Check size={12} aria-hidden />}
               </span>
               <span
                 className={clsx(
@@ -145,15 +192,15 @@ export function NoteCard({ note }: Props) {
       <div className="hover-actions flex items-center px-1 pb-1">
         {!inTrash && !inArchive && (
           <>
-            <div className="relative">
+            <div className="relative" ref={popoverRef}>
               <IconBtn
-                title="Background options"
+                ariaLabel="Background options"
                 onClick={(e) => {
                   e.stopPropagation();
                   setColorOpen((v) => !v);
                 }}
               >
-                <Palette size={18} />
+                <Palette size={18} aria-hidden />
               </IconBtn>
               {colorOpen && (
                 <div
@@ -168,31 +215,31 @@ export function NoteCard({ note }: Props) {
                 </div>
               )}
             </div>
-            <IconBtn title="Archive" onClick={toggleArchive}>
-              <Archive size={18} />
+            <IconBtn ariaLabel="Archive" onClick={toggleArchive}>
+              <Archive size={18} aria-hidden />
             </IconBtn>
-            <IconBtn title="Delete" onClick={trash}>
-              <Trash2 size={18} />
+            <IconBtn ariaLabel="Delete" onClick={trash}>
+              <Trash2 size={18} aria-hidden />
             </IconBtn>
           </>
         )}
         {inArchive && (
           <>
-            <IconBtn title="Unarchive" onClick={toggleArchive}>
-              <ArchiveRestore size={18} />
+            <IconBtn ariaLabel="Unarchive" onClick={toggleArchive}>
+              <ArchiveRestore size={18} aria-hidden />
             </IconBtn>
-            <IconBtn title="Delete" onClick={trash}>
-              <Trash2 size={18} />
+            <IconBtn ariaLabel="Delete" onClick={trash}>
+              <Trash2 size={18} aria-hidden />
             </IconBtn>
           </>
         )}
         {inTrash && (
           <>
-            <IconBtn title="Restore" onClick={restore}>
-              <RotateCcw size={18} />
+            <IconBtn ariaLabel="Restore" onClick={restore}>
+              <RotateCcw size={18} aria-hidden />
             </IconBtn>
-            <IconBtn title="Delete forever" onClick={deleteForever}>
-              <Trash2 size={18} />
+            <IconBtn ariaLabel="Delete forever" onClick={deleteForever}>
+              <Trash2 size={18} aria-hidden />
             </IconBtn>
           </>
         )}
@@ -204,16 +251,18 @@ export function NoteCard({ note }: Props) {
 function IconBtn({
   children,
   onClick,
-  title,
+  ariaLabel,
 }: {
   children: React.ReactNode;
   onClick: (e: React.MouseEvent) => void;
-  title: string;
+  ariaLabel: string;
 }) {
   return (
     <button
+      type="button"
       onClick={onClick}
-      title={title}
+      aria-label={ariaLabel}
+      title={ariaLabel}
       className="p-2 rounded-full hover:bg-black/10 dark:hover:bg-white/10"
     >
       {children}
@@ -222,7 +271,7 @@ function IconBtn({
 }
 
 function ChipsRow({ noteLabelIds }: { noteLabelIds: string[] }) {
-  const { labels } = useStore();
+  const labels = useStore((s) => s.labels);
   if (!noteLabelIds.length) return null;
   const visible = noteLabelIds
     .map((id) => labels.find((l) => l.id === id))

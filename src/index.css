@@ -45,6 +45,29 @@ button {
   padding: 0;
 }
 
+/* EI-13 — visible keyboard focus ring across all interactive elements.
+   `:focus-visible` only fires when focus came from keyboard, so mouse
+   users don't see it. */
+*:focus-visible {
+  outline: 2px solid #1a73e8;
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* EI-38 — respect prefers-reduced-motion. Cuts every transition and
+   animation to a near-instant value rather than disabling them entirely
+   (some are load-bearing for focus indication). */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
 .masonry-grid {
   display: flex;
   margin-left: -8px;
