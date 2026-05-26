@@ -1,8 +1,13 @@
-import { useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import { CheckSquare, Image, Paintbrush } from "lucide-react";
 import { useStore } from "../store";
 import { api } from "../api";
-import { DrawingCanvasModal } from "./DrawingCanvasModal";
+
+// EI-V0.5-17 — the canvas drag-in is a big chunk (event handlers,
+// repaint loop, palette UI); lazy-load until the user clicks Paintbrush.
+const DrawingCanvasModal = lazy(() =>
+  import("./DrawingCanvasModal").then((m) => ({ default: m.DrawingCanvasModal })),
+);
 
 export function NewNoteBar() {
   const openEditor = useStore((s) => s.openEditor);
@@ -81,11 +86,15 @@ export function NewNoteBar() {
           </button>
         </div>
       </div>
-      <DrawingCanvasModal
-        open={drawingOpen}
-        onCancel={() => setDrawingOpen(false)}
-        onSave={saveDrawing}
-      />
+      {drawingOpen && (
+        <Suspense fallback={null}>
+          <DrawingCanvasModal
+            open={drawingOpen}
+            onCancel={() => setDrawingOpen(false)}
+            onSave={saveDrawing}
+          />
+        </Suspense>
+      )}
     </div>
   );
 }

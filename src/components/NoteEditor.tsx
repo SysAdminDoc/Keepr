@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import clsx from "clsx";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import {
@@ -22,6 +22,7 @@ import {
   Lock,
   Unlock,
   History,
+  MoreVertical,
 } from "lucide-react";
 import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import type { Attachment } from "../types";
@@ -48,9 +49,17 @@ import { IconBtn } from "./IconBtn";
 import { extractHashtagsFromNote } from "../lib/hashtags";
 import { recurrenceLabel } from "../lib/reminders";
 import { useFlip } from "../hooks/useFlip";
+import { useClickOutside } from "../hooks/useClickOutside";
 import { AttachmentGrid } from "./AttachmentGrid";
-import { ReminderPicker } from "./ReminderPicker";
-import { HistoryDrawer } from "./HistoryDrawer";
+// EI-V0.5-17 — both modals mount conditionally behind an open flag, so
+// React.lazy keeps them out of the initial editor payload. ColorPicker
+// stays eager (used on every editor open).
+const ReminderPicker = lazy(() =>
+  import("./ReminderPicker").then((m) => ({ default: m.ReminderPicker })),
+);
+const HistoryDrawer = lazy(() =>
+  import("./HistoryDrawer").then((m) => ({ default: m.HistoryDrawer })),
+);
 import type {
   BackgroundPatternKey,
   ChecklistItemInput,
@@ -60,6 +69,29 @@ import type {
   NoteInput,
 } from "../types";
 import { BACKGROUND_PATTERNS, normalizePattern } from "../lib/backgroundPatterns";
+
+/** EI-V0.5-15 — single row of the kebab "More actions" popover. */
+function MoreMenuItem({
+  icon,
+  label,
+  onClick,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      onClick={onClick}
+      className="flex items-center gap-2 w-full px-3 py-2 text-sm text-left hover:bg-black/5 dark:hover:bg-white/10"
+    >
+      {icon}
+      <span>{label}</span>
+    </button>
+  );
+}
 
 interface ChecklistRowProps {
   /** Sortable id — unique per row (we use the row's stable key). */
@@ -243,6 +275,11 @@ export function NoteEditor() {
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [reminderPickerOpen, setReminderPickerOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
+  // EI-V0.5-15 — kebab "More" overflow menu. Absorbs the lower-priority
+  // actions (Make a copy, Move to vault, Version history) so the
+  // toolbar stays within ~7 visible buttons even on narrow windows.
+  const [moreMenuOpen, setMoreMenuOpen] = useState(false);
+  const moreMenuRef = useRef<HTMLDivElement>(null);
 
   // EI-06 — Snapshot the existing note once on open. We deliberately do NOT
   // depend on the store's `notes` array because a background load() would
@@ -568,6 +605,8 @@ export function NoteEditor() {
   // be wasted work and could fight ongoing text input).
   const flipKey = draft.checklist.map((c) => (c.checked ? "1" : "0")).join("");
   const { register: flipRegister } = useFlip<string>(flipKey);
+
+  useClickOutside(moreMenuRef, moreMenuOpen, () => setMoreMenuOpen(false));
   // Map sort id -> original draft.checklist index, so drag-end can
   // resolve the array slot reliably even after group splitting.
   const indexOfSortId = (id: string): number => {
@@ -1182,11 +1221,6 @@ export function NoteEditor() {
             )}
           </div>
           {existing && !existing.trashed && (
-            <IconBtn ariaLabel="Make a copy" onClick={duplicate}>
-              <Copy size={18} aria-hidden />
-            </IconBtn>
-          )}
-          {existing && !existing.trashed && (
             <IconBtn
               ariaLabel={existing.archived ? "Unarchive" : "Archive"}
               onClick={archive}
@@ -1198,38 +1232,68 @@ export function NoteEditor() {
               )}
             </IconBtn>
           )}
-          {existing &&
-            !existing.trashed &&
-            vaultInitialized &&
-            vaultUnlocked && (
-              <IconBtn
-                ariaLabel={
-                  existing.vault === "vault"
-                    ? "Move out of vault"
-                    : "Move to vault"
-                }
-                onClick={toggleVault}
-                pressed={existing.vault === "vault"}
-              >
-                {existing.vault === "vault" ? (
-                  <Unlock size={18} aria-hidden />
-                ) : (
-                  <Lock size={18} aria-hidden />
-                )}
-              </IconBtn>
-            )}
-          {existing && !existing.trashed && (
-            <IconBtn
-              ariaLabel="Version history"
-              onClick={() => setHistoryOpen(true)}
-            >
-              <History size={18} aria-hidden />
-            </IconBtn>
-          )}
           {existing && !existing.trashed && (
             <IconBtn ariaLabel="Delete" onClick={trash}>
               <Trash2 size={18} aria-hidden />
             </IconBtn>
+          )}
+          {existing && !existing.trashed && (
+            // EI-V0.5-15 — "More" kebab. Houses the lower-priority
+            // actions (Make a copy, Version history, Move to/out of
+            // vault) so the always-visible toolbar stays compact.
+            <div className="relative" ref={moreMenuRef}>
+              <IconBtn
+                ariaLabel="More actions"
+                onClick={() => setMoreMenuOpen((v) => !v)}
+                pressed={moreMenuOpen}
+              >
+                <MoreVertical size={18} aria-hidden />
+              </IconBtn>
+              {moreMenuOpen && (
+                <div
+                  className="absolute z-30 bottom-12 left-0 w-52 rounded-lg shadow-lg border bg-white dark:bg-[#2d2e30] dark:border-[#5f6368] py-1"
+                  role="menu"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <MoreMenuItem
+                    icon={<Copy size={16} aria-hidden />}
+                    label="Make a copy"
+                    onClick={() => {
+                      setMoreMenuOpen(false);
+                      duplicate();
+                    }}
+                  />
+                  <MoreMenuItem
+                    icon={<History size={16} aria-hidden />}
+                    label="Version history"
+                    onClick={() => {
+                      setMoreMenuOpen(false);
+                      setHistoryOpen(true);
+                    }}
+                  />
+                  {vaultInitialized && vaultUnlocked && (
+                    <MoreMenuItem
+                      icon={
+                        existing.vault === "vault" ? (
+                          <Unlock size={16} aria-hidden />
+                        ) : (
+                          <Lock size={16} aria-hidden />
+                        )
+                      }
+                      label={
+                        existing.vault === "vault"
+                          ? "Move out of vault"
+                          : "Move to vault"
+                      }
+                      onClick={() => {
+                        setMoreMenuOpen(false);
+                        toggleVault();
+                      }}
+                    />
+                  )}
+                </div>
+              )}
+            </div>
           )}
           <div className="flex-1" />
           <button
@@ -1241,29 +1305,40 @@ export function NoteEditor() {
         </div>
       </div>
 
-      <ReminderPicker
-        open={reminderPickerOpen}
-        existingFireAt={noteReminder?.fireAt ?? null}
-        existingRrule={noteReminder?.rrule ?? null}
-        onSet={setReminderForNote}
-        onSnooze={snoozeReminderForNote}
-        onClear={clearReminderForNote}
-        onClose={() => setReminderPickerOpen(false)}
-      />
+      {/* EI-V0.5-17 — only mount the lazy chunks when actually open so
+          the import doesn't fire on every editor open. fallback={null}
+          because both modals already gate their render on `open`. */}
+      {reminderPickerOpen && (
+        <Suspense fallback={null}>
+          <ReminderPicker
+            open={reminderPickerOpen}
+            existingFireAt={noteReminder?.fireAt ?? null}
+            existingRrule={noteReminder?.rrule ?? null}
+            onSet={setReminderForNote}
+            onSnooze={snoozeReminderForNote}
+            onClear={clearReminderForNote}
+            onClose={() => setReminderPickerOpen(false)}
+          />
+        </Suspense>
+      )}
 
-      <HistoryDrawer
-        open={historyOpen}
-        noteId={existing?.id ?? null}
-        onClose={() => setHistoryOpen(false)}
-        onRestored={() => {
-          // Refresh the editor's view by reloading the note in the store.
-          if (existing) {
-            void api.getNote(existing.id).then((updated) => {
-              if (updated) upsertNote(updated);
-            });
-          }
-        }}
-      />
+      {historyOpen && (
+        <Suspense fallback={null}>
+          <HistoryDrawer
+            open={historyOpen}
+            noteId={existing?.id ?? null}
+            onClose={() => setHistoryOpen(false)}
+            onRestored={() => {
+              // Refresh the editor's view by reloading the note in the store.
+              if (existing) {
+                void api.getNote(existing.id).then((updated) => {
+                  if (updated) upsertNote(updated);
+                });
+              }
+            }}
+          />
+        </Suspense>
+      )}
     </div>
   );
 }

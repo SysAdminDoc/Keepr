@@ -68,25 +68,10 @@ button {
   }
 }
 
-.masonry-grid {
-  display: flex;
-  margin-left: -8px;
-  width: auto;
-}
-.masonry-grid-col {
-  padding-left: 8px;
-  background-clip: padding-box;
-}
-.masonry-grid-col > * {
-  margin-bottom: 8px;
-}
-
-/* NF-23 — list view: clamp the masonry to a single readable column. */
-.masonry-grid-list {
-  max-width: 600px;
-  margin-left: auto;
-  margin-right: auto;
-}
+/* EI-10 (v0.15) — react-masonry-css dropped in favour of CSS `columns`.
+ * The wrapper styles that supported the old library are removed. The
+ * NoteGrid component now handles list-mode width directly with Tailwind
+ * `max-w-3xl mx-auto`; no global selectors needed. */
 
 .note-card {
   transition: box-shadow .15s, border-color .15s;

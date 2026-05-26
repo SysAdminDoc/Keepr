@@ -1,12 +1,26 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { TopBar } from "./components/TopBar";
 import { Sidebar } from "./components/Sidebar";
 import { NoteGrid } from "./components/NoteGrid";
 import { NewNoteBar } from "./components/NewNoteBar";
 import { NoteEditor } from "./components/NoteEditor";
-import { SettingsModal } from "./components/SettingsModal";
-import { LabelsManager } from "./components/LabelsManager";
+// EI-V0.5-17 — code-split secondary modals. They mount conditionally
+// behind `*open` flags so React.lazy is a clean fit; the initial bundle
+// no longer includes the LabelsManager / SettingsModal / HelpOverlay
+// trees, which only show up the first time the user opens them.
+const SettingsModal = lazy(() =>
+  import("./components/SettingsModal").then((m) => ({ default: m.SettingsModal })),
+);
+const LabelsManager = lazy(() =>
+  import("./components/LabelsManager").then((m) => ({ default: m.LabelsManager })),
+);
+const HelpOverlay = lazy(() =>
+  import("./components/HelpOverlay").then((m) => ({ default: m.HelpOverlay })),
+);
+const LockScreen = lazy(() =>
+  import("./components/LockScreen").then((m) => ({ default: m.LockScreen })),
+);
 import { ConfirmDialog } from "./components/ConfirmDialog";
 import { useStore } from "./store";
 import { api } from "./api";
@@ -16,10 +30,8 @@ import { backupFilename, backupPath, isBackupDue } from "./lib/autoBackup";
 import { useGlobalHotkey } from "./hooks/useGlobalHotkey";
 import { useKeepShortcuts } from "./hooks/useKeepShortcuts";
 import { useIdleLock } from "./hooks/useIdleLock";
-import { HelpOverlay } from "./components/HelpOverlay";
 import { BulkActionBar } from "./components/BulkActionBar";
 import { FilterChips } from "./components/FilterChips";
-import { LockScreen } from "./components/LockScreen";
 import { Lightbulb, Archive, Trash2, Tag, Loader2, Bell } from "lucide-react";
 
 export default function App() {
@@ -296,10 +308,12 @@ export default function App() {
       </div>
 
       <NoteEditor />
-      <SettingsModal />
-      <LabelsManager />
-      <HelpOverlay open={helpOpen} onClose={() => setHelpOpen(false)} />
-      <LockScreen />
+      <Suspense fallback={null}>
+        <SettingsModal />
+        <LabelsManager />
+        <HelpOverlay open={helpOpen} onClose={() => setHelpOpen(false)} />
+        <LockScreen />
+      </Suspense>
 
       <ConfirmDialog
         open={emptyTrashOpen}

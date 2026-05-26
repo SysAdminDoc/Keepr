@@ -1,5 +1,4 @@
 import { useCallback } from "react";
-import Masonry from "react-masonry-css";
 import {
   DndContext,
   DragOverlay,
@@ -21,19 +20,6 @@ interface Props {
   notes: Note[];
 }
 
-const gridBreakpoints = {
-  default: 5,
-  1600: 5,
-  1400: 4,
-  1100: 3,
-  800: 2,
-  500: 1,
-};
-
-const listBreakpoints = {
-  default: 1,
-};
-
 /**
  * Renders the masonry grid. When sortMode === "custom" we additionally
  * wrap children in DndContext + SortableContext (NF-05) so a drag inside
@@ -49,8 +35,6 @@ export function NoteGrid({ notes }: Props) {
   const sortMode = useStore((s) => s.sortMode);
   const section = useStore((s) => s.section);
   const showToast = useStore((s) => s.showToast);
-  const breakpoints =
-    viewMode === "list" ? listBreakpoints : gridBreakpoints;
 
   // EI-V0.5-1 — drag-reorder is only safe in the Notes section. In
   // Archive/Trash/Label sections, a drop would write `position` for the
@@ -107,20 +91,34 @@ export function NoteGrid({ notes }: Props) {
     [notes, showToast],
   );
 
+  // EI-10 — replaced react-masonry-css (last release Aug 2022, no
+  // virtualization, blocking NF-05 work) with CSS multi-column layout.
+  // `column-count` + `break-inside: avoid` produces the same visual
+  // (cards fill columns top-to-bottom) with zero runtime cost and no
+  // ResizeObserver shim needed. List mode collapses to one column.
   const cards = (
-    <Masonry
-      breakpointCols={breakpoints}
+    <div
       className={
         viewMode === "list"
-          ? "masonry-grid masonry-grid-list"
-          : "masonry-grid"
+          ? "max-w-3xl mx-auto"
+          : "columns-1 sm:columns-2 lg:columns-3 xl:columns-4 2xl:columns-5 gap-4"
       }
-      columnClassName="masonry-grid-col"
     >
       {notes.map((n) => (
-        <NoteCard key={n.id} note={n} />
+        // `break-inside-avoid` keeps a card from being split across
+        // columns; the inline-block + w-full pairing is the Tailwind
+        // recipe for masonry-with-multicol that works in every modern
+        // browser back to Chrome 50 / Firefox 52 / Safari 9.
+        <div
+          key={n.id}
+          className={
+            viewMode === "list" ? "mb-4" : "break-inside-avoid mb-4 inline-block w-full"
+          }
+        >
+          <NoteCard note={n} />
+        </div>
       ))}
-    </Masonry>
+    </div>
   );
 
   if (!dragEnabled) return cards;
