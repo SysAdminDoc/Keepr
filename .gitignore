@@ -20,8 +20,8 @@ npm-debug.log*
 
 # Tauri
 src-tauri/target
-src-tauri/Cargo.lock
 src-tauri/gen/schemas
+# NOTE: src-tauri/Cargo.lock IS committed (best practice for binaries — EI-28).
 
 # tsc composite output
 *.tsbuildinfo
