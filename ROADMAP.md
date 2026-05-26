@@ -1,6 +1,6 @@
 # Keepr Roadmap
 
-> Single source of truth for **outstanding work only**. Shipped batches and per-release notes live in [CHANGELOG.md](CHANGELOG.md). Long-form rationale for the v0.5+ items lives in [RESEARCH_FEATURE_PLAN_v0.5.md](RESEARCH_FEATURE_PLAN_v0.5.md); the original v0.1→v0.2 research is in [RESEARCH_FEATURE_PLAN.md](RESEARCH_FEATURE_PLAN.md). Both research files are historical reference — when they disagree with this roadmap, this roadmap wins.
+> Single source of truth for **outstanding work only**. Shipped batches and per-release notes live in [CHANGELOG.md](CHANGELOG.md). Long-form rationale: [RESEARCH_FEATURE_PLAN_v0.19.md](RESEARCH_FEATURE_PLAN_v0.19.md) is the current research cycle (v0.19+); [RESEARCH_FEATURE_PLAN_v0.5.md](RESEARCH_FEATURE_PLAN_v0.5.md) covers v0.5→v0.11; the original v0.1→v0.2 research is in [RESEARCH_FEATURE_PLAN.md](RESEARCH_FEATURE_PLAN.md). All three research files are historical reference — when they disagree with this roadmap, this roadmap wins.
 
 Priority legend: **P0** = data loss / crash / security · **P1** = visible bug / high user value · **P2** = polish / nice-to-have · **P3** = future / experimental.
 
