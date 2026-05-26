@@ -31,3 +31,9 @@ vite.config.d.ts
 # OS
 .DS_Store
 Thumbs.db
+
+# Local agent working notes (never committed)
+CLAUDE.md
+CODEX_CHANGELOG.md
+.claude/
+.audit-notes-*.md
