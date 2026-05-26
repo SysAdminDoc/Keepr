@@ -10,18 +10,20 @@ Priority legend: **P0** = data loss / crash / security · **P1** = visible bug /
 
 Goal: close every P0 audit finding, add a thin test+CI safety net, ship a real portable bundle, and lay the primitives (attachment protocol, schema migration, FTS) that v0.3 depends on.
 
-### P0 — data safety, security, correctness
-- [ ] **EI-01** — Fix zip-slip in `import_zip` (validate entry paths, cap entry count + uncompressed bytes)
-- [ ] **EI-02** — `PRAGMA wal_checkpoint(TRUNCATE)` before `export_zip`; fsync the zip file
-- [ ] **EI-03** — Safe-swap on import partial failure (`keepr.db.prev` snapshot) + busy gate
-- [ ] **EI-04** — Add `PRAGMA user_version` + migration framework in `db.rs`
-- [ ] **EI-05** — Set real CSP; drop unused `fs:*` capabilities and `tauri-plugin-fs` dep
-- [ ] **EI-06** — Fix editor `existing`-ref clobber (background `load()` no longer wipes typing)
-- [ ] **EI-07** — Editor re-entrant close handler + register `onCloseRequested` so ALT-F4 saves drafts
-- [ ] **EI-08** — Rewrite `list_notes` from N+1 to 3 bulk queries stitched in Rust
-- [ ] **EI-09** — Test suite + GitHub Actions CI scaffold
+### P0 — data safety, security, correctness — ALL CLOSED in v0.2 pass 1
+
+- [x] **EI-01** — Fix zip-slip in `import_zip` (validate entry paths, cap entry count + uncompressed bytes)
+- [x] **EI-02** — `PRAGMA wal_checkpoint(TRUNCATE)` before `export_zip`; fsync the zip file
+- [x] **EI-03** — Safe-swap on import partial failure (`keepr.db.prev` snapshot) + busy gate
+- [x] **EI-04** — Add `PRAGMA user_version` + migration framework in `db.rs`
+- [x] **EI-05** — Set real CSP; drop unused `fs:*` capabilities and `tauri-plugin-fs` dep
+- [x] **EI-06** — Fix editor `existing`-ref clobber (background `load()` no longer wipes typing)
+- [x] **EI-07** — Editor re-entrant close handler + register `onCloseRequested` so ALT-F4 saves drafts
+- [x] **EI-08** — Rewrite `list_notes` from N+1 to 3 bulk queries stitched in Rust
+- [x] **EI-09** — Test suite + GitHub Actions CI scaffold (8 Rust + 16 vitest)
 
 ### P1 — foundation & primitives
+
 - [ ] **NF-resource** — Register `keepr-resource://` protocol + `attachments` table (foundation for NF-01/NF-11/NF-12)
 - [ ] **EI-10** — Replace `react-masonry-css` (unmaintained, blocks NF-05)
 - [ ] **EI-11** — Real portable EXE bundle target + `portable.flag` mode detection
@@ -34,29 +36,31 @@ Goal: close every P0 audit finding, add a thin test+CI safety net, ship a real p
 - [ ] **EI-18** — Search debounce (150 ms) + FTS5 backend
 - [ ] **EI-19** — Click-outside dismiss + viewport-aware placement for popovers
 - [ ] **EI-20** — Replace `window.confirm()` with styled dialogs
-- [ ] **EI-21** — Editor archive/trash flushes draft first
-- [ ] **EI-22** — Fix lossy `setKind` round-trip (preserve `checked` state)
-- [ ] **EI-23** — Don't auto-delete on empty-list close
+- [x] **EI-21** — Editor archive/trash flushes draft first
+- [x] **EI-22** — Fix lossy `setKind` round-trip (preserve `checked` state)
+- [x] **EI-23** — Don't auto-delete on empty-list close
 - [ ] **EI-24** — Optimistic in-place updates (replace full `load()` reflows)
 - [ ] **EI-25** — Per-store-slice Zustand subscriptions with `useShallow`
 - [ ] **EI-26** — Release mutex before `load_note` re-reads in write commands
 - [ ] **EI-27** — Standardize commit style (no `Co-Authored-By` trailer) in CONTRIBUTING.md
-- [ ] **EI-28** — Commit `src-tauri/Cargo.lock`
+- [x] **EI-28** — Commit `src-tauri/Cargo.lock`
 - [ ] **EI-29** — Add CONTRIBUTING.md + SECURITY.md
 
 ### P2 — hygiene & polish
+
 - [ ] **EI-30** — Single source of truth for color palette (de-dup `colors.ts` ↔ `tailwind.config.js`)
 - [ ] **EI-31** — Shared `<IconBtn>` component
-- [ ] **EI-32** — Add `idx_notes_state` SQL index; push filtering into SQL
+- [x] **EI-32** — Add `idx_notes_state` SQL index (rolled into EI-04 v1 migration)
 - [ ] **EI-33** — Cap input sizes server-side (title ≤200, body ≤50 KB, ≤200 items)
 - [ ] **EI-34** — Replace `.filter_map(|r| r.ok())` with `.collect::<Result<_,_>>()?`
-- [ ] **EI-35** — Strip unused Cargo deps (`serde_json`, `thiserror`, `anyhow`, `walkdir`)
-- [ ] **EI-36** — `panic = "abort"` + `lto = true` in release profile
+- [x] **EI-35** — Strip unused Cargo deps (partial: serde_json + thiserror dropped via EI-05; anyhow + walkdir kept)
+- [x] **EI-36** — `panic = "abort"` + `lto = true` in release profile (rolled into EI-04 commit)
 - [ ] **EI-37** — Inline boot script in `<head>` to set dark class before paint
 - [ ] **EI-38** — Reduced-motion guard on animations
 - [ ] **EI-39** — WCAG contrast pass on dark color variants
 
 ### P3 — nits
+
 - [ ] **EI-40** — Don't reset `search` on `setSection` change
 
 ---

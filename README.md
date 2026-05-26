@@ -1,6 +1,6 @@
 # Keepr
 
-A pixel-close, offline-first clone of Google Keep. Built with Tauri 2 + React + Rust + SQLite. Portable Windows EXE — no installer, no internet, your notes stay on your machine.
+A pixel-close, offline-first clone of Google Keep. Built with Tauri 2 + React + Rust + SQLite. Your notes stay on your machine; back them up to any folder you sync to a cloud provider.
 
 ## Why
 
@@ -9,29 +9,49 @@ Google Keep is great until the internet goes out. Keepr gives you the same look,
 ## Features
 
 - Card masonry grid (pinned + others sections)
-- Text notes and checklists
+- Text notes and checklists (text ↔ checklist round-trips losslessly via GFM-style `- [x]` markers)
 - 12 Keep colors (light + dark variants)
 - Labels with chip filtering
 - Search across title, body, and checklist items
 - Archive and Trash with restore
-- Manual ZIP export / import (point at your Google Drive sync folder)
+- Manual ZIP export / import with zip-slip + zip-bomb defenses and a `.prev` snapshot the restore can roll back to
 - Light / dark theme
-- Single portable EXE, ~8 MB
-- SQLite-backed local store at `%APPDATA%\Keepr\keepr.db` (override via Settings)
+- Native Windows installer (`.msi` + `.nsis`); see Roadmap for the upcoming portable-EXE bundle
 
-## Roadmap
+## Where Keepr stores your data
 
-See [ROADMAP.md](ROADMAP.md).
+Keepr uses Tauri's per-app data directory:
+
+- **Windows:** `%APPDATA%\com.sysadmindoc.keepr\keepr.db` (SQLite, WAL mode)
+- **macOS / Linux:** the equivalent OS-conventional path (`~/Library/Application Support/com.sysadmindoc.keepr/` on macOS; `$XDG_DATA_HOME/com.sysadmindoc.keepr/` on Linux). macOS and Linux builds are not yet shipped.
+
+The schema is versioned (`PRAGMA user_version`), so a newer Keepr can upgrade an older database in place. A backup is just a regular ZIP — `keepr.db` at the root plus any future attachments.
+
+## Roadmap & changelog
+
+- [ROADMAP.md](ROADMAP.md) — the live task list
+- [CHANGELOG.md](CHANGELOG.md) — what shipped in each release
+- [RESEARCH_FEATURE_PLAN.md](RESEARCH_FEATURE_PLAN.md) — the long-form research that backs the roadmap
 
 ## Build from source
 
-Prereqs: Node 20+, Rust 1.80+, Tauri CLI 2.x.
+Prereqs: Node 20+, Rust 1.80+. The Tauri CLI is bundled as a dev-dependency — no global install.
 
 ```sh
 npm install
 npm run tauri dev          # dev (HMR)
-npm run tauri build        # release EXE in src-tauri/target/release/
+npm run tauri build        # release MSI/NSIS in src-tauri/target/release/bundle/
+npm test                   # vitest (frontend)
+cargo test --manifest-path src-tauri/Cargo.toml --lib   # rust unit tests
 ```
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). Issues + PRs welcome.
+
+## Security
+
+See [SECURITY.md](SECURITY.md) for the threat model and how to report vulnerabilities.
 
 ## License
 
