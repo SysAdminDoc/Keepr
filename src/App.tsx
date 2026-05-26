@@ -10,6 +10,7 @@ import { ConfirmDialog } from "./components/ConfirmDialog";
 import { useStore } from "./store";
 import { api } from "./api";
 import { filterNotes } from "./lib/filterNotes";
+import { findExpiredTrashed } from "./lib/trashRetention";
 import { useGlobalHotkey } from "./hooks/useGlobalHotkey";
 import { Lightbulb, Archive, Trash2, Tag, Loader2 } from "lucide-react";
 
@@ -26,11 +27,36 @@ export default function App() {
   const loaded = useStore((s) => s.loaded);
 
   const toggleViewMode = useStore((s) => s.toggleViewMode);
+  const trashRetentionDays = useStore((s) => s.trashRetentionDays);
   const [sidebarExpanded, setSidebarExpanded] = useState(true);
   const [emptyTrashOpen, setEmptyTrashOpen] = useState(false);
 
   // NF-23 — Ctrl+G toggles between grid and list view.
   useGlobalHotkey({ key: "g", mod: true }, toggleViewMode);
+
+  // NF-17 — sweep expired trashed notes once after the initial load() and
+  // again every hour while the app is open. Errors are swallowed; the
+  // notes simply stay in Trash and get caught next sweep.
+  useEffect(() => {
+    if (!loaded) return;
+    const sweep = async () => {
+      const expired = findExpiredTrashed(
+        useStore.getState().notes,
+        useStore.getState().trashRetentionDays,
+      );
+      for (const n of expired) {
+        try {
+          await api.deleteNotePermanent(n.id);
+          useStore.getState().removeNote(n.id);
+        } catch {
+          /* try again next sweep */
+        }
+      }
+    };
+    void sweep();
+    const t = window.setInterval(sweep, 60 * 60 * 1000); // hourly
+    return () => window.clearInterval(t);
+  }, [loaded, trashRetentionDays]);
 
   const performEmptyTrash = async () => {
     setEmptyTrashOpen(false);

@@ -17,6 +17,7 @@ import { api } from "../api";
 import { ColorPicker } from "./ColorPicker";
 import { IconBtn } from "./IconBtn";
 import { useClickOutside } from "../hooks/useClickOutside";
+import { daysLeftInTrash } from "../lib/trashRetention";
 
 interface Props {
   note: Note;
@@ -29,6 +30,7 @@ export function NoteCard({ note }: Props) {
   const showToast = useStore((s) => s.showToast);
   const patchNote = useStore((s) => s.patchNote);
   const removeNote = useStore((s) => s.removeNote);
+  const trashRetentionDays = useStore((s) => s.trashRetentionDays);
   const [colorOpen, setColorOpen] = useState(false);
   const popoverRef = useRef<HTMLDivElement>(null);
   useClickOutside(popoverRef, colorOpen, () => setColorOpen(false));
@@ -164,6 +166,7 @@ export function NoteCard({ note }: Props) {
     });
 
   const cardLabel = note.title || (note.body ? note.body.slice(0, 60) : "Untitled note");
+  const daysLeft = inTrash ? daysLeftInTrash(note, trashRetentionDays) : null;
 
   return (
     <div
@@ -236,6 +239,12 @@ export function NoteCard({ note }: Props) {
               + {note.checklist.length - 12} more
             </div>
           )}
+        </div>
+      )}
+
+      {daysLeft !== null && (
+        <div className="px-3 pb-1 text-[11px] uppercase tracking-wide font-medium opacity-70">
+          {daysLeft === 1 ? "1 day left" : `${daysLeft} days left`}
         </div>
       )}
 

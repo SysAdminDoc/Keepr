@@ -12,6 +12,8 @@ export function SettingsModal() {
   const closeSettings = useStore((s) => s.closeSettings);
   const themeMode = useStore((s) => s.themeMode);
   const setThemeMode = useStore((s) => s.setThemeMode);
+  const trashRetentionDays = useStore((s) => s.trashRetentionDays);
+  const setTrashRetentionDays = useStore((s) => s.setTrashRetentionDays);
   const load = useStore((s) => s.load);
   const showToast = useStore((s) => s.showToast);
 
@@ -155,6 +157,31 @@ export function SettingsModal() {
                 <span className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1">
                   <Folder size={14} aria-hidden /> local
                 </span>
+              }
+            />
+
+            <Row
+              title="Auto-empty Trash"
+              subtitle={
+                trashRetentionDays === 0
+                  ? "Never — keep trashed notes forever"
+                  : trashRetentionDays === 1
+                  ? "After 1 day"
+                  : `After ${trashRetentionDays} days`
+              }
+              action={
+                <input
+                  type="number"
+                  min={0}
+                  max={3650}
+                  value={trashRetentionDays}
+                  onChange={(e) => {
+                    const v = parseInt(e.target.value, 10);
+                    if (!Number.isNaN(v)) setTrashRetentionDays(v);
+                  }}
+                  aria-label="Auto-empty Trash after how many days (0 = never)"
+                  className="w-20 px-2 py-1 text-sm rounded border border-gray-300 dark:border-[#5f6368] bg-transparent text-right"
+                />
               }
             />
 

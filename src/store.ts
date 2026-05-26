@@ -28,6 +28,8 @@ interface UIState {
   /** User preference. `system` follows prefers-color-scheme. */
   themeMode: ThemeMode;
   viewMode: ViewMode;
+  /** Days a note stays in Trash before being auto-purged. 0 = never (NF-17). */
+  trashRetentionDays: number;
   editorOpen: boolean;
   editorNoteId: string | null;
   settingsOpen: boolean;
@@ -41,6 +43,7 @@ interface UIState {
   setThemeMode: (mode: ThemeMode) => void;
   setViewMode: (mode: ViewMode) => void;
   toggleViewMode: () => void;
+  setTrashRetentionDays: (days: number) => void;
   openEditor: (id: string | null) => void;
   closeEditor: () => void;
   openSettings: () => void;
@@ -76,6 +79,9 @@ function nextToastId(): number {
 
 const THEME_KEY = "keepr:theme"; // values: "light" | "dark" | "system" | (legacy: undefined)
 const VIEW_MODE_KEY = "keepr:view-mode"; // values: "grid" | "list"
+const TRASH_RETENTION_KEY = "keepr:trash-retention-days"; // integer
+
+const DEFAULT_TRASH_RETENTION_DAYS = 7;
 
 // EI-37 — the inline boot script in `index.html` toggles the `.dark` class on
 // <html> BEFORE the first React paint, so there's no flash of wrong theme.
@@ -97,6 +103,15 @@ function readInitialThemeMode(): ThemeMode {
 function readInitialViewMode(): ViewMode {
   if (typeof localStorage === "undefined") return "grid";
   return localStorage.getItem(VIEW_MODE_KEY) === "list" ? "list" : "grid";
+}
+
+function readInitialTrashRetentionDays(): number {
+  if (typeof localStorage === "undefined") return DEFAULT_TRASH_RETENTION_DAYS;
+  const raw = localStorage.getItem(TRASH_RETENTION_KEY);
+  if (raw == null) return DEFAULT_TRASH_RETENTION_DAYS;
+  const n = parseInt(raw, 10);
+  if (Number.isNaN(n) || n < 0 || n > 3650) return DEFAULT_TRASH_RETENTION_DAYS;
+  return n;
 }
 
 function effectiveDark(mode: ThemeMode): boolean {
@@ -143,6 +158,7 @@ export const useStore = create<UIState>((set, get) => ({
   labelsManagerOpen: false,
   themeMode: readInitialThemeMode(),
   viewMode: readInitialViewMode(),
+  trashRetentionDays: readInitialTrashRetentionDays(),
   toasts: [],
   load: async () => {
     try {
@@ -181,6 +197,11 @@ export const useStore = create<UIState>((set, get) => ({
   toggleViewMode: () => {
     const next: ViewMode = get().viewMode === "grid" ? "list" : "grid";
     get().setViewMode(next);
+  },
+  setTrashRetentionDays: (days) => {
+    const clamped = Math.max(0, Math.min(3650, Math.round(days)));
+    localStorage.setItem(TRASH_RETENTION_KEY, String(clamped));
+    set({ trashRetentionDays: clamped });
   },
   _setDarkFromSystem: (dark) => set({ dark }),
   openEditor: (id) => set({ editorOpen: true, editorNoteId: id }),
