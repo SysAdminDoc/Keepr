@@ -6,6 +6,13 @@ All notable changes to Keepr are documented here. Format loosely follows [Keep a
 
 (See [ROADMAP.md](ROADMAP.md) for the live task list.)
 
+## [0.16.4] — 2026-05-26 — "Settings modal: wider + scrollable"
+
+### Fixed
+
+- **Settings modal cut off at the bottom on shorter screens.** The modal container had no `max-height` and no scroll wrapper, so when AppLockSection + VaultSection + auto-backup + Takeout import + Markdown vault rows added up to more than the viewport, the bottom rows disappeared below the screen edge with no way to reach them. Container is now `max-w-2xl max-h-[90vh] flex flex-col`; the header gets `shrink-0` so it stays pinned and the body gets `overflow-y-auto` so long content scrolls inside the modal instead of overflowing the page.
+- **Modal width:** bumped from `max-w-lg` (32rem) to `max-w-2xl` (42rem) — the form rows had cramped right-side labels and wrapped awkwardly at the older width.
+
 ## [0.16.3] — 2026-05-26 — "Takeout importer accepts any zip"
 
 The Takeout importer used to require the canonical English path `Takeout/Keep/<title>.json`. That worked for Keep-only English exports but broke on three real-world cases I kept hitting:

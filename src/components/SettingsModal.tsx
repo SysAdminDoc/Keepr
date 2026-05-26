@@ -104,10 +104,10 @@ export function SettingsModal() {
       >
         <div
           ref={containerRef}
-          className="w-full max-w-lg rounded-lg shadow-keep-hover bg-white dark:bg-[#2d2e30] text-gray-800 dark:text-gray-100"
+          className="w-full max-w-2xl max-h-[90vh] flex flex-col rounded-lg shadow-keep-hover bg-white dark:bg-[#2d2e30] text-gray-800 dark:text-gray-100"
           onClick={(e) => e.stopPropagation()}
         >
-          <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200 dark:border-[#5f6368]">
+          <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200 dark:border-[#5f6368] shrink-0">
             <h2 id="settings-title" className="text-lg font-medium">
               Settings
             </h2>
@@ -121,7 +121,7 @@ export function SettingsModal() {
             </button>
           </div>
 
-          <div className="px-5 py-4 space-y-5">
+          <div className="px-5 py-4 space-y-5 overflow-y-auto">
             <Row
               title="Theme"
               subtitle={
