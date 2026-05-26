@@ -6,6 +6,17 @@ All notable changes to Keepr are documented here. Format loosely follows [Keep a
 
 (See [ROADMAP.md](ROADMAP.md) for the live task list.)
 
+## [0.17.1] — 2026-05-26 — "Drag actually sticks · 90vw×90vh editor · blurred backdrop"
+
+### Fixed
+
+- **Drag-to-rearrange now visibly sticks.** The v0.17.0 onDragEnd updated each note's `position` field optimistically but never re-sorted the `notes` array — so the rendered order remained whatever the previous sort key left behind, and the dragged card appeared to snap back to its original slot. Even the auto-flip to Custom sort only fired AFTER the await on `api.reorderNotes`, so there was a 50-100ms window with the wrong order even when it eventually corrected. New flow: compute the target sort mode up front (current mode if pinned-only or already Custom; otherwise `"custom"`), then apply the position patch + `sortNotes(next, targetSort)` in a single setState so the drop snaps to its final slot atomically. `setSortMode` still runs after to persist the mode flip to localStorage and emit the toast, but the re-sort it triggers is a no-op visually.
+
+### Changed
+
+- **Editor is now proportional to the monitor.** Was `w-[95vw] max-w-[1400px] max-h-[90vh]` — `max-h` let the modal collapse around short notes and the 1400px cap left ultrawides with empty bands. Now `w-[90vw] max-w-[1800px] h-[90vh]` — always 90% of viewport height regardless of content length (so the editor consistently feels "opened-up"), capped at 1800px on ultrawides to keep line length readable. `shadow-keep-hover` → `shadow-2xl` so the modal sits more clearly on top of the blurred backdrop.
+- **All modal backdrops now use frosted-glass blur.** `.modal-backdrop` in `index.css` picks up `backdrop-filter: blur(10px) saturate(140%)`. Affects the editor, settings, history drawer, labels manager, help overlay, confirm dialog, reminder picker, and drawing canvas — premium look unified across every modal in the app.
+
 ## [0.17.0] — 2026-05-26 — "Editor goes big · pinned stays put · free drag"
 
 ### Added

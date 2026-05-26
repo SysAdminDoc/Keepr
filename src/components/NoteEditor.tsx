@@ -733,7 +733,11 @@ export function NoteEditor() {
     <div className="fixed inset-0 z-50 modal-backdrop grid place-items-center p-4" onClick={close}>
       <div
         className={clsx(
-          "w-[95vw] max-w-[1400px] max-h-[90vh] flex flex-col rounded-lg border shadow-keep-hover overflow-hidden",
+          // Proportional to monitor: 90% width × 90% height regardless of
+          // content length, so the editor always feels "opened-up" rather
+          // than collapsing around short notes. Capped at 1800px on
+          // ultrawides so the line length stays readable.
+          "w-[90vw] max-w-[1800px] h-[90vh] flex flex-col rounded-lg border shadow-2xl overflow-hidden",
           dropActive && "ring-2 ring-[#1a73e8] ring-offset-2",
         )}
         style={{

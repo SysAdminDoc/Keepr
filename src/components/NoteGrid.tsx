@@ -12,7 +12,7 @@ import {
 import { SortableContext, arrayMove, rectSortingStrategy } from "@dnd-kit/sortable";
 import type { Note } from "../types";
 import { NoteCard } from "./NoteCard";
-import { useStore } from "../store";
+import { sortNotes, useStore } from "../store";
 import { api } from "../api";
 import { useState } from "react";
 
@@ -71,31 +71,43 @@ export function NoteGrid({ notes }: Props) {
       if (oldIndex === -1 || newIndex === -1) return;
       const reordered = arrayMove(notes, oldIndex, newIndex);
 
-      // Optimistic: patch position on every visible note. Notes outside
-      // this section keep their positions so cross-section ordering is
-      // stable.
+      // Optimistic: patch position on every visible note + immediately
+      // re-sort the notes array so the dropped card actually lands at
+      // the drop site. Without the re-sort, the array order in the
+      // store is whatever the previous sort left behind — the position
+      // FIELD updates but the rendered ORDER doesn't, so the drag
+      // appears to snap back.
+      //
+      // For unpinned drags under non-Custom modes, the user's intent
+      // only becomes visible once sortMode flips to Custom (under
+      // Modified the unpinned subset re-sorts by updated_at again).
+      // Compute the target sort up front and apply both the patch and
+      // the re-sort in a single setState so the render is atomic — no
+      // visible snap-back between drop and "Switched to Custom" toast.
       const positionedIds = reordered.map((n) => n.id);
+      const draggedAllPinned = notes.every((n) => n.pinned);
+      const targetSort =
+        draggedAllPinned || sortMode === "custom" ? sortMode : "custom";
       useStore.setState((s) => {
         const next = s.notes.map((n) => {
           const i = positionedIds.indexOf(n.id);
           return i >= 0 ? { ...n, position: i } : n;
         });
-        return { notes: next };
+        return { notes: sortNotes(next, targetSort) };
       });
-      // Persist. The Rust command updates position for every id passed in.
-      // We pass the full visible set (the only notes whose order changed).
+      // Persist the sortMode change (if any) so it survives reload —
+      // setSortMode also runs sortNotes internally, but our setState
+      // above already produced the correct order so the extra re-sort
+      // is a no-op visually.
+      if (targetSort !== sortMode) {
+        setSortMode(targetSort);
+        showToast("Switched to Custom sort to keep your order");
+      }
+      // Persist positions. The Rust command updates position for every
+      // id passed in. We pass the full visible set (the only notes
+      // whose order changed).
       try {
         await api.reorderNotes(positionedIds);
-        // Auto-switch to Custom sort so the drop is visible. Under
-        // Modified/Created/Title the displayed order would snap back to
-        // the chosen key and the drag would feel like it did nothing.
-        // The pinned section sorts by position regardless of mode, so
-        // pinned-only drags don't trigger the flip + toast.
-        const draggedAllPinned = notes.every((n) => n.pinned);
-        if (!draggedAllPinned && sortMode !== "custom") {
-          setSortMode("custom");
-          showToast("Switched to Custom sort to keep your order");
-        }
       } catch (err) {
         showToast("Could not reorder: " + String(err));
       }
