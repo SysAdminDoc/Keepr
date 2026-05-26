@@ -6,6 +6,16 @@ All notable changes to Keepr are documented here. Format loosely follows [Keep a
 
 (See [ROADMAP.md](ROADMAP.md) for the live task list.)
 
+## [0.18.1] — 2026-05-26 — "Pinned notes don't shuffle on unpin"
+
+### Fixed
+
+- **Unpinning a pinned note no longer rearranges the others.** The pinned section used CSS multi-column masonry, which redistributes cards across columns every time the count changes — so unpinning any pinned note visually relocated the remaining ones, breaking the user's muscle memory for "this important note is in the top-right." Fix: pinned section now renders as a **row-major CSS Grid with explicit position slots**. Each pinned card sits in the grid cell its `position` field points to, and any "gap" positions (left behind by an unpinned note that still owns position N) render as an invisible placeholder cell. Result: the cards that stay pinned never move; the unpinned card's old spot just becomes blank until that gap gets re-filled (by drag-reorder, which renumbers positions contiguously). `set_pinned` already preserves `position` (only updates `pinned`/`archived`/`updated_at`), so this works end-to-end without a Rust change.
+
+### Changed
+
+- **NoteGrid gains a `layout` prop** — `"masonry"` (default, used by unpinned/archive/trash/label sections — packing density still wins there since the user expects modified/created sort to reshuffle) or `"stable-grid"` (used by the pinned section). Same drag-and-drop / DndContext logic in both layouts.
+
 ## [0.18.0] — 2026-05-26 — "Theme accent + larger note text"
 
 ### Added

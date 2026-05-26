@@ -325,7 +325,11 @@ export default function App() {
                   {section.kind === "notes" && pinned.length > 0 && (
                     <>
                       <SectionLabel text="PINNED" />
-                      <NoteGrid notes={pinned} />
+                      {/* stable-grid: each pinned card sits in its
+                          position slot; unpinning a middle card leaves
+                          a blank cell so the remaining pinned cards
+                          stay in place. */}
+                      <NoteGrid notes={pinned} layout="stable-grid" />
                       {others.length > 0 && <SectionLabel text="OTHERS" />}
                     </>
                   )}
