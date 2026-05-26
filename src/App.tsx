@@ -15,6 +15,7 @@ import { useGlobalHotkey } from "./hooks/useGlobalHotkey";
 import { useKeepShortcuts } from "./hooks/useKeepShortcuts";
 import { HelpOverlay } from "./components/HelpOverlay";
 import { BulkActionBar } from "./components/BulkActionBar";
+import { FilterChips } from "./components/FilterChips";
 import { Lightbulb, Archive, Trash2, Tag, Loader2 } from "lucide-react";
 
 export default function App() {
@@ -90,9 +91,10 @@ export default function App() {
     load();
   }, [load]);
 
+  const filters = useStore((s) => s.filters);
   const filtered = useMemo(
-    () => filterNotes(notes, section, search),
-    [notes, section, search],
+    () => filterNotes(notes, section, search, filters),
+    [notes, section, search, filters],
   );
   // NF-04 — Ctrl+A handler reaches the latest filtered list via this ref
   // so we don't need to register a new hotkey on every keystroke.
@@ -135,7 +137,9 @@ export default function App() {
       )}
       <div className="flex-1 min-h-0 flex">
         <Sidebar expanded={sidebarExpanded} />
-        <main className="flex-1 min-w-0 overflow-y-auto px-4 sm:px-8 py-6">
+        <main className="flex-1 min-w-0 overflow-y-auto">
+          {loaded && <FilterChips />}
+          <div className="px-4 sm:px-8 pt-2 pb-6">
           {!loaded ? (
             <LoadingState />
           ) : (
@@ -174,6 +178,7 @@ export default function App() {
               )}
             </>
           )}
+          </div>
         </main>
       </div>
 

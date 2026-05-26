@@ -1,5 +1,6 @@
 import { create } from "zustand";
-import type { Note, Label, Section } from "./types";
+import type { Note, Label, Section, SearchFilters } from "./types";
+import { EMPTY_FILTERS } from "./types";
 import { api } from "./api";
 
 export interface ToastAction {
@@ -23,6 +24,8 @@ interface UIState {
   loaded: boolean;
   section: Section;
   search: string;
+  /** NF-09 facet filters applied alongside text search. */
+  filters: SearchFilters;
   /** Resolved theme — true when the effective theme is dark. */
   dark: boolean;
   /** User preference. `system` follows prefers-color-scheme. */
@@ -40,6 +43,8 @@ interface UIState {
   load: () => Promise<void>;
   setSection: (s: Section) => void;
   setSearch: (q: string) => void;
+  setFilters: (f: SearchFilters) => void;
+  clearFilters: () => void;
   /** Cycle through Light → Dark → System (legacy `toggleDark` retained). */
   toggleDark: () => void;
   setThemeMode: (mode: ThemeMode) => void;
@@ -157,6 +162,7 @@ export const useStore = create<UIState>((set, get) => ({
   loaded: false,
   section: { kind: "notes" },
   search: "",
+  filters: EMPTY_FILTERS,
   dark: readInitialDark(),
   editorOpen: false,
   editorNoteId: null,
@@ -184,6 +190,8 @@ export const useStore = create<UIState>((set, get) => ({
   // EI-40 — don't wipe the search input when the user switches sections.
   setSection: (s) => set({ section: s }),
   setSearch: (q) => set({ search: q }),
+  setFilters: (f) => set({ filters: f }),
+  clearFilters: () => set({ filters: EMPTY_FILTERS }),
   toggleDark: () => {
     // Two-state toggle off the resolved `dark` value. Sets an explicit
     // light/dark preference (loses the "system" choice — use setThemeMode

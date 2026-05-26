@@ -65,3 +65,21 @@ export type Section =
   | { kind: "archive" }
   | { kind: "trash" }
   | { kind: "label"; labelId: string };
+
+export interface SearchFilters {
+  /** Note kinds to include. Empty = no kind constraint. */
+  kinds: NoteKind[];
+  /** Colors to include. Empty = no color constraint. */
+  colors: ColorKey[];
+  /** Label IDs to include. Multiple = OR within the group. Empty = no constraint. */
+  labelIds: string[];
+  /** Only pinned notes if true. */
+  pinnedOnly: boolean;
+}
+
+export const EMPTY_FILTERS: SearchFilters = {
+  kinds: [],
+  colors: [],
+  labelIds: [],
+  pinnedOnly: false,
+};
