@@ -9,7 +9,10 @@ import {
   X,
   LayoutGrid,
   Rows3,
+  ArrowUpDown,
 } from "lucide-react";
+import { useClickOutside } from "../hooks/useClickOutside";
+import type { SortMode } from "../store";
 import clsx from "clsx";
 import { useStore } from "../store";
 
@@ -26,8 +29,13 @@ export function TopBar({ onMenu }: Props) {
   const toggleDark = useStore((s) => s.toggleDark);
   const viewMode = useStore((s) => s.viewMode);
   const toggleViewMode = useStore((s) => s.toggleViewMode);
+  const sortMode = useStore((s) => s.sortMode);
+  const setSortMode = useStore((s) => s.setSortMode);
   const openSettings = useStore((s) => s.openSettings);
   const load = useStore((s) => s.load);
+  const [sortMenuOpen, setSortMenuOpen] = useState(false);
+  const sortRef = useRef<HTMLDivElement>(null);
+  useClickOutside(sortRef, sortMenuOpen, () => setSortMenuOpen(false));
 
   // EI-18 — local input state with debounced commit to the store. Typing in
   // the input no longer triggers a re-render of every card on every
@@ -123,6 +131,55 @@ export function TopBar({ onMenu }: Props) {
             className={clsx(refreshing && "animate-spin motion-reduce:animate-none")}
           />
         </button>
+        <div className="relative" ref={sortRef}>
+          <button
+            className="p-3 rounded-full hover:bg-gray-200 dark:hover:bg-[#3c4043]"
+            onClick={() => setSortMenuOpen((v) => !v)}
+            aria-label="Sort notes"
+            aria-haspopup="true"
+            aria-expanded={sortMenuOpen}
+            title="Sort"
+          >
+            <ArrowUpDown size={20} aria-hidden />
+          </button>
+          {sortMenuOpen && (
+            <div
+              className="absolute right-0 top-12 z-30 w-44 rounded-lg shadow-lg border bg-white dark:bg-[#2d2e30] dark:border-[#5f6368] p-1"
+              role="menu"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="text-[11px] font-medium uppercase tracking-wide px-3 py-1 opacity-60">
+                Sort by
+              </div>
+              {(
+                [
+                  ["modified", "Date modified"],
+                  ["created", "Date created"],
+                  ["title", "Title (A–Z)"],
+                  ["custom", "Custom"],
+                ] as [SortMode, string][]
+              ).map(([m, label]) => (
+                <button
+                  key={m}
+                  type="button"
+                  role="menuitemradio"
+                  aria-checked={sortMode === m}
+                  onClick={() => {
+                    setSortMode(m);
+                    setSortMenuOpen(false);
+                  }}
+                  className={
+                    sortMode === m
+                      ? "block w-full text-left text-sm px-3 py-1.5 rounded text-[#1a73e8] font-medium"
+                      : "block w-full text-left text-sm px-3 py-1.5 rounded hover:bg-black/5 dark:hover:bg-white/10"
+                  }
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
         <button
           className="p-3 rounded-full hover:bg-gray-200 dark:hover:bg-[#3c4043]"
           onClick={toggleViewMode}

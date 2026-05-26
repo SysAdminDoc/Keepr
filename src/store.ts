@@ -18,6 +18,7 @@ export interface Toast {
 export type ThemeMode = "light" | "dark" | "system";
 export type ViewMode = "grid" | "list";
 export type AutoBackupCadence = "off" | "daily" | "weekly";
+export type SortMode = "modified" | "created" | "title" | "custom";
 
 interface UIState {
   notes: Note[];
@@ -32,6 +33,8 @@ interface UIState {
   /** User preference. `system` follows prefers-color-scheme. */
   themeMode: ThemeMode;
   viewMode: ViewMode;
+  /** How the masonry grid orders unpinned (and pinned) notes (NF-05). */
+  sortMode: SortMode;
   /** Days a note stays in Trash before being auto-purged. 0 = never (NF-17). */
   trashRetentionDays: number;
   /** When true, ticking a checklist item moves it into the "Checked items"
@@ -63,6 +66,7 @@ interface UIState {
   setThemeMode: (mode: ThemeMode) => void;
   setViewMode: (mode: ViewMode) => void;
   toggleViewMode: () => void;
+  setSortMode: (mode: SortMode) => void;
   setTrashRetentionDays: (days: number) => void;
   setMoveCheckedToBottom: (enabled: boolean) => void;
   setAutoBackupCadence: (c: AutoBackupCadence) => void;
@@ -107,6 +111,7 @@ function nextToastId(): number {
 
 const THEME_KEY = "keepr:theme"; // values: "light" | "dark" | "system" | (legacy: undefined)
 const VIEW_MODE_KEY = "keepr:view-mode"; // values: "grid" | "list"
+const SORT_MODE_KEY = "keepr:sort-mode"; // values: "modified"|"created"|"title"|"custom"
 const TRASH_RETENTION_KEY = "keepr:trash-retention-days"; // integer
 const MOVE_CHECKED_KEY = "keepr:move-checked-to-bottom"; // "true" | "false"
 const AUTOBACKUP_CADENCE_KEY = "keepr:autobackup-cadence"; // "off"|"daily"|"weekly"
@@ -136,6 +141,15 @@ function readInitialThemeMode(): ThemeMode {
 function readInitialViewMode(): ViewMode {
   if (typeof localStorage === "undefined") return "grid";
   return localStorage.getItem(VIEW_MODE_KEY) === "list" ? "list" : "grid";
+}
+
+function readInitialSortMode(): SortMode {
+  if (typeof localStorage === "undefined") return "modified";
+  const raw = localStorage.getItem(SORT_MODE_KEY);
+  if (raw === "modified" || raw === "created" || raw === "title" || raw === "custom") {
+    return raw;
+  }
+  return "modified";
 }
 
 function readInitialTrashRetentionDays(): number {
@@ -217,6 +231,7 @@ export const useStore = create<UIState>((set, get) => ({
   labelsManagerOpen: false,
   themeMode: readInitialThemeMode(),
   viewMode: readInitialViewMode(),
+  sortMode: readInitialSortMode(),
   trashRetentionDays: readInitialTrashRetentionDays(),
   moveCheckedToBottom: readInitialMoveCheckedToBottom(),
   autoBackupCadence: readInitialAutoBackupCadence(),
@@ -230,7 +245,12 @@ export const useStore = create<UIState>((set, get) => ({
         api.listNotes(),
         api.listLabels(),
       ]);
-      set({ notes, labels, loaded: true });
+      // Apply the user's preferred sort over the SQL-default order.
+      set((s) => ({
+        notes: sortNotes(notes, s.sortMode),
+        labels,
+        loaded: true,
+      }));
     } catch (e) {
       // Even on failure we mark loaded so the user sees an error toast,
       // not an infinite spinner.
@@ -263,6 +283,12 @@ export const useStore = create<UIState>((set, get) => ({
   toggleViewMode: () => {
     const next: ViewMode = get().viewMode === "grid" ? "list" : "grid";
     get().setViewMode(next);
+  },
+  setSortMode: (mode) => {
+    localStorage.setItem(SORT_MODE_KEY, mode);
+    set({ sortMode: mode });
+    // Re-sort current notes immediately.
+    set((s) => ({ notes: sortNotes(s.notes, mode) }));
   },
   setTrashRetentionDays: (days) => {
     const clamped = Math.max(0, Math.min(3650, Math.round(days)));
@@ -316,12 +342,13 @@ export const useStore = create<UIState>((set, get) => ({
       const next = [...s.notes];
       if (i >= 0) next[i] = note;
       else next.unshift(note);
-      return { notes: sortNotes(next) };
+      return { notes: sortNotes(next, s.sortMode) };
     }),
   patchNote: (id, patch) =>
     set((s) => ({
       notes: sortNotes(
         s.notes.map((n) => (n.id === id ? { ...n, ...patch } : n)),
+        s.sortMode,
       ),
     })),
   removeNote: (id) =>
@@ -370,13 +397,25 @@ useStoreRef = useStore;
 
 // --- sort helpers (mirror Rust's list_notes ORDER BY) ---
 
-function sortNotes(notes: Note[]): Note[] {
-  // Sort by pinned DESC, then updated_at DESC. Match SQL's behavior so the
-  // grid stays in sync without a re-fetch.
-  return [...notes].sort((a, b) => {
+export function sortNotes(notes: Note[], mode: SortMode = "modified"): Note[] {
+  // Pinned-first is universal; the secondary key changes per mode (NF-05).
+  const cmp = (a: Note, b: Note): number => {
     if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
+    if (mode === "created") {
+      return a.created_at < b.created_at ? 1 : a.created_at > b.created_at ? -1 : 0;
+    }
+    if (mode === "title") {
+      return a.title.localeCompare(b.title, undefined, { sensitivity: "base" });
+    }
+    if (mode === "custom") {
+      // Lower position first; ties broken by updated_at DESC for stability.
+      if (a.position !== b.position) return a.position - b.position;
+      return a.updated_at < b.updated_at ? 1 : a.updated_at > b.updated_at ? -1 : 0;
+    }
+    // "modified" — default
     return a.updated_at < b.updated_at ? 1 : a.updated_at > b.updated_at ? -1 : 0;
-  });
+  };
+  return [...notes].sort(cmp);
 }
 
 function sortLabels(labels: Label[]): Label[] {
