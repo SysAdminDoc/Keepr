@@ -1,0 +1,33 @@
+node_modules
+dist
+dist-ssr
+*.local
+
+# Editor
+.vscode/*
+!.vscode/extensions.json
+.idea
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Logs
+logs
+*.log
+npm-debug.log*
+
+# Tauri
+src-tauri/target
+src-tauri/Cargo.lock
+src-tauri/gen/schemas
+
+# tsc composite output
+*.tsbuildinfo
+vite.config.js
+vite.config.d.ts
+
+# OS
+.DS_Store
+Thumbs.db
