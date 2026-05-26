@@ -303,9 +303,10 @@ function ChecklistRow({
         placeholder="List item"
         aria-label="List item"
         className={clsx(
-          "flex-1 bg-transparent outline-none text-[14px]",
+          "flex-1 bg-transparent outline-none",
           item.checked && "line-through opacity-60",
         )}
+        style={{ fontSize: "var(--keepr-note-font-size)" }}
       />
       <button
         type="button"

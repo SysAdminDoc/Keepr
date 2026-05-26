@@ -184,7 +184,7 @@ export function ReminderPicker({
               <button
                 type="button"
                 onClick={submitCustom}
-                className="px-3 py-1.5 text-sm rounded bg-[#1a73e8] text-white hover:bg-[#1557b0]"
+                className="px-3 py-1.5 text-sm rounded bg-[var(--keepr-accent)] text-white hover:bg-[var(--keepr-accent-hover)]"
               >
                 Set
               </button>

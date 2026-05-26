@@ -94,7 +94,7 @@ export function FilterChips() {
         <button
           type="button"
           onClick={clearFilters}
-          className="ml-1 text-xs text-[#1a73e8] hover:underline"
+          className="ml-1 text-xs text-[var(--keepr-accent)] hover:underline"
         >
           Clear filters
         </button>
@@ -157,7 +157,7 @@ function KindMenu({
           <button
             type="button"
             onClick={() => setOpen(false)}
-            className="mt-1 w-full text-xs text-right text-[#1a73e8] hover:underline px-2"
+            className="mt-1 w-full text-xs text-right text-[var(--keepr-accent)] hover:underline px-2"
           >
             Done
           </button>
@@ -209,7 +209,7 @@ function ColorMenu({
                 className={clsx(
                   "w-7 h-7 rounded-full border transition-transform hover:scale-110 motion-reduce:transform-none",
                   selected
-                    ? "ring-2 ring-[#1a73e8] border-transparent"
+                    ? "ring-2 ring-[var(--keepr-accent)] border-transparent"
                     : k === "default"
                     ? "border-gray-400"
                     : "border-transparent",
@@ -279,7 +279,7 @@ function LabelMenu({
           <button
             type="button"
             onClick={() => setOpen(false)}
-            className="mt-1 w-full text-xs text-right text-[#1a73e8] hover:underline px-2"
+            className="mt-1 w-full text-xs text-right text-[var(--keepr-accent)] hover:underline px-2"
           >
             Done
           </button>

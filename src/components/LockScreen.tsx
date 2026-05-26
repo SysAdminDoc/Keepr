@@ -79,7 +79,7 @@ export function LockScreen() {
               autoFocus
               autoComplete="current-password"
               aria-label="App Lock PIN"
-              className="w-full px-3 py-2 pr-10 text-base rounded border border-gray-300 dark:border-[#5f6368] bg-transparent focus:outline-none focus:ring-2 focus:ring-[#1a73e8]"
+              className="w-full px-3 py-2 pr-10 text-base rounded border border-gray-300 dark:border-[#5f6368] bg-transparent focus:outline-none focus:ring-2 focus:ring-[var(--keepr-accent)]"
               disabled={busy}
             />
             <button
@@ -103,7 +103,7 @@ export function LockScreen() {
           <button
             type="submit"
             disabled={busy || pin.length === 0}
-            className="w-full px-4 py-2 rounded bg-[#1a73e8] text-white font-medium hover:bg-[#1557b0] disabled:opacity-50"
+            className="w-full px-4 py-2 rounded bg-[var(--keepr-accent)] text-white font-medium hover:bg-[var(--keepr-accent-hover)] disabled:opacity-50"
           >
             {busy ? "Verifying…" : "Unlock"}
           </button>

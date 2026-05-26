@@ -22,7 +22,7 @@ const LockScreen = lazy(() =>
   import("./components/LockScreen").then((m) => ({ default: m.LockScreen })),
 );
 import { ConfirmDialog } from "./components/ConfirmDialog";
-import { useStore } from "./store";
+import { accentHoverFor, useStore } from "./store";
 import { api } from "./api";
 import { filterNotes } from "./lib/filterNotes";
 import { findExpiredTrashed } from "./lib/trashRetention";
@@ -212,6 +212,19 @@ export default function App() {
   // currently unlocked — locked → already on the overlay, no need to
   // re-fire.
   useIdleLock(lockAfterMinutes, lock, appLockEnabled && !locked);
+
+  // Mirror user-tunable design tokens onto the document root so every
+  // CSS rule + every Tailwind arbitrary class that references one of
+  // these vars (`var(--keepr-accent)`, `var(--keepr-note-font-size)`,
+  // etc.) updates live when the user changes the setting.
+  const accentColor = useStore((s) => s.accentColor);
+  const noteFontSize = useStore((s) => s.noteFontSize);
+  useEffect(() => {
+    const root = document.documentElement;
+    root.style.setProperty("--keepr-accent", accentColor);
+    root.style.setProperty("--keepr-accent-hover", accentHoverFor(accentColor));
+    root.style.setProperty("--keepr-note-font-size", `${noteFontSize}px`);
+  }, [accentColor, noteFontSize]);
 
   // Ctrl+Wheel anywhere in the app resizes the masonry cards. Up = zoom
   // in (wider), down = zoom out (narrower). Bound to the window with

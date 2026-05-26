@@ -195,7 +195,7 @@ export function TopBar({ onMenu }: Props) {
                   }}
                   className={
                     sortMode === m
-                      ? "block w-full text-left text-sm px-3 py-1.5 rounded text-[#1a73e8] font-medium"
+                      ? "block w-full text-left text-sm px-3 py-1.5 rounded text-[var(--keepr-accent)] font-medium"
                       : "block w-full text-left text-sm px-3 py-1.5 rounded hover:bg-black/5 dark:hover:bg-white/10"
                   }
                 >

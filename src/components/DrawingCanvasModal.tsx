@@ -212,7 +212,7 @@ export function DrawingCanvasModal({ open, onCancel, onSave }: Props) {
                 aria-pressed={!erase && color === c}
                 className={
                   "w-6 h-6 rounded-full border border-gray-400 transition-transform hover:scale-110 motion-reduce:transform-none " +
-                  (!erase && color === c ? "ring-2 ring-[#1a73e8]" : "")
+                  (!erase && color === c ? "ring-2 ring-[var(--keepr-accent)]" : "")
                 }
                 style={{ background: c }}
               />
@@ -298,7 +298,7 @@ export function DrawingCanvasModal({ open, onCancel, onSave }: Props) {
             type="button"
             onClick={save}
             disabled={busy || !hasStrokes}
-            className="inline-flex items-center gap-2 px-4 py-1.5 text-sm rounded bg-[#1a73e8] text-white font-medium hover:bg-[#1557b0] disabled:opacity-50"
+            className="inline-flex items-center gap-2 px-4 py-1.5 text-sm rounded bg-[var(--keepr-accent)] text-white font-medium hover:bg-[var(--keepr-accent-hover)] disabled:opacity-50"
           >
             <Save size={14} aria-hidden /> {busy ? "Saving…" : "Save drawing"}
           </button>

@@ -6,6 +6,21 @@ All notable changes to Keepr are documented here. Format loosely follows [Keep a
 
 (See [ROADMAP.md](ROADMAP.md) for the live task list.)
 
+## [0.18.0] — 2026-05-26 — "Theme accent + larger note text"
+
+### Added
+
+- **Accent color picker.** Six presets in Settings (Blue / Purple / Green / Orange / Pink / Teal) — re-skins every accent surface in the app at once: the new-note button, pin states, focus rings, theme-mode selector, archive/restore primaries, vault unlock, lock-screen submit, filter chip selection, hashtag highlights in note cards, color-picker selection rings, drawing canvas accent — all driven from a single `--keepr-accent` (+ paired `--keepr-accent-hover`) CSS variable. Blue is the original Keep accent and remains the default. Persisted to `keepr:accent-color`.
+- **Note text size slider.** Settings → "Note text size" — 12-22px range, default 14px (the historic Keep size). Drives `--keepr-note-font-size`, which is applied via inline `style` to: note-card body text, note-card checklist items, editor body textarea, editor checklist items. Reset button restores the default. Persisted to `keepr:note-font-size`.
+
+### Changed
+
+- **All hard-coded `#1a73e8`/`#1557b0` references replaced with `var(--keepr-accent)` / `var(--keepr-accent-hover)`.** 12 components + `index.css` (focus-visible outline) now resolve their accent at render time so the picker reskins live without a reload. SVG strokes in `backgroundPatterns.ts` and the literal blue swatch in `DrawingCanvasModal`'s draw-color palette are intentionally NOT remapped — those are not "the accent", they're independent colors.
+
+### Implementation note
+
+- `App.tsx` mounts a single useEffect that mirrors `accentColor` + `noteFontSize` onto the document root as CSS variables. Every reference is a `var(...)` read — no per-component theme prop drilling.
+
 ## [0.17.1] — 2026-05-26 — "Drag actually sticks · 90vw×90vh editor · blurred backdrop"
 
 ### Fixed

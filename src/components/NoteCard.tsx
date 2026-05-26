@@ -223,7 +223,7 @@ export function NoteCard({ note }: Props) {
       className={clsx(
         "note-card group relative rounded-lg border shadow-keep hover:shadow-keep-hover cursor-default",
         "transition-shadow motion-reduce:transition-none",
-        isSelected && "ring-2 ring-[#1a73e8] ring-offset-1",
+        isSelected && "ring-2 ring-[var(--keepr-accent)] ring-offset-1",
         sortable.isDragging && "opacity-50",
       )}
       style={{
@@ -257,7 +257,7 @@ export function NoteCard({ note }: Props) {
         className={clsx(
           "absolute top-2 left-2 w-6 h-6 rounded-full grid place-items-center text-white transition-opacity motion-reduce:transition-none",
           isSelected
-            ? "opacity-100 bg-[#1a73e8]"
+            ? "opacity-100 bg-[var(--keepr-accent)]"
             : "opacity-0 group-hover:opacity-100 focus:opacity-100 bg-black/40 hover:bg-black/60",
           selectMode && "opacity-100",
         )}
@@ -304,7 +304,10 @@ export function NoteCard({ note }: Props) {
       {!lockedVault && (
         note.kind === "text" ? (
           note.body && (
-            <div className="px-4 pb-3 text-[14px] leading-snug whitespace-pre-wrap break-words max-h-[16rem] overflow-hidden">
+            <div
+              className="px-4 pb-3 leading-snug whitespace-pre-wrap break-words max-h-[16rem] overflow-hidden"
+              style={{ fontSize: "var(--keepr-note-font-size)" }}
+            >
               <HighlightHashtags text={note.body} />
             </div>
           )
@@ -313,7 +316,8 @@ export function NoteCard({ note }: Props) {
             {note.checklist.slice(0, 12).map((it) => (
               <div
                 key={it.id}
-                className="flex items-start gap-2 px-2 py-1 text-[14px]"
+                className="flex items-start gap-2 px-2 py-1"
+                style={{ fontSize: "var(--keepr-note-font-size)" }}
               >
                 <span
                   className="w-4 h-4 mt-0.5 grid place-items-center border rounded-sm border-current opacity-70"
@@ -448,7 +452,7 @@ function HighlightHashtags({ text }: { text: string }) {
     parts.push(
       <span
         key={key++}
-        className="text-[#1a73e8] dark:text-[#8ab4f8] font-medium"
+        className="text-[var(--keepr-accent)] dark:text-[#8ab4f8] font-medium"
       >
         #{tag}
       </span>,

@@ -105,7 +105,7 @@ function SetupPanel() {
       <button
         type="submit"
         disabled={busy}
-        className="sm:col-span-2 px-3 py-2 text-sm rounded bg-[#1a73e8] text-white font-medium hover:bg-[#1557b0] disabled:opacity-50"
+        className="sm:col-span-2 px-3 py-2 text-sm rounded bg-[var(--keepr-accent)] text-white font-medium hover:bg-[var(--keepr-accent-hover)] disabled:opacity-50"
       >
         {busy ? "Creating…" : "Create vault"}
       </button>
@@ -154,7 +154,7 @@ function UnlockPanel() {
       <button
         type="submit"
         disabled={busy || pw.length === 0}
-        className="px-3 py-1.5 text-sm rounded bg-[#1a73e8] text-white font-medium hover:bg-[#1557b0] disabled:opacity-50"
+        className="px-3 py-1.5 text-sm rounded bg-[var(--keepr-accent)] text-white font-medium hover:bg-[var(--keepr-accent-hover)] disabled:opacity-50"
       >
         {busy ? "Verifying…" : "Unlock"}
       </button>

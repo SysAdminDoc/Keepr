@@ -1,7 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { X, Download, Upload, Folder, FolderOpen } from "lucide-react";
 import { open, save } from "@tauri-apps/plugin-dialog";
-import { useStore } from "../store";
+import {
+  ACCENT_PRESETS,
+  MAX_NOTE_FONT_SIZE,
+  MIN_NOTE_FONT_SIZE,
+  useStore,
+} from "../store";
 import { api } from "../api";
 import { useEscape } from "../hooks/useEscape";
 import { useFocusTrap } from "../hooks/useFocusTrap";
@@ -23,6 +28,11 @@ export function SettingsModal() {
   const autoBackupFolder = useStore((s) => s.autoBackupFolder);
   const setAutoBackupFolder = useStore((s) => s.setAutoBackupFolder);
   const autoBackupLastAt = useStore((s) => s.autoBackupLastAt);
+  const accentColor = useStore((s) => s.accentColor);
+  const setAccentColor = useStore((s) => s.setAccentColor);
+  const noteFontSize = useStore((s) => s.noteFontSize);
+  const setNoteFontSize = useStore((s) => s.setNoteFontSize);
+  const resetNoteFontSize = useStore((s) => s.resetNoteFontSize);
   const load = useStore((s) => s.load);
   const showToast = useStore((s) => s.showToast);
 
@@ -146,7 +156,7 @@ export function SettingsModal() {
                       onClick={() => setThemeMode(mode)}
                       className={
                         themeMode === mode
-                          ? "px-3 py-1.5 bg-[#1a73e8] text-white"
+                          ? "px-3 py-1.5 bg-[var(--keepr-accent)] text-white"
                           : "px-3 py-1.5 hover:bg-black/5 dark:hover:bg-white/10"
                       }
                     >
@@ -157,6 +167,71 @@ export function SettingsModal() {
                         : "System"}
                     </button>
                   ))}
+                </div>
+              }
+            />
+
+            <Row
+              title="Accent color"
+              subtitle={
+                ACCENT_PRESETS.find((p) => p.color === accentColor)?.name
+                  ?? "Custom"
+              }
+              action={
+                <div
+                  role="radiogroup"
+                  aria-label="Accent color"
+                  className="flex items-center gap-2"
+                >
+                  {ACCENT_PRESETS.map((p) => {
+                    const selected = p.color === accentColor;
+                    return (
+                      <button
+                        key={p.color}
+                        type="button"
+                        role="radio"
+                        aria-checked={selected}
+                        aria-label={p.name}
+                        title={p.name}
+                        onClick={() => setAccentColor(p.color)}
+                        className={
+                          selected
+                            ? "w-7 h-7 rounded border-2 border-gray-800 dark:border-white"
+                            : "w-7 h-7 rounded border border-black/10 dark:border-white/10 hover:scale-110 transition-transform"
+                        }
+                        style={{ backgroundColor: p.color }}
+                      />
+                    );
+                  })}
+                </div>
+              }
+            />
+
+            <Row
+              title="Note text size"
+              subtitle={`${noteFontSize}px — applies to note bodies and checklist items`}
+              action={
+                <div className="flex items-center gap-3">
+                  <input
+                    type="range"
+                    aria-label="Note text size"
+                    min={MIN_NOTE_FONT_SIZE}
+                    max={MAX_NOTE_FONT_SIZE}
+                    step={1}
+                    value={noteFontSize}
+                    onChange={(e) => setNoteFontSize(parseInt(e.target.value, 10))}
+                    className="w-32 accent-[var(--keepr-accent)]"
+                  />
+                  <span className="text-xs text-gray-500 dark:text-gray-400 w-10 text-right tabular-nums">
+                    {noteFontSize}px
+                  </span>
+                  <button
+                    type="button"
+                    onClick={resetNoteFontSize}
+                    className="text-xs px-2 py-1 rounded border border-gray-300 dark:border-[#5f6368] hover:bg-black/5 dark:hover:bg-white/10"
+                  >
+                    Reset
+                  </button>
                 </div>
               }
             />
@@ -207,7 +282,7 @@ export function SettingsModal() {
                   checked={moveCheckedToBottom}
                   onChange={(e) => setMoveCheckedToBottom(e.target.checked)}
                   aria-label="Move checked items to bottom"
-                  className="w-5 h-5 accent-[#1a73e8]"
+                  className="w-5 h-5 accent-[var(--keepr-accent)]"
                 />
               }
             />

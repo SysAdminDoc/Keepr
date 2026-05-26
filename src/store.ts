@@ -102,6 +102,17 @@ interface UIState {
    *  handler. Positive = zoom in (wider). Clamped to MIN/MAX. */
   bumpCardWidth: (deltaSteps: number) => void;
   resetCardWidth: () => void;
+  /** Body / checklist text size in px. Drives `--keepr-note-font-size`
+   *  via the App-level useEffect that mirrors store values onto the
+   *  document root. */
+  noteFontSize: number;
+  setNoteFontSize: (px: number) => void;
+  resetNoteFontSize: () => void;
+  /** Theme accent color (hex). Must match an `ACCENT_PRESETS` entry.
+   *  Mirrored to `--keepr-accent` + `--keepr-accent-hover` CSS vars. */
+  accentColor: string;
+  setAccentColor: (hex: string) => void;
+  resetAccentColor: () => void;
   openEditor: (id: string | null) => void;
   closeEditor: () => void;
   openSettings: () => void;
@@ -161,6 +172,8 @@ const AUTOBACKUP_CADENCE_KEY = "keepr:autobackup-cadence"; // "off"|"daily"|"wee
 const AUTOBACKUP_FOLDER_KEY = "keepr:autobackup-folder"; // absolute path
 const AUTOBACKUP_LAST_KEY = "keepr:autobackup-last-at"; // ISO
 const CARD_WIDTH_KEY = "keepr:card-width"; // integer px, clamped to MIN/MAX_CARD_WIDTH
+const ACCENT_COLOR_KEY = "keepr:accent-color"; // hex string, must match an ACCENT_PRESETS entry
+const NOTE_FONT_SIZE_KEY = "keepr:note-font-size"; // integer px, clamped to MIN/MAX_NOTE_FONT_SIZE
 
 const DEFAULT_TRASH_RETENTION_DAYS = 7;
 const DEFAULT_MOVE_CHECKED_TO_BOTTOM = true;
@@ -171,6 +184,33 @@ export const DEFAULT_CARD_WIDTH = 240;
 export const MIN_CARD_WIDTH = 160;
 export const MAX_CARD_WIDTH = 480;
 export const CARD_WIDTH_STEP = 16;
+
+/** Note body / checklist text size. Applied via the `--keepr-note-font-size`
+ *  CSS variable so a single store value drives every note text surface. */
+export const DEFAULT_NOTE_FONT_SIZE = 14;
+export const MIN_NOTE_FONT_SIZE = 12;
+export const MAX_NOTE_FONT_SIZE = 24;
+
+/** Theme accent presets. Drives `--keepr-accent` + `--keepr-accent-hover`.
+ *  Hover is the same hue at lower lightness — pre-computed so we don't
+ *  pull in a color library. Blue is the original Keep accent. */
+export interface AccentPreset {
+  name: string;
+  color: string;
+  hover: string;
+}
+export const ACCENT_PRESETS: AccentPreset[] = [
+  { name: "Blue", color: "#1a73e8", hover: "#1557b0" },
+  { name: "Purple", color: "#8e24aa", hover: "#6a1b8e" },
+  { name: "Green", color: "#2e7d32", hover: "#1b5e20" },
+  { name: "Orange", color: "#ef6c00", hover: "#bf5400" },
+  { name: "Pink", color: "#e91e63", hover: "#ad1457" },
+  { name: "Teal", color: "#00838f", hover: "#005f66" },
+];
+export const DEFAULT_ACCENT_COLOR = ACCENT_PRESETS[0].color;
+export function accentHoverFor(color: string): string {
+  return ACCENT_PRESETS.find((p) => p.color === color)?.hover ?? ACCENT_PRESETS[0].hover;
+}
 
 // EI-37 — the inline boot script in `index.html` toggles the `.dark` class on
 // <html> BEFORE the first React paint, so there's no flash of wrong theme.
@@ -251,6 +291,30 @@ function readInitialCardWidth(): number {
   return clampCardWidth(n);
 }
 
+function clampNoteFontSize(n: number): number {
+  if (!Number.isFinite(n)) return DEFAULT_NOTE_FONT_SIZE;
+  return Math.max(MIN_NOTE_FONT_SIZE, Math.min(MAX_NOTE_FONT_SIZE, Math.round(n)));
+}
+
+function readInitialNoteFontSize(): number {
+  if (typeof localStorage === "undefined") return DEFAULT_NOTE_FONT_SIZE;
+  const raw = localStorage.getItem(NOTE_FONT_SIZE_KEY);
+  if (raw == null) return DEFAULT_NOTE_FONT_SIZE;
+  const n = parseInt(raw, 10);
+  if (Number.isNaN(n)) return DEFAULT_NOTE_FONT_SIZE;
+  return clampNoteFontSize(n);
+}
+
+function readInitialAccentColor(): string {
+  if (typeof localStorage === "undefined") return DEFAULT_ACCENT_COLOR;
+  const raw = localStorage.getItem(ACCENT_COLOR_KEY);
+  // Whitelist against ACCENT_PRESETS — a stale localStorage key from a
+  // future preset that no longer exists falls back to default rather
+  // than rendering an unknown color.
+  if (raw && ACCENT_PRESETS.some((p) => p.color === raw)) return raw;
+  return DEFAULT_ACCENT_COLOR;
+}
+
 function effectiveDark(mode: ThemeMode): boolean {
   if (mode === "dark") return true;
   if (mode === "light") return false;
@@ -304,6 +368,8 @@ export const useStore = create<UIState>((set, get) => ({
   autoBackupFolder: readInitialAutoBackupFolder(),
   autoBackupLastAt: readInitialAutoBackupLastAt(),
   cardWidth: readInitialCardWidth(),
+  noteFontSize: readInitialNoteFontSize(),
+  accentColor: readInitialAccentColor(),
   toasts: [],
   selectedIds: new Set(),
   locked: false,
@@ -396,6 +462,28 @@ export const useStore = create<UIState>((set, get) => ({
   resetCardWidth: () => {
     localStorage.removeItem(CARD_WIDTH_KEY);
     set({ cardWidth: DEFAULT_CARD_WIDTH });
+  },
+  setNoteFontSize: (px) => {
+    const clamped = clampNoteFontSize(px);
+    localStorage.setItem(NOTE_FONT_SIZE_KEY, String(clamped));
+    set({ noteFontSize: clamped });
+  },
+  resetNoteFontSize: () => {
+    localStorage.removeItem(NOTE_FONT_SIZE_KEY);
+    set({ noteFontSize: DEFAULT_NOTE_FONT_SIZE });
+  },
+  setAccentColor: (hex) => {
+    // Whitelist against ACCENT_PRESETS so a bad call site can't sneak
+    // an arbitrary string into the CSS var.
+    const allowed = ACCENT_PRESETS.some((p) => p.color === hex)
+      ? hex
+      : DEFAULT_ACCENT_COLOR;
+    localStorage.setItem(ACCENT_COLOR_KEY, allowed);
+    set({ accentColor: allowed });
+  },
+  resetAccentColor: () => {
+    localStorage.removeItem(ACCENT_COLOR_KEY);
+    set({ accentColor: DEFAULT_ACCENT_COLOR });
   },
   setAutoBackupLastAt: (iso) => {
     if (iso) localStorage.setItem(AUTOBACKUP_LAST_KEY, iso);

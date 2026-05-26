@@ -738,7 +738,7 @@ export function NoteEditor() {
           // than collapsing around short notes. Capped at 1800px on
           // ultrawides so the line length stays readable.
           "w-[90vw] max-w-[1800px] h-[90vh] flex flex-col rounded-lg border shadow-2xl overflow-hidden",
-          dropActive && "ring-2 ring-[#1a73e8] ring-offset-2",
+          dropActive && "ring-2 ring-[var(--keepr-accent)] ring-offset-2",
         )}
         style={{
           background: bg,
@@ -788,7 +788,8 @@ export function NoteEditor() {
             value={draft.body}
             onChange={(e) => setDraft({ ...draft, body: e.target.value })}
             placeholder="Take a note…"
-            className="flex-1 w-full resize-none bg-transparent outline-none px-4 pb-3 text-[14px] placeholder-gray-500 dark:placeholder-gray-400 min-h-[20rem]"
+            className="flex-1 w-full resize-none bg-transparent outline-none px-4 pb-3 placeholder-gray-500 dark:placeholder-gray-400 min-h-[20rem]"
+            style={{ fontSize: "var(--keepr-note-font-size)" }}
           />
         ) : (
           // EI-V0.5-10 (v0.16) — checklist editor extracted to its own

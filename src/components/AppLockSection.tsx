@@ -122,7 +122,7 @@ function EnablePanel({ onEnabled }: { onEnabled: () => Promise<void> }) {
       <button
         type="submit"
         disabled={busy}
-        className="sm:col-span-2 px-3 py-2 text-sm rounded bg-[#1a73e8] text-white font-medium hover:bg-[#1557b0] disabled:opacity-50"
+        className="sm:col-span-2 px-3 py-2 text-sm rounded bg-[var(--keepr-accent)] text-white font-medium hover:bg-[var(--keepr-accent-hover)] disabled:opacity-50"
       >
         {busy ? "Hashing…" : "Enable App Lock"}
       </button>

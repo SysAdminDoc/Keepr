@@ -72,7 +72,7 @@ export function ConfirmDialog({
             className={
               destructive
                 ? "px-4 py-1.5 text-sm font-medium rounded text-white bg-[#d93025] hover:bg-[#b1271b]"
-                : "px-4 py-1.5 text-sm font-medium rounded text-white bg-[#1a73e8] hover:bg-[#1557b0]"
+                : "px-4 py-1.5 text-sm font-medium rounded text-white bg-[var(--keepr-accent)] hover:bg-[var(--keepr-accent-hover)]"
             }
           >
             {confirmLabel}

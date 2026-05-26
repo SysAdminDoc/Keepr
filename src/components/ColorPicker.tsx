@@ -52,7 +52,7 @@ export function ColorPicker({
                 k === "default"
                   ? "border border-gray-400 dark:border-gray-500"
                   : "border border-transparent",
-                selected && "ring-2 ring-[#1a73e8] ring-offset-1",
+                selected && "ring-2 ring-[var(--keepr-accent)] ring-offset-1",
               )}
               style={{ background: k === "default" ? "transparent" : LIGHT_HEX[k] }}
             >
@@ -91,7 +91,7 @@ export function ColorPicker({
                   }}
                   className={clsx(
                     "w-12 h-10 rounded-md border border-gray-300 dark:border-[#5f6368] bg-white dark:bg-[#3c4043] overflow-hidden grid place-items-center hover:scale-105 transition-transform motion-reduce:transform-none motion-reduce:transition-none",
-                    selected && "ring-2 ring-[#1a73e8] ring-offset-1",
+                    selected && "ring-2 ring-[var(--keepr-accent)] ring-offset-1",
                   )}
                   style={{
                     backgroundImage: url,
