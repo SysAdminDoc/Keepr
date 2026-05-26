@@ -48,6 +48,11 @@ pub struct AppState {
     /// the vault is unlocked. Zeroized on Drop; replaced with `None`
     /// when `lock_vault` is called or the app exits.
     pub vault_dek: Arc<Mutex<Option<vault::Dek>>>,
+    /// EI-V0.5-12 — set to true on `RunEvent::ExitRequested` so the
+    /// reminder scheduler thread breaks its sleep loop and returns. The
+    /// thread checks this flag at the top of every iteration AND wakes
+    /// from sleep early via a parking pair (see `run()` below).
+    pub shutdown: Arc<AtomicBool>,
 }
 
 /// Subdirectory under the data dir where the `keepr-resource://` protocol
@@ -172,6 +177,24 @@ pub fn run() {
         }))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
+        // NF-V0.5-J — file + stdout logging via tauri-plugin-log. Writes
+        // to <app_log_dir>/Keepr.log (per OS convention). Rotation kicks
+        // in at 1 MiB and keeps the previous file around as .old; stderr
+        // / stdout are mirrored in dev so println! and eprintln! still
+        // surface in `tauri dev`.
+        .plugin(
+            tauri_plugin_log::Builder::new()
+                .level(log::LevelFilter::Info)
+                .targets([
+                    tauri_plugin_log::Target::new(
+                        tauri_plugin_log::TargetKind::LogDir { file_name: Some("Keepr".to_string()) },
+                    ),
+                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
+                ])
+                .max_file_size(1024 * 1024)
+                .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepOne)
+                .build(),
+        )
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(move |app, shortcut, event| {
@@ -220,6 +243,7 @@ pub fn run() {
                 importing: Arc::new(AtomicBool::new(false)),
                 data_dir,
                 vault_dek: Arc::new(Mutex::new(None)),
+                shutdown: Arc::new(AtomicBool::new(false)),
             });
 
             // NF-06 — tray icon + menu. "Show / Hide Keepr" toggles the
@@ -297,8 +321,15 @@ pub fn run() {
                 use std::thread::sleep;
                 use std::time::Duration;
                 loop {
-                    let now = chrono::Utc::now().to_rfc3339();
                     let state: tauri::State<'_, AppState> = app_handle.state();
+                    // EI-V0.5-12 — exit cleanly when the run loop signals
+                    // shutdown. Checked before AND between sleep slices
+                    // so we never wait the full 30 s after Exit.
+                    if state.shutdown.load(std::sync::atomic::Ordering::SeqCst) {
+                        log::info!("reminder scheduler shutting down");
+                        break;
+                    }
+                    let now = chrono::Utc::now().to_rfc3339();
                     match commands::peek_due_reminders(&state, &now) {
                         Ok(items) if !items.is_empty() => {
                             for (rem, preview) in &items {
@@ -312,32 +343,44 @@ pub fn run() {
                                 match show_result {
                                     Ok(_) => {
                                         // Toast surfaced — safe to mark fired.
-                                        if let Err(e) =
-                                            commands::mark_reminder_fired(&state, &rem.id, &now)
-                                        {
-                                            eprintln!(
-                                                "keepr: failed to mark reminder {} fired: {e}",
-                                                rem.id
+                                        if let Err(e) = commands::mark_reminder_fired(
+                                            &state,
+                                            &rem.note_id,
+                                            &now,
+                                        ) {
+                                            log::warn!(
+                                                "failed to mark reminder for note {} fired: {e}",
+                                                rem.note_id
                                             );
                                         }
+                                        // Payload is the note id — the renderer opens
+                                        // the editor on it via the View-note toast.
                                         let _ = app_handle
-                                            .emit("keepr://reminder-fired", &rem.id);
+                                            .emit("keepr://reminder-fired", &rem.note_id);
                                     }
                                     Err(e) => {
                                         // Permission denied / COM error / Focus Assist —
                                         // leave fired_at NULL so the next sweep retries.
-                                        eprintln!(
-                                            "keepr: notification.show() failed for {}: {e}",
-                                            rem.id
+                                        log::warn!(
+                                            "notification.show() failed for note {}: {e}",
+                                            rem.note_id
                                         );
                                     }
                                 }
                             }
                         }
                         Ok(_) => {}
-                        Err(e) => eprintln!("keepr: reminder sweep failed: {e}"),
+                        Err(e) => log::warn!("reminder sweep failed: {e}"),
                     }
-                    sleep(Duration::from_secs(30));
+                    // Sleep in 1-second slices so a shutdown request takes
+                    // at most one second to propagate. 30 one-second checks
+                    // is cheaper than the per-sweep work.
+                    for _ in 0..30 {
+                        sleep(Duration::from_secs(1));
+                        if state.shutdown.load(std::sync::atomic::Ordering::SeqCst) {
+                            break;
+                        }
+                    }
                 }
             });
 
@@ -373,6 +416,7 @@ pub fn run() {
             commands::export_zip,
             commands::import_zip,
             commands::get_data_dir,
+            commands::get_log_dir,
             commands::get_app_lock_settings,
             commands::enable_app_lock,
             commands::disable_app_lock,
@@ -389,6 +433,20 @@ pub fn run() {
             commands::restore_snapshot,
             commands::export_reminders_ics,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app_handle, event| {
+            // EI-V0.5-12 — flip the shutdown flag on ExitRequested so the
+            // reminder scheduler thread wakes from its 1-second sleep,
+            // sees the flag, and returns. Tauri kills the process after
+            // this callback returns; the explicit signal lets the
+            // scheduler log a clean shutdown rather than vanishing.
+            if let tauri::RunEvent::ExitRequested { .. } = event {
+                if let Some(state) = app_handle.try_state::<AppState>() {
+                    state
+                        .shutdown
+                        .store(true, std::sync::atomic::Ordering::SeqCst);
+                }
+            }
+        });
 }

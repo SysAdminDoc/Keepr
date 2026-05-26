@@ -27,6 +27,7 @@ export function SettingsModal() {
   const showToast = useStore((s) => s.showToast);
 
   const [dataDir, setDataDir] = useState<string>("");
+  const [logDir, setLogDir] = useState<string>("");
   const [busy, setBusy] = useState(false);
   const [pendingRestoreSrc, setPendingRestoreSrc] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -37,6 +38,7 @@ export function SettingsModal() {
   useEffect(() => {
     if (!settingsOpen) return;
     api.getDataDir().then(setDataDir).catch(() => {});
+    api.getLogDir().then(setLogDir).catch(() => {});
   }, [settingsOpen]);
 
   if (!settingsOpen) return null;
@@ -166,6 +168,29 @@ export function SettingsModal() {
                 <span className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1">
                   <Folder size={14} aria-hidden /> local
                 </span>
+              }
+            />
+
+            <Row
+              title="Log folder (NF-V0.5-J)"
+              subtitle={logDir || "—"}
+              action={
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (!logDir) return;
+                    try {
+                      await navigator.clipboard.writeText(logDir);
+                      showToast("Log folder path copied");
+                    } catch {
+                      showToast("Copy failed — path: " + logDir);
+                    }
+                  }}
+                  disabled={!logDir}
+                  className="text-xs px-2 py-1 rounded border border-gray-300 dark:border-[#5f6368] hover:bg-black/5 dark:hover:bg-white/10 disabled:opacity-50"
+                >
+                  Copy path
+                </button>
               }
             />
 
@@ -392,7 +417,7 @@ export function SettingsModal() {
           </div>
 
           <div className="px-5 py-3 border-t border-gray-200 dark:border-[#5f6368] text-xs text-gray-500 dark:text-gray-400">
-            Keepr v0.11.0 — offline-first Google Keep clone. MIT-licensed.
+            Keepr v0.12.0 — offline-first Google Keep clone. MIT-licensed.
           </div>
         </div>
       </div>

@@ -11,7 +11,6 @@ import { filterNotes } from "../lib/filterNotes";
 
 function reminder(over: Partial<Reminder> = {}): Reminder {
   return {
-    id: over.id ?? "r1",
     noteId: over.noteId ?? "n1",
     fireAt: over.fireAt ?? "2026-06-01T12:00:00Z",
     rrule: over.rrule ?? null,
@@ -75,15 +74,15 @@ describe("reminders helpers", () => {
   });
 
   it("compareByDue sorts soonest first using effectiveFireAt", () => {
-    const a = reminder({ id: "a", fireAt: "2026-06-01T12:00:00Z" });
+    const a = reminder({ noteId: "a", fireAt: "2026-06-01T12:00:00Z" });
     const b = reminder({
-      id: "b",
+      noteId: "b",
       fireAt: "2026-06-01T10:00:00Z",
       snoozeUntil: "2026-06-01T15:00:00Z",
     });
-    const c = reminder({ id: "c", fireAt: "2026-06-01T09:00:00Z" });
+    const c = reminder({ noteId: "c", fireAt: "2026-06-01T09:00:00Z" });
     const sorted = [a, b, c].slice().sort(compareByDue);
-    expect(sorted.map((r) => r.id)).toEqual(["c", "a", "b"]);
+    expect(sorted.map((r) => r.noteId)).toEqual(["c", "a", "b"]);
   });
 });
 
@@ -95,11 +94,10 @@ describe("filterNotes — reminders section", () => {
     const n2 = note({ id: "n2", title: "second" });
     const nTrash = note({ id: "trash", trashed: true });
     const nNoReminder = note({ id: "lonely" });
-    const r1 = reminder({ id: "r1", noteId: "n1", fireAt: "2026-06-02T00:00:00Z" });
-    const r2 = reminder({ id: "r2", noteId: "n2", fireAt: "2026-06-01T00:00:00Z" });
-    const rTrash = reminder({ id: "rt", noteId: "trash", fireAt: "2026-05-30T00:00:00Z" });
+    const r1 = reminder({ noteId: "n1", fireAt: "2026-06-02T00:00:00Z" });
+    const r2 = reminder({ noteId: "n2", fireAt: "2026-06-01T00:00:00Z" });
+    const rTrash = reminder({ noteId: "trash", fireAt: "2026-05-30T00:00:00Z" });
     const rFired = reminder({
-      id: "rf",
       noteId: "lonely",
       firedAt: "2026-05-01T00:00:00Z",
     });

@@ -4,7 +4,7 @@ use std::path::Path;
 
 /// Current schema version. Bump and add a new arm to `apply_migration` for every
 /// schema change. Migrations are forward-only and ordered.
-pub const SCHEMA_VERSION: i32 = 7;
+pub const SCHEMA_VERSION: i32 = 8;
 
 pub fn open(path: &Path) -> Result<Connection> {
     let mut conn = Connection::open(path)?;
@@ -52,6 +52,7 @@ fn apply_migration(tx: &rusqlite::Transaction, version: i32) -> Result<()> {
         5 => tx.execute_batch(MIGRATION_V5)?,
         6 => tx.execute_batch(MIGRATION_V6)?,
         7 => tx.execute_batch(MIGRATION_V7)?,
+        8 => tx.execute_batch(MIGRATION_V8)?,
         v => bail!("no migration defined for schema v{v}"),
     }
     Ok(())
@@ -225,6 +226,35 @@ BEGIN
 END;
 "#;
 
+/// v8 — Reminder schema cleanup (EI-V0.5-14).
+///
+/// The original `reminders` table carried a redundant `id TEXT PRIMARY
+/// KEY` alongside a `note_id TEXT NOT NULL UNIQUE` — one reminder per
+/// note made `note_id` the natural key. v8 rebuilds the table with
+/// `note_id` as the PK directly + a CHECK on `fire_at` so we can't
+/// land an empty timestamp from a future bug. The migration is a
+/// classic SQLite table-rebuild (no DROP COLUMN PK support).
+const MIGRATION_V8: &str = r#"
+CREATE TABLE reminders_new (
+    note_id TEXT PRIMARY KEY REFERENCES notes(id) ON DELETE CASCADE,
+    fire_at TEXT NOT NULL CHECK (length(fire_at) > 0),
+    rrule TEXT,
+    snooze_until TEXT,
+    fired_at TEXT,
+    dismissed_at TEXT,
+    created_at TEXT NOT NULL
+);
+INSERT INTO reminders_new
+    (note_id, fire_at, rrule, snooze_until, fired_at, dismissed_at, created_at)
+SELECT note_id, fire_at, rrule, snooze_until, fired_at, dismissed_at, created_at
+FROM reminders;
+DROP TABLE reminders;
+ALTER TABLE reminders_new RENAME TO reminders;
+CREATE INDEX IF NOT EXISTS idx_reminders_pending
+    ON reminders(fired_at, fire_at)
+    WHERE fired_at IS NULL;
+"#;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -304,6 +334,37 @@ mod tests {
             .unwrap();
         let err = migrate(&mut conn).unwrap_err();
         assert!(err.to_string().contains("upgrade Keepr"));
+    }
+
+    #[test]
+    fn migration_v8_rebuilds_reminders_with_note_id_pk() {
+        let conn = fresh_conn();
+        // PK is now note_id (no separate id column).
+        let cols: Vec<(String, i32)> = conn
+            .prepare("PRAGMA table_info(reminders)")
+            .unwrap()
+            .query_map([], |r| Ok((r.get::<_, String>(1)?, r.get::<_, i32>(5)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        let names: Vec<&str> = cols.iter().map(|(n, _)| n.as_str()).collect();
+        assert!(!names.contains(&"id"), "v8 should drop reminders.id; got {names:?}");
+        let note_id_pk = cols.iter().find(|(n, _)| n == "note_id").unwrap().1;
+        assert_eq!(note_id_pk, 1, "note_id should be the PK");
+        // CHECK on fire_at rejects empty strings.
+        conn.execute(
+            "INSERT INTO notes (id, kind, title, body, color, pinned, archived, trashed, \
+                                position, created_at, updated_at) \
+             VALUES ('n1', 'text', '', '', 'default', 0, 0, 0, 0, \
+                     '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+        let bad = conn.execute(
+            "INSERT INTO reminders (note_id, fire_at, created_at) VALUES ('n1', '', '2026-01-01T00:00:00Z')",
+            [],
+        );
+        assert!(bad.is_err(), "CHECK should reject empty fire_at");
     }
 
     #[test]

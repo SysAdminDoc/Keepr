@@ -6,7 +6,7 @@ use std::fs::File;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use tauri::State;
+use tauri::{Manager, State};
 use uuid::Uuid;
 use zip::write::SimpleFileOptions;
 
@@ -1305,7 +1305,8 @@ fn takeout_reminder_fire_at(r: &serde_json::Value) -> Option<String> {
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct Reminder {
-    pub id: String,
+    // EI-V0.5-14 (v0.12+): `note_id` is the natural key — one reminder
+    // per note. The redundant `id` column was dropped in schema v8.
     pub note_id: String,
     pub fire_at: String,
     pub rrule: Option<String>,
@@ -1381,26 +1382,25 @@ pub fn set_reminder(
     }
     validate_rrule(rrule.as_deref())?;
     let conn = state.db.lock();
-    let id = Uuid::new_v4().to_string();
     let now = now_iso();
-    // UPSERT keyed on the UNIQUE note_id — replacing an existing
-    // reminder rather than appending. Also resets fired/dismissed/
-    // snooze so re-setting effectively re-arms it.
+    // UPSERT keyed on note_id (now the PK after v8 schema cleanup) —
+    // replacing an existing reminder rather than appending. Resets
+    // fired/dismissed/snooze so re-setting effectively re-arms it.
     conn.execute(
-        "INSERT INTO reminders (id, note_id, fire_at, rrule, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5)
+        "INSERT INTO reminders (note_id, fire_at, rrule, created_at)
+         VALUES (?1, ?2, ?3, ?4)
          ON CONFLICT(note_id) DO UPDATE SET
             fire_at = excluded.fire_at,
             rrule = excluded.rrule,
             fired_at = NULL,
             dismissed_at = NULL,
             snooze_until = NULL",
-        params![id, note_id, fire_at, rrule, now],
+        params![note_id, fire_at, rrule, now],
     )
     .map_err(err)?;
     let r = conn
         .query_row(
-            "SELECT id, note_id, fire_at, rrule, snooze_until, fired_at, dismissed_at, created_at
+            "SELECT note_id, fire_at, rrule, snooze_until, fired_at, dismissed_at, created_at
              FROM reminders WHERE note_id = ?1",
             params![note_id],
             reminder_from_row,
@@ -1440,7 +1440,7 @@ pub fn snooze_reminder(
     }
     let r = conn
         .query_row(
-            "SELECT id, note_id, fire_at, rrule, snooze_until, fired_at, dismissed_at, created_at
+            "SELECT note_id, fire_at, rrule, snooze_until, fired_at, dismissed_at, created_at
              FROM reminders WHERE note_id = ?1",
             params![note_id],
             reminder_from_row,
@@ -1468,7 +1468,7 @@ pub fn list_reminders(state: State<'_, AppState>) -> Result<Vec<Reminder>, Strin
     let conn = state.db.lock();
     let mut stmt = conn
         .prepare(
-            "SELECT id, note_id, fire_at, rrule, snooze_until, fired_at, dismissed_at, created_at
+            "SELECT note_id, fire_at, rrule, snooze_until, fired_at, dismissed_at, created_at
              FROM reminders",
         )
         .map_err(err)?;
@@ -1492,8 +1492,8 @@ pub fn export_reminders_ics(state: State<'_, AppState>, dest: String) -> Result<
     let conn = state.db.lock();
     let mut stmt = conn
         .prepare(
-            "SELECT r.id, r.note_id, r.fire_at, r.rrule, r.snooze_until, \
-                    r.fired_at, r.dismissed_at, r.created_at, n.title, n.vault \
+            "SELECT r.note_id, r.fire_at, r.rrule, r.snooze_until, \
+                    r.created_at, n.title, n.vault \
              FROM reminders r \
              JOIN notes n ON n.id = r.note_id \
              WHERE r.fired_at IS NULL AND r.dismissed_at IS NULL \
@@ -1508,14 +1508,13 @@ pub fn export_reminders_ics(state: State<'_, AppState>, dest: String) -> Result<
     ics.push_str("PRODID:-//Keepr//NF-V0.5-G//EN\r\n");
     ics.push_str("CALSCALE:GREGORIAN\r\n");
     while let Some(row) = rows.next().map_err(err)? {
-        let id: String = row.get(0).map_err(err)?;
-        let note_id: String = row.get(1).map_err(err)?;
-        let fire_at: String = row.get(2).map_err(err)?;
-        let rrule: Option<String> = row.get(3).map_err(err)?;
-        let snooze_until: Option<String> = row.get(4).map_err(err)?;
-        let created_at: String = row.get(7).map_err(err)?;
-        let title: String = row.get(8).map_err(err)?;
-        let vault: String = row.get(9).map_err(err)?;
+        let note_id: String = row.get(0).map_err(err)?;
+        let fire_at: String = row.get(1).map_err(err)?;
+        let rrule: Option<String> = row.get(2).map_err(err)?;
+        let snooze_until: Option<String> = row.get(3).map_err(err)?;
+        let created_at: String = row.get(4).map_err(err)?;
+        let title: String = row.get(5).map_err(err)?;
+        let vault: String = row.get(6).map_err(err)?;
         let effective = snooze_until.unwrap_or(fire_at);
         let summary = if vault == "vault" {
             "Keepr — locked vault note".to_string()
@@ -1527,7 +1526,7 @@ pub fn export_reminders_ics(state: State<'_, AppState>, dest: String) -> Result<
         let dtstart = format_ics_utc(&effective)?;
         let dtstamp = format_ics_utc(&created_at)?;
         ics.push_str("BEGIN:VEVENT\r\n");
-        ics.push_str(&format!("UID:keepr-{id}-{note_id}@keepr.local\r\n"));
+        ics.push_str(&format!("UID:keepr-{note_id}@keepr.local\r\n"));
         ics.push_str(&format!("DTSTAMP:{dtstamp}\r\n"));
         ics.push_str(&format!("DTSTART:{dtstart}\r\n"));
         ics.push_str(&format!("SUMMARY:{}\r\n", escape_ics(&summary)));
@@ -1579,7 +1578,7 @@ pub fn peek_due_reminders(
     let conn = state.db.lock();
     let mut stmt = conn
         .prepare(
-            "SELECT r.id, r.note_id, r.fire_at, r.rrule, r.snooze_until,
+            "SELECT r.note_id, r.fire_at, r.rrule, r.snooze_until,
                     r.fired_at, r.dismissed_at, r.created_at, n.title, n.body
              FROM reminders r
              JOIN notes n ON n.id = r.note_id
@@ -1592,17 +1591,16 @@ pub fn peek_due_reminders(
     let rows = stmt
         .query_map(params![now_rfc3339], |row| {
             let r = Reminder {
-                id: row.get(0)?,
-                note_id: row.get(1)?,
-                fire_at: row.get(2)?,
-                rrule: row.get(3)?,
-                snooze_until: row.get(4)?,
-                fired_at: row.get(5)?,
-                dismissed_at: row.get(6)?,
-                created_at: row.get(7)?,
+                note_id: row.get(0)?,
+                fire_at: row.get(1)?,
+                rrule: row.get(2)?,
+                snooze_until: row.get(3)?,
+                fired_at: row.get(4)?,
+                dismissed_at: row.get(5)?,
+                created_at: row.get(6)?,
             };
-            let title: String = row.get(8)?;
-            let body: String = row.get(9)?;
+            let title: String = row.get(7)?;
+            let body: String = row.get(8)?;
             let preview = if !title.is_empty() {
                 title
             } else if !body.is_empty() {
@@ -1628,7 +1626,7 @@ pub fn peek_due_reminders(
 /// so the recurring reminder re-arms automatically for the next cycle.
 pub fn mark_reminder_fired(
     state: &AppState,
-    reminder_id: &str,
+    note_id: &str,
     fired_at_rfc3339: &str,
 ) -> Result<(), String> {
     let conn = state.db.lock();
@@ -1636,8 +1634,8 @@ pub fn mark_reminder_fired(
     // just mark fired.
     let row: Option<(String, Option<String>)> = conn
         .query_row(
-            "SELECT fire_at, rrule FROM reminders WHERE id = ?1",
-            params![reminder_id],
+            "SELECT fire_at, rrule FROM reminders WHERE note_id = ?1",
+            params![note_id],
             |r| {
                 let fa: String = r.get(0)?;
                 let rr: Option<String> = r.get(1)?;
@@ -1651,8 +1649,8 @@ pub fn mark_reminder_fired(
             conn.execute(
                 "UPDATE reminders
                  SET fire_at = ?1, fired_at = NULL, snooze_until = NULL
-                 WHERE id = ?2",
-                params![next, reminder_id],
+                 WHERE note_id = ?2",
+                params![next, note_id],
             )
             .map_err(err)?;
             return Ok(());
@@ -1660,23 +1658,25 @@ pub fn mark_reminder_fired(
     }
     // Single-shot: just mark fired.
     conn.execute(
-        "UPDATE reminders SET fired_at = ?1 WHERE id = ?2",
-        params![fired_at_rfc3339, reminder_id],
+        "UPDATE reminders SET fired_at = ?1 WHERE note_id = ?2",
+        params![fired_at_rfc3339, note_id],
     )
     .map_err(err)?;
     Ok(())
 }
 
 fn reminder_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Reminder> {
+    // Column order matches every "SELECT note_id, fire_at, rrule,
+    // snooze_until, fired_at, dismissed_at, created_at FROM reminders"
+    // in this module post-v8 schema cleanup (EI-V0.5-14).
     Ok(Reminder {
-        id: row.get(0)?,
-        note_id: row.get(1)?,
-        fire_at: row.get(2)?,
-        rrule: row.get(3)?,
-        snooze_until: row.get(4)?,
-        fired_at: row.get(5)?,
-        dismissed_at: row.get(6)?,
-        created_at: row.get(7)?,
+        note_id: row.get(0)?,
+        fire_at: row.get(1)?,
+        rrule: row.get(2)?,
+        snooze_until: row.get(3)?,
+        fired_at: row.get(4)?,
+        dismissed_at: row.get(5)?,
+        created_at: row.get(6)?,
     })
 }
 
@@ -2156,6 +2156,19 @@ pub fn empty_trash(state: State<'_, AppState>) -> Result<(), String> {
 #[tauri::command]
 pub fn get_data_dir(state: State<'_, AppState>) -> Result<String, String> {
     Ok(state.data_dir.to_string_lossy().to_string())
+}
+
+/// NF-V0.5-J — return the OS-conventional log directory Tauri's logger
+/// is writing into. The renderer surfaces this in Settings so a user
+/// reporting a bug can attach the file. Uses the same path resolution
+/// `tauri-plugin-log`'s `LogDir` target uses, via `app_log_dir()`.
+#[tauri::command]
+pub fn get_log_dir(app: tauri::AppHandle) -> Result<String, String> {
+    let dir = app
+        .path()
+        .app_log_dir()
+        .map_err(|e| format!("could not resolve log dir: {e}"))?;
+    Ok(dir.to_string_lossy().to_string())
 }
 
 // --- App Lock (NF-V0.5-C) ---------------------------------------------------
@@ -3298,6 +3311,7 @@ mod tests {
             importing: Arc::new(AtomicBool::new(false)),
             data_dir,
             vault_dek: Arc::new(Mutex::new(None)),
+            shutdown: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -3321,21 +3335,21 @@ mod tests {
         let now = "2026-05-26T12:00:00Z";
         let conn = state.db.lock();
         conn.execute(
-            "INSERT INTO reminders (id, note_id, fire_at, created_at) VALUES ('r1', 'n1', '2026-05-26T11:00:00Z', ?1)",
+            "INSERT INTO reminders (note_id, fire_at, created_at) VALUES ('n1', '2026-05-26T11:00:00Z', ?1)",
             params![now],
         ).unwrap();
         conn.execute(
-            "INSERT INTO reminders (id, note_id, fire_at, created_at) VALUES ('r2', 'n2', '2026-05-26T13:00:00Z', ?1)",
+            "INSERT INTO reminders (note_id, fire_at, created_at) VALUES ('n2', '2026-05-26T13:00:00Z', ?1)",
             params![now],
         ).unwrap();
         conn.execute(
-            "INSERT INTO reminders (id, note_id, fire_at, fired_at, created_at) VALUES ('r3', 'n3', '2026-05-26T11:00:00Z', ?1, ?1)",
+            "INSERT INTO reminders (note_id, fire_at, fired_at, created_at) VALUES ('n3', '2026-05-26T11:00:00Z', ?1, ?1)",
             params![now],
         ).unwrap();
         drop(conn);
         let due = peek_due_reminders(&state, now).unwrap();
         assert_eq!(due.len(), 1);
-        assert_eq!(due[0].0.id, "r1");
+        assert_eq!(due[0].0.note_id, "n1");
         assert_eq!(due[0].1, "due note");
     }
 
@@ -3350,7 +3364,7 @@ mod tests {
         )
         .unwrap();
         conn.execute(
-            "INSERT INTO reminders (id, note_id, fire_at, created_at) VALUES ('r1', 'n_trash', '2026-05-26T11:00:00Z', '2026-05-26T11:00:00Z')",
+            "INSERT INTO reminders (note_id, fire_at, created_at) VALUES ('n_trash', '2026-05-26T11:00:00Z', '2026-05-26T11:00:00Z')",
             [],
         )
         .unwrap();
@@ -3365,16 +3379,16 @@ mod tests {
         insert_test_note(&state, "n1", "x");
         let conn = state.db.lock();
         conn.execute(
-            "INSERT INTO reminders (id, note_id, fire_at, created_at) VALUES ('r1', 'n1', '2026-05-26T11:00:00Z', '2026-05-26T11:00:00Z')",
+            "INSERT INTO reminders (note_id, fire_at, created_at) VALUES ('n1', '2026-05-26T11:00:00Z', '2026-05-26T11:00:00Z')",
             [],
         )
         .unwrap();
         drop(conn);
-        mark_reminder_fired(&state, "r1", "2026-05-26T12:00:00Z").unwrap();
+        mark_reminder_fired(&state, "n1", "2026-05-26T12:00:00Z").unwrap();
         let conn = state.db.lock();
         let fired: Option<String> = conn
             .query_row(
-                "SELECT fired_at FROM reminders WHERE id = 'r1'",
+                "SELECT fired_at FROM reminders WHERE note_id = 'n1'",
                 [],
                 |r| r.get(0),
             )
@@ -3391,7 +3405,7 @@ mod tests {
         insert_test_note(&state, "n1", "x");
         let conn = state.db.lock();
         conn.execute(
-            "INSERT INTO reminders (id, note_id, fire_at, created_at) VALUES ('r1', 'n1', '2026-05-26T11:00:00Z', '2026-05-26T11:00:00Z')",
+            "INSERT INTO reminders (note_id, fire_at, created_at) VALUES ('n1', '2026-05-26T11:00:00Z', '2026-05-26T11:00:00Z')",
             [],
         )
         .unwrap();
@@ -3402,7 +3416,7 @@ mod tests {
         let conn = state.db.lock();
         let fired: Option<String> = conn
             .query_row(
-                "SELECT fired_at FROM reminders WHERE id = 'r1'",
+                "SELECT fired_at FROM reminders WHERE note_id = 'n1'",
                 [],
                 |r| r.get(0),
             )
@@ -3479,16 +3493,16 @@ mod tests {
         insert_test_note(&state, "n1", "daily standup");
         let conn = state.db.lock();
         conn.execute(
-            "INSERT INTO reminders (id, note_id, fire_at, rrule, created_at) VALUES ('r1', 'n1', '2026-05-26T08:00:00+00:00', 'FREQ=DAILY', '2026-05-26T08:00:00+00:00')",
+            "INSERT INTO reminders (note_id, fire_at, rrule, created_at) VALUES ('n1', '2026-05-26T08:00:00+00:00', 'FREQ=DAILY', '2026-05-26T08:00:00+00:00')",
             [],
         )
         .unwrap();
         drop(conn);
-        mark_reminder_fired(&state, "r1", "2026-05-26T08:05:00+00:00").unwrap();
+        mark_reminder_fired(&state, "n1", "2026-05-26T08:05:00+00:00").unwrap();
         let conn = state.db.lock();
         let (fire_at, fired_at): (String, Option<String>) = conn
             .query_row(
-                "SELECT fire_at, fired_at FROM reminders WHERE id = 'r1'",
+                "SELECT fire_at, fired_at FROM reminders WHERE note_id = 'n1'",
                 [],
                 |r| Ok((r.get(0)?, r.get(1)?)),
             )
@@ -3503,16 +3517,16 @@ mod tests {
         insert_test_note(&state, "n1", "single");
         let conn = state.db.lock();
         conn.execute(
-            "INSERT INTO reminders (id, note_id, fire_at, created_at) VALUES ('r1', 'n1', '2026-05-26T08:00:00+00:00', '2026-05-26T08:00:00+00:00')",
+            "INSERT INTO reminders (note_id, fire_at, created_at) VALUES ('n1', '2026-05-26T08:00:00+00:00', '2026-05-26T08:00:00+00:00')",
             [],
         )
         .unwrap();
         drop(conn);
-        mark_reminder_fired(&state, "r1", "2026-05-26T08:05:00+00:00").unwrap();
+        mark_reminder_fired(&state, "n1", "2026-05-26T08:05:00+00:00").unwrap();
         let conn = state.db.lock();
         let fired_at: Option<String> = conn
             .query_row(
-                "SELECT fired_at FROM reminders WHERE id = 'r1'",
+                "SELECT fired_at FROM reminders WHERE note_id = 'n1'",
                 [],
                 |r| r.get(0),
             )

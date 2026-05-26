@@ -84,7 +84,8 @@ export interface Label {
 }
 
 export interface Reminder {
-  id: string;
+  /** The owning note's id. Reminders are keyed on `noteId` (one per note);
+   *  schema v8 dropped the separate `reminders.id` PK that v0.4 had. */
   noteId: string;
   fireAt: string;
   rrule: string | null;
