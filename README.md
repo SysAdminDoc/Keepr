@@ -27,6 +27,10 @@ Keepr uses Tauri's per-app data directory:
 
 The schema is versioned (`PRAGMA user_version`), so a newer Keepr can upgrade an older database in place. A backup is just a regular ZIP — `keepr.db` at the root plus any future attachments.
 
+### Portable mode
+
+Drop an empty file named `portable.flag` next to `keepr.exe`. On startup Keepr detects the sentinel, writes `keepr.db` (and any attachments) **in the same folder as the EXE**, and never touches `%APPDATA%`. Copy the folder to a USB stick, run from any Windows box, your notes travel with you. Remove the file to go back to per-user storage.
+
 ## Roadmap & changelog
 
 - [ROADMAP.md](ROADMAP.md) — the live task list

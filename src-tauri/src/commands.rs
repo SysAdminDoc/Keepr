@@ -6,7 +6,7 @@ use std::fs::File;
 use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::sync::Arc;
-use tauri::{Manager, State};
+use tauri::State;
 use uuid::Uuid;
 use zip::write::SimpleFileOptions;
 
@@ -69,6 +69,40 @@ fn err<E: std::fmt::Display>(e: E) -> String {
     e.to_string()
 }
 
+// EI-33 — server-side input caps. The renderer is trusted but we still defend
+// the SQLite store from accidentally-huge payloads or malformed kinds.
+const MAX_TITLE_CHARS: usize = 1024;
+const MAX_BODY_BYTES: usize = 64 * 1024; // 64 KiB
+const MAX_CHECKLIST_ITEMS: usize = 1000;
+const MAX_CHECKLIST_ITEM_CHARS: usize = 2048;
+
+fn validate_note_input(input: &NoteInput) -> Result<(), String> {
+    if input.kind != "text" && input.kind != "list" {
+        return Err(format!("unknown note kind '{}'", input.kind));
+    }
+    if input.title.chars().count() > MAX_TITLE_CHARS {
+        return Err(format!("title exceeds {MAX_TITLE_CHARS} characters"));
+    }
+    if input.body.len() > MAX_BODY_BYTES {
+        return Err(format!("body exceeds {MAX_BODY_BYTES} bytes"));
+    }
+    if input.checklist.len() > MAX_CHECKLIST_ITEMS {
+        return Err(format!(
+            "checklist has {} items (max {})",
+            input.checklist.len(),
+            MAX_CHECKLIST_ITEMS
+        ));
+    }
+    for (i, item) in input.checklist.iter().enumerate() {
+        if item.text.chars().count() > MAX_CHECKLIST_ITEM_CHARS {
+            return Err(format!(
+                "checklist item {i} exceeds {MAX_CHECKLIST_ITEM_CHARS} characters"
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn load_note(conn: &Connection, id: &str) -> Result<Option<Note>, rusqlite::Error> {
     let mut stmt = conn.prepare(
         "SELECT id, kind, title, body, color, pinned, archived, trashed, position,
@@ -111,15 +145,13 @@ fn load_note(conn: &Connection, id: &str) -> Result<Option<Note>, rusqlite::Erro
                 position: row.get(3)?,
             })
         })?
-        .filter_map(|r| r.ok())
-        .collect();
+        .collect::<Result<Vec<_>, _>>()?;
     note.checklist = items;
     let mut lstmt =
         conn.prepare("SELECT label_id FROM note_labels WHERE note_id = ?1")?;
     let labels: Vec<String> = lstmt
         .query_map(params![id], |row| row.get::<_, String>(0))?
-        .filter_map(|r| r.ok())
-        .collect();
+        .collect::<Result<Vec<_>, _>>()?;
     note.labels = labels;
     Ok(Some(note))
 }
@@ -212,6 +244,10 @@ pub fn get_note(state: State<'_, AppState>, id: String) -> Result<Option<Note>, 
 
 #[tauri::command]
 pub fn create_note(state: State<'_, AppState>, input: NoteInput) -> Result<Note, String> {
+    if state.importing.load(std::sync::atomic::Ordering::SeqCst) {
+        return Err("a restore is currently in progress".into());
+    }
+    validate_note_input(&input)?;
     let mut conn = state.db.lock();
     let tx = conn.transaction().map_err(err)?;
     let id = Uuid::new_v4().to_string();
@@ -230,6 +266,7 @@ pub fn create_note(state: State<'_, AppState>, input: NoteInput) -> Result<Note,
         ],
     )
     .map_err(err)?;
+    let mut checklist_out: Vec<ChecklistItem> = Vec::with_capacity(input.checklist.len());
     for item in &input.checklist {
         let item_id = item
             .id
@@ -241,6 +278,12 @@ pub fn create_note(state: State<'_, AppState>, input: NoteInput) -> Result<Note,
             params![item_id, id, item.text, item.checked as i64, item.position],
         )
         .map_err(err)?;
+        checklist_out.push(ChecklistItem {
+            id: item_id,
+            text: item.text.clone(),
+            checked: item.checked,
+            position: item.position,
+        });
     }
     for label_id in &input.labels {
         tx.execute(
@@ -250,9 +293,25 @@ pub fn create_note(state: State<'_, AppState>, input: NoteInput) -> Result<Note,
         .map_err(err)?;
     }
     tx.commit().map_err(err)?;
-    load_note(&conn, &id)
-        .map_err(err)?
-        .ok_or_else(|| "note vanished after insert".into())
+    // EI-26 — release the mutex immediately after commit; constructing the
+    // returned Note from inputs avoids re-reading the database under lock.
+    drop(conn);
+    Ok(Note {
+        id,
+        kind: input.kind,
+        title: input.title,
+        body: input.body,
+        color: input.color,
+        pinned: input.pinned,
+        archived: false,
+        trashed: false,
+        position: 0,
+        created_at: now.clone(),
+        updated_at: now,
+        trashed_at: None,
+        checklist: checklist_out,
+        labels: input.labels,
+    })
 }
 
 #[tauri::command]
@@ -261,9 +320,22 @@ pub fn update_note(
     id: String,
     input: NoteInput,
 ) -> Result<Note, String> {
+    if state.importing.load(std::sync::atomic::Ordering::SeqCst) {
+        return Err("a restore is currently in progress".into());
+    }
+    validate_note_input(&input)?;
     let mut conn = state.db.lock();
     let tx = conn.transaction().map_err(err)?;
     let now = now_iso();
+    // Read created_at + archived/trashed flags so the returned Note
+    // accurately reflects what's on disk (we don't change those fields here).
+    let (created_at, archived, trashed, trashed_at, position): (String, i64, i64, Option<String>, i64) =
+        tx.query_row(
+            "SELECT created_at, archived, trashed, trashed_at, position FROM notes WHERE id = ?1",
+            params![id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+        )
+        .map_err(|_| format!("note {id} not found"))?;
     tx.execute(
         "UPDATE notes
            SET kind = ?1, title = ?2, body = ?3, color = ?4, pinned = ?5, updated_at = ?6
@@ -281,6 +353,7 @@ pub fn update_note(
     .map_err(err)?;
     tx.execute("DELETE FROM checklist_items WHERE note_id = ?1", params![id])
         .map_err(err)?;
+    let mut checklist_out: Vec<ChecklistItem> = Vec::with_capacity(input.checklist.len());
     for item in &input.checklist {
         let item_id = item
             .id
@@ -292,6 +365,12 @@ pub fn update_note(
             params![item_id, id, item.text, item.checked as i64, item.position],
         )
         .map_err(err)?;
+        checklist_out.push(ChecklistItem {
+            id: item_id,
+            text: item.text.clone(),
+            checked: item.checked,
+            position: item.position,
+        });
     }
     tx.execute("DELETE FROM note_labels WHERE note_id = ?1", params![id])
         .map_err(err)?;
@@ -303,9 +382,23 @@ pub fn update_note(
         .map_err(err)?;
     }
     tx.commit().map_err(err)?;
-    load_note(&conn, &id)
-        .map_err(err)?
-        .ok_or_else(|| "note vanished after update".into())
+    drop(conn);
+    Ok(Note {
+        id,
+        kind: input.kind,
+        title: input.title,
+        body: input.body,
+        color: input.color,
+        pinned: input.pinned,
+        archived: archived != 0,
+        trashed: trashed != 0,
+        position,
+        created_at,
+        updated_at: now,
+        trashed_at,
+        checklist: checklist_out,
+        labels: input.labels,
+    })
 }
 
 #[tauri::command]
@@ -480,11 +573,8 @@ pub fn empty_trash(state: State<'_, AppState>) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn get_data_dir(app: tauri::AppHandle) -> Result<String, String> {
-    app.path()
-        .app_data_dir()
-        .map(|p| p.to_string_lossy().to_string())
-        .map_err(err)
+pub fn get_data_dir(state: State<'_, AppState>) -> Result<String, String> {
+    Ok(state.data_dir.to_string_lossy().to_string())
 }
 
 // --- Backup / restore -------------------------------------------------------
@@ -544,14 +634,13 @@ fn validate_zip_archive<R: std::io::Read + std::io::Seek>(
 
 #[tauri::command]
 pub fn export_zip(
-    app: tauri::AppHandle,
     state: State<'_, AppState>,
     dest: String,
 ) -> Result<String, String> {
     if state.importing.load(std::sync::atomic::Ordering::SeqCst) {
         return Err("a restore is currently in progress".into());
     }
-    let data_dir: PathBuf = app.path().app_data_dir().map_err(err)?;
+    let data_dir: PathBuf = state.data_dir.clone();
     let dest_path = PathBuf::from(&dest);
     if let Some(parent) = dest_path.parent() {
         std::fs::create_dir_all(parent).map_err(err)?;
@@ -609,7 +698,6 @@ pub fn export_zip(
 
 #[tauri::command]
 pub fn import_zip(
-    app: tauri::AppHandle,
     state: State<'_, AppState>,
     src: String,
 ) -> Result<(), String> {
@@ -626,8 +714,7 @@ pub fn import_zip(
         flag: state.importing.clone(),
     };
 
-    let result = do_import_zip(&app, &state, &src);
-    result
+    do_import_zip(&state, &src)
 }
 
 struct ImportGate {
@@ -639,12 +726,8 @@ impl Drop for ImportGate {
     }
 }
 
-fn do_import_zip(
-    app: &tauri::AppHandle,
-    state: &State<'_, AppState>,
-    src: &str,
-) -> Result<(), String> {
-    let data_dir: PathBuf = app.path().app_data_dir().map_err(err)?;
+fn do_import_zip(state: &State<'_, AppState>, src: &str) -> Result<(), String> {
+    let data_dir: PathBuf = state.data_dir.clone();
     std::fs::create_dir_all(&data_dir).map_err(err)?;
     let staging = data_dir.join("__restore_tmp");
     if staging.exists() {
