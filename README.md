@@ -29,7 +29,8 @@ Google Keep is great until the internet goes out. Keepr gives you the same look,
 Keepr uses Tauri's per-app data directory:
 
 - **Windows:** `%APPDATA%\com.sysadmindoc.keepr\keepr.db` (SQLite, WAL mode)
-- **macOS / Linux:** the equivalent OS-conventional path (`~/Library/Application Support/com.sysadmindoc.keepr/` on macOS; `$XDG_DATA_HOME/com.sysadmindoc.keepr/` on Linux). macOS and Linux builds are not yet shipped.
+- **macOS:** `~/Library/Application Support/com.sysadmindoc.keepr/keepr.db` (best-effort builds since v0.10).
+- **Linux:** `$XDG_DATA_HOME/com.sysadmindoc.keepr/keepr.db` (best-effort builds since v0.10).
 
 The schema is versioned (`PRAGMA user_version`), so a newer Keepr can upgrade an older database in place. A backup is just a regular ZIP — `keepr.db` at the root plus any future attachments.
 
@@ -47,11 +48,27 @@ Drop an empty file named `portable.flag` next to `keepr.exe`. On startup Keepr d
 
 Pick one of the published builds from [Releases](https://github.com/SysAdminDoc/Keepr/releases):
 
+**Windows (supported)**
+
 - **`Keepr_<version>_x64-setup.exe`** — NSIS installer (default).
 - **`Keepr_<version>_x64_en-US.msi`** — Windows Installer alternative.
 - **`Keepr-portable.zip`** — extract anywhere, run `keepr.exe`. The bundled `portable.flag` makes the app store `keepr.db` next to the EXE so it travels on a USB stick.
 
 Keepr is unsigned today (see [SECURITY.md](SECURITY.md) for rationale). First launch shows Windows SmartScreen — click "More info" → "Run anyway".
+
+**macOS (best-effort, v0.10+)**
+
+- **`Keepr_<version>_aarch64.dmg`** — Apple silicon (M1/M2/M3).
+- **`Keepr_<version>_x64.dmg`** — Intel.
+
+Unsigned and not notarized. macOS will refuse to launch on first try — right-click the app → Open → confirm, or run `xattr -d com.apple.quarantine /Applications/Keepr.app` to clear the quarantine bit.
+
+**Linux (best-effort, v0.10+)**
+
+- **`keepr_<version>_amd64.deb`** — Debian/Ubuntu.
+- **`Keepr_<version>_amd64.AppImage`** — distro-agnostic; `chmod +x` then run.
+
+Built against Ubuntu 22.04 / glibc 2.35. Older distros may need to self-build from source.
 
 ## Build from source
 

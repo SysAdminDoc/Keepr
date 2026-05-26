@@ -1,10 +1,17 @@
 name: Release
 
-# NF-V0.5-F — bundled-release pipeline. Fires on any tag matching
-# v*.*.* and produces an NSIS installer + MSI + raw portable .exe
-# uploaded to a fresh GitHub Release. Unsigned per the v0.5 open-question
-# resolution; users will see a SmartScreen warning the first time —
-# documented in README + CHANGELOG.
+# NF-V0.5-F + NF-V0.5-K — bundled-release pipeline. Fires on any tag
+# matching v*.*.* and produces:
+#   - Windows: NSIS installer + MSI + raw portable .zip (the only
+#     officially-supported channel).
+#   - macOS: .app bundle inside a .dmg, two arches (x86_64 + aarch64).
+#   - Linux: .deb + .AppImage.
+#
+# Cross-platform builds are best-effort — Keepr is developed and
+# QA'd on Windows; Mac/Linux artifacts are produced so the codebase
+# stays buildable on those platforms (and so users can self-build),
+# not as a support promise. See README for the "supported platform"
+# wording.
 #
 # Trigger manually with `gh workflow run release.yml` for a dry-run on
 # a non-tag commit (the resulting Release becomes a draft).
@@ -19,12 +26,32 @@ permissions:
   contents: write
 
 jobs:
-  build-windows:
-    name: Build Windows (unsigned)
-    runs-on: windows-latest
+  build:
+    name: Build (${{ matrix.label }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            label: Windows
+            rust-target: ""
+            tauri-args: ""
+          - os: macos-14
+            label: macOS (Apple silicon)
+            rust-target: aarch64-apple-darwin
+            tauri-args: "--target aarch64-apple-darwin"
+          - os: macos-13
+            label: macOS (Intel)
+            rust-target: x86_64-apple-darwin
+            tauri-args: "--target x86_64-apple-darwin"
+          - os: ubuntu-22.04
+            label: Linux (x86_64)
+            rust-target: ""
+            tauri-args: ""
     defaults:
       run:
-        shell: pwsh
+        shell: bash
     steps:
       - uses: actions/checkout@v4
 
@@ -34,44 +61,64 @@ jobs:
           cache: npm
 
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust-target }}
 
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+          key: ${{ matrix.os }}-${{ matrix.rust-target }}
+
+      # NF-V0.5-K — Linux runners need the WebKitGTK + ATK + libsoup
+      # stack tauri-action assumes is preinstalled on macOS/Windows.
+      # The packages also pull in librsvg2 (for the tray icon).
+      - name: Install Linux build dependencies
+        if: matrix.os == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libsoup-3.0-dev \
+            patchelf
 
       - name: Install npm dependencies
         run: npm ci
 
-      - name: Build with tauri-action (NSIS + MSI bundles)
+      - name: Build with tauri-action
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          # Reuse the pushed tag; tauri-action will publish a draft
-          # Release containing the bundles.
           tagName: ${{ github.ref_name || 'v0.0.0-dev' }}
           releaseName: "Keepr ${{ github.ref_name || 'dev' }}"
           releaseBody: |
-            Keepr ${{ github.ref_name || 'dev' }} — unsigned Windows build.
+            Keepr ${{ github.ref_name || 'dev' }} — unsigned multi-platform build.
 
-            - `*.msi` — Windows Installer (recommended).
-            - `*-setup.exe` — NSIS installer.
-            - `Keepr-portable.zip` — extract anywhere, drop `portable.flag` next to `keepr.exe` for USB-stick mode.
+            **Windows (supported)** — `*.msi` (recommended), `*-setup.exe` (NSIS), `Keepr-portable.zip` (extract anywhere, drop `portable.flag` next to `keepr.exe` for USB-stick mode).
 
-            First-run SmartScreen warning is expected — click "More info → Run anyway" to install. See [SECURITY.md](https://github.com/SysAdminDoc/Keepr/blob/main/SECURITY.md) for why we ship unsigned today.
+            **macOS (best-effort)** — `*.dmg` per arch. Unsigned + not notarized; macOS will refuse to open it until you right-click → Open → confirm, or run `xattr -d com.apple.quarantine /Applications/Keepr.app`.
+
+            **Linux (best-effort)** — `*.deb` (Debian/Ubuntu) and `*.AppImage` (anywhere). Built against Ubuntu 22.04 / glibc 2.35.
+
+            First-run SmartScreen warning is expected on Windows — click "More info → Run anyway" to install. See [SECURITY.md](https://github.com/SysAdminDoc/Keepr/blob/main/SECURITY.md) for why we ship unsigned today.
 
             Full release notes: [CHANGELOG.md](https://github.com/SysAdminDoc/Keepr/blob/main/CHANGELOG.md).
           releaseDraft: true
           prerelease: false
-          # Bundle config in src-tauri/tauri.conf.json already lists
-          # ["nsis", "msi"]; tauri-action picks them up.
-          args: ""
+          # Bundle config in src-tauri/tauri.conf.json picks the right
+          # targets per platform (NSIS+MSI on Windows, DMG on macOS,
+          # deb+AppImage on Linux). --target adds the arch suffix on
+          # the multi-arch macOS matrix entries.
+          args: ${{ matrix.tauri-args }}
 
-      # NF-V0.5-F — also publish a raw portable .exe. tauri-action only
-      # uploads the bundle targets, so we attach the unbundled binary
-      # ourselves as `Keepr-portable.zip` so users have the no-install
-      # path the README promises.
-      - name: Package portable zip
+      # Windows-only — package the raw exe as a portable zip alongside
+      # the bundles, since tauri-action only uploads the bundle targets.
+      - name: Package Windows portable zip
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
         run: |
           $exe = "src-tauri/target/release/keepr.exe"
           if (-not (Test-Path $exe)) {
@@ -82,10 +129,8 @@ jobs:
           New-Item -ItemType Directory -Force -Path $stage | Out-Null
           Copy-Item $exe $stage
           # An empty `portable.flag` flips data-dir resolution into
-          # next-to-EXE mode on first launch (EI-V0.5-1's helper from
-          # v0.2: lib.rs::resolve_data_dir).
+          # next-to-EXE mode on first launch (lib.rs::resolve_data_dir).
           New-Item -ItemType File -Path "$stage/portable.flag" | Out-Null
-          # README inside the zip explains the gesture.
           @"
           Keepr portable — extract this folder anywhere (USB stick, network share,
           Documents/Apps). Run keepr.exe. The presence of portable.flag tells the
@@ -96,14 +141,15 @@ jobs:
           "@ | Out-File -FilePath "$stage/README.txt" -Encoding utf8
           Compress-Archive -Path "$stage/*" -DestinationPath "Keepr-portable.zip" -Force
 
-      - name: Attach portable zip to release
-        if: github.ref_type == 'tag'
+      - name: Attach Windows portable zip to release
+        if: matrix.os == 'windows-latest' && github.ref_type == 'tag'
+        shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh release upload ${{ github.ref_name }} Keepr-portable.zip --clobber
 
-      - name: Upload portable zip as workflow artifact (dry runs)
-        if: github.ref_type != 'tag'
+      - name: Upload Windows portable zip as workflow artifact (dry runs)
+        if: matrix.os == 'windows-latest' && github.ref_type != 'tag'
         uses: actions/upload-artifact@v4
         with:
           name: Keepr-portable
