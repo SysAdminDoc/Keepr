@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::io::{Read, Write};
 use std::path::PathBuf;
+use std::sync::Arc;
 use tauri::{Manager, State};
 use uuid::Uuid;
 use zip::write::SimpleFileOptions;
@@ -429,38 +430,123 @@ pub fn get_data_dir(app: tauri::AppHandle) -> Result<String, String> {
         .map_err(err)
 }
 
+// --- Backup / restore -------------------------------------------------------
+//
+// EI-01: Validate every zip entry before writing it. Even though zip's
+//   `enclosed_name()` already protects against `..` traversal and absolute
+//   paths, we double-check that the resolved write path stays under the
+//   staging directory after canonicalization. Also cap entry count and
+//   total uncompressed size so a zip-bomb can't fill the disk.
+// EI-02: Run `PRAGMA wal_checkpoint(TRUNCATE)` before zipping so committed
+//   WAL pages land in keepr.db, and fsync the zip file before reporting
+//   success.
+// EI-03: Snapshot the live keepr.db to keepr.db.prev before swap; restore
+//   from .prev on any error after the swap; reject parallel mutating
+//   commands while import is in progress via AppState.importing.
+
+const MAX_ENTRY_COUNT: usize = 10_000;
+const MAX_UNCOMPRESSED_BYTES: u64 = 2 * 1024 * 1024 * 1024; // 2 GiB
+const MAX_PER_FILE_BYTES: u64 = 512 * 1024 * 1024; // 512 MiB
+
+/// Validate a candidate restore archive against EI-01's caps and EI-01's
+/// path-safety rules without writing anything to disk. Pure function so it
+/// can be unit tested.
+fn validate_zip_archive<R: std::io::Read + std::io::Seek>(
+    archive: &mut zip::ZipArchive<R>,
+) -> Result<(), String> {
+    if archive.len() > MAX_ENTRY_COUNT {
+        return Err(format!(
+            "backup has {} entries (max {})",
+            archive.len(),
+            MAX_ENTRY_COUNT
+        ));
+    }
+    let mut total_uncompressed: u64 = 0;
+    for i in 0..archive.len() {
+        let f = archive.by_index(i).map_err(err)?;
+        if f.enclosed_name().is_none() {
+            return Err(format!("backup entry '{}' has an unsafe path", f.name()));
+        }
+        if f.size() > MAX_PER_FILE_BYTES {
+            return Err(format!(
+                "backup entry '{}' exceeds {} bytes",
+                f.name(),
+                MAX_PER_FILE_BYTES
+            ));
+        }
+        total_uncompressed = total_uncompressed.saturating_add(f.size());
+        if total_uncompressed > MAX_UNCOMPRESSED_BYTES {
+            return Err(format!(
+                "backup uncompressed size exceeds {} bytes",
+                MAX_UNCOMPRESSED_BYTES
+            ));
+        }
+    }
+    Ok(())
+}
+
 #[tauri::command]
-pub fn export_zip(app: tauri::AppHandle, dest: String) -> Result<String, String> {
+pub fn export_zip(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    dest: String,
+) -> Result<String, String> {
+    if state.importing.load(std::sync::atomic::Ordering::SeqCst) {
+        return Err("a restore is currently in progress".into());
+    }
     let data_dir: PathBuf = app.path().app_data_dir().map_err(err)?;
     let dest_path = PathBuf::from(&dest);
     if let Some(parent) = dest_path.parent() {
         std::fs::create_dir_all(parent).map_err(err)?;
     }
+
+    // EI-02: flush WAL into the main DB before zipping (otherwise recent
+    // committed writes are silently absent from the backup).
+    {
+        let conn = state.db.lock();
+        conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")
+            .map_err(err)?;
+    }
+
     let file = File::create(&dest_path).map_err(err)?;
     let mut zip = zip::ZipWriter::new(file);
     let opts: SimpleFileOptions =
         SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
 
-    for entry in walkdir::WalkDir::new(&data_dir).into_iter().filter_map(|e| e.ok()) {
+    for entry in walkdir::WalkDir::new(&data_dir)
+        .into_iter()
+        .filter_map(|e| e.ok())
+    {
         let path = entry.path();
-        if path.is_file() {
-            let name = path
-                .strip_prefix(&data_dir)
-                .map_err(err)?
-                .to_string_lossy()
-                .replace('\\', "/");
-            // skip lock/journal/wal sidecars
-            if name.ends_with("-journal") || name.ends_with("-wal") || name.ends_with("-shm") {
-                continue;
-            }
-            zip.start_file(name, opts).map_err(err)?;
-            let mut f = File::open(path).map_err(err)?;
-            let mut buf = Vec::new();
-            f.read_to_end(&mut buf).map_err(err)?;
-            zip.write_all(&buf).map_err(err)?;
+        if !path.is_file() {
+            continue;
         }
+        let name = path
+            .strip_prefix(&data_dir)
+            .map_err(err)?
+            .to_string_lossy()
+            .replace('\\', "/");
+        // Skip SQLite sidecars (covered by the WAL checkpoint above) and our
+        // own backup sentinels.
+        if name.ends_with("-journal")
+            || name.ends_with("-wal")
+            || name.ends_with("-shm")
+            || name.ends_with(".prev")
+            || name.starts_with("__restore_tmp/")
+        {
+            continue;
+        }
+        zip.start_file(name, opts).map_err(err)?;
+        let mut f = File::open(path).map_err(err)?;
+        let mut buf = Vec::new();
+        f.read_to_end(&mut buf).map_err(err)?;
+        zip.write_all(&buf).map_err(err)?;
     }
-    zip.finish().map_err(err)?;
+
+    // EI-02: fsync the zip so a crash within milliseconds of the success
+    // toast doesn't leave a zero-byte or truncated backup on disk.
+    let file = zip.finish().map_err(err)?;
+    file.sync_all().map_err(err)?;
     Ok(dest_path.to_string_lossy().to_string())
 }
 
@@ -470,63 +556,224 @@ pub fn import_zip(
     state: State<'_, AppState>,
     src: String,
 ) -> Result<(), String> {
+    // EI-03 — busy gate. swap() returns the previous value; if it was already
+    // true, another import is in flight and we must refuse rather than race.
+    if state
+        .importing
+        .swap(true, std::sync::atomic::Ordering::SeqCst)
+    {
+        return Err("a restore is already in progress".into());
+    }
+    // Always clear the gate on any exit path.
+    let _gate = ImportGate {
+        flag: state.importing.clone(),
+    };
+
+    let result = do_import_zip(&app, &state, &src);
+    result
+}
+
+struct ImportGate {
+    flag: Arc<std::sync::atomic::AtomicBool>,
+}
+impl Drop for ImportGate {
+    fn drop(&mut self) {
+        self.flag.store(false, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+fn do_import_zip(
+    app: &tauri::AppHandle,
+    state: &State<'_, AppState>,
+    src: &str,
+) -> Result<(), String> {
     let data_dir: PathBuf = app.path().app_data_dir().map_err(err)?;
     std::fs::create_dir_all(&data_dir).map_err(err)?;
-
-    // close + drop the existing connection by replacing it after restore
-    let file = File::open(&src).map_err(err)?;
-    let mut archive = zip::ZipArchive::new(file).map_err(err)?;
     let staging = data_dir.join("__restore_tmp");
     if staging.exists() {
         std::fs::remove_dir_all(&staging).map_err(err)?;
     }
     std::fs::create_dir_all(&staging).map_err(err)?;
+    // Canonical staging dir for the under-prefix check below.
+    let staging_canon = std::fs::canonicalize(&staging).map_err(err)?;
+
+    let file = File::open(src).map_err(err)?;
+    let mut archive = zip::ZipArchive::new(file).map_err(err)?;
+    validate_zip_archive(&mut archive)?;
 
     for i in 0..archive.len() {
         let mut f = archive.by_index(i).map_err(err)?;
-        let outpath = match f.enclosed_name() {
-            Some(p) => staging.join(p),
-            None => continue,
+        // enclosed_name returns None for absolute paths or any path with
+        // `..` traversal — this is the first line of zip-slip defense.
+        let safe = match f.enclosed_name() {
+            Some(p) => p,
+            None => return Err(format!("backup entry '{}' has an unsafe path", f.name())),
         };
+        let outpath = staging.join(&safe);
+
+        // Belt-and-braces: ensure the resolved write path still sits under
+        // the staging directory after the join. We canonicalize the *parent*
+        // (which exists once we create it) rather than the file (which
+        // doesn't yet) to do the prefix check.
+        if let Some(parent) = outpath.parent() {
+            std::fs::create_dir_all(parent).map_err(err)?;
+            let parent_canon = std::fs::canonicalize(parent).map_err(err)?;
+            if !parent_canon.starts_with(&staging_canon) {
+                return Err(format!(
+                    "backup entry '{}' resolves outside staging directory",
+                    f.name()
+                ));
+            }
+        }
+
         if f.is_dir() {
             std::fs::create_dir_all(&outpath).map_err(err)?;
         } else {
-            if let Some(parent) = outpath.parent() {
-                std::fs::create_dir_all(parent).map_err(err)?;
-            }
             let mut out = File::create(&outpath).map_err(err)?;
             std::io::copy(&mut f, &mut out).map_err(err)?;
         }
     }
 
-    // swap: replace keepr.db (and any attachments dir) with restored copies
+    // The archive must contain keepr.db at the root (matches what export_zip
+    // writes). Reject otherwise.
     let restored_db = staging.join("keepr.db");
     if !restored_db.exists() {
-        std::fs::remove_dir_all(&staging).ok();
-        return Err("backup missing keepr.db".into());
+        let _ = std::fs::remove_dir_all(&staging);
+        return Err("backup is missing keepr.db".into());
     }
+
     let target_db = data_dir.join("keepr.db");
+    let prev_db = data_dir.join("keepr.db.prev");
 
-    // drop & reopen connection around the swap
-    {
-        let mut conn_guard = state.db.lock();
-        // close current conn by replacing with a throwaway in-memory one
-        let throwaway = rusqlite::Connection::open_in_memory().map_err(err)?;
-        let _old = std::mem::replace(&mut *conn_guard, throwaway);
-        // _old is dropped here -> file handle released
+    // --- EI-03 safe swap ---
+    let mut conn_guard = state.db.lock();
 
-        // remove WAL/SHM sidecars before overwriting
-        for ext in ["-journal", "-wal", "-shm"] {
-            let side = target_db.with_extension(format!("db{}", ext));
-            let _ = std::fs::remove_file(side);
-        }
-        std::fs::copy(&restored_db, &target_db).map_err(err)?;
+    // Step 1: drop the live connection so we can move the file out from
+    // under it. Use a throwaway in-memory connection only until we either
+    // succeed (replaced with the new DB) or fail (we restore from .prev
+    // before unlocking, so no caller ever observes the throwaway).
+    let throwaway = rusqlite::Connection::open_in_memory().map_err(err)?;
+    let _old = std::mem::replace(&mut *conn_guard, throwaway);
+    drop(_old);
 
-        // reopen the real DB
-        let new_conn = crate::db::open(&target_db).map_err(err)?;
-        *conn_guard = new_conn;
+    // Remove stale WAL/SHM/journal sidecars left over from previous opens.
+    for sidecar in ["keepr.db-journal", "keepr.db-wal", "keepr.db-shm"] {
+        let _ = std::fs::remove_file(data_dir.join(sidecar));
     }
 
-    std::fs::remove_dir_all(&staging).ok();
-    Ok(())
+    // Step 2: snapshot the current DB to .prev so we can restore on failure.
+    let had_prior_db = target_db.exists();
+    if had_prior_db {
+        // remove any stale .prev from a previous failed import
+        let _ = std::fs::remove_file(&prev_db);
+        std::fs::rename(&target_db, &prev_db).map_err(err)?;
+    }
+
+    // Step 3: install the restored DB. Helper so we can unify error
+    // recovery — on any failure between here and the successful open() we
+    // restore from .prev and bail.
+    let install_then_open = || -> Result<rusqlite::Connection, String> {
+        std::fs::copy(&restored_db, &target_db).map_err(err)?;
+        crate::db::open(&target_db).map_err(err)
+    };
+
+    match install_then_open() {
+        Ok(new_conn) => {
+            *conn_guard = new_conn;
+            // Successful — drop the .prev snapshot and the staging dir.
+            let _ = std::fs::remove_file(&prev_db);
+            let _ = std::fs::remove_dir_all(&staging);
+            Ok(())
+        }
+        Err(install_err) => {
+            // Roll back. Best-effort — if even the rollback fails we leave
+            // the in-memory throwaway in place so the next operation errors
+            // loudly rather than silently writing to memory.
+            let _ = std::fs::remove_file(&target_db);
+            if had_prior_db {
+                if let Err(rename_err) = std::fs::rename(&prev_db, &target_db) {
+                    return Err(format!(
+                        "restore failed ({install_err}); rollback also failed ({rename_err}); \
+                         your previous database is at {}",
+                        prev_db.display()
+                    ));
+                }
+                match crate::db::open(&target_db) {
+                    Ok(restored_conn) => {
+                        *conn_guard = restored_conn;
+                    }
+                    Err(reopen_err) => {
+                        return Err(format!(
+                            "restore failed ({install_err}); rolled back to previous DB but \
+                             could not reopen it ({reopen_err})"
+                        ));
+                    }
+                }
+            }
+            let _ = std::fs::remove_dir_all(&staging);
+            Err(install_err)
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::{Cursor, Write as _};
+    use zip::write::SimpleFileOptions;
+
+    fn build_zip<F: FnOnce(&mut zip::ZipWriter<Cursor<Vec<u8>>>)>(build: F) -> Vec<u8> {
+        let buf = Cursor::new(Vec::<u8>::new());
+        let mut zw = zip::ZipWriter::new(buf);
+        build(&mut zw);
+        zw.finish().unwrap().into_inner()
+    }
+
+    #[test]
+    fn validate_accepts_a_normal_backup() {
+        let bytes = build_zip(|zw| {
+            let opts = SimpleFileOptions::default();
+            zw.start_file("keepr.db", opts).unwrap();
+            zw.write_all(b"SQLite format 3\0").unwrap();
+            zw.start_file("resources/abc.png", opts).unwrap();
+            zw.write_all(b"PNGDATA").unwrap();
+        });
+        let mut archive = zip::ZipArchive::new(Cursor::new(bytes)).unwrap();
+        validate_zip_archive(&mut archive).expect("should accept normal backup");
+    }
+
+    #[test]
+    fn validate_rejects_too_many_entries() {
+        let bytes = build_zip(|zw| {
+            let opts = SimpleFileOptions::default();
+            for i in 0..(MAX_ENTRY_COUNT + 1) {
+                zw.start_file(format!("entry-{i}"), opts).unwrap();
+            }
+        });
+        let mut archive = zip::ZipArchive::new(Cursor::new(bytes)).unwrap();
+        let err = validate_zip_archive(&mut archive).unwrap_err();
+        assert!(err.contains("max"), "got: {err}");
+    }
+
+    #[test]
+    fn validate_rejects_path_traversal() {
+        // A zip with `..\..\evil.txt` cannot be created via start_file's
+        // sanitization, but raw zip parsers will accept it. We construct
+        // such a malicious zip by hand.
+        let mut raw = Vec::<u8>::new();
+        // Use the zip crate's raw API: start_file_from_path with a literal
+        // name that includes `..`. zip-rs will pass it through; the validator
+        // must catch it via enclosed_name().
+        let mut zw = zip::ZipWriter::new(Cursor::new(&mut raw));
+        let opts = SimpleFileOptions::default();
+        // The crate sanitizes via mangle on read, so enclosed_name will be
+        // None for `../escape.txt` because it resolves outside the root.
+        zw.start_file("../escape.txt", opts).unwrap();
+        zw.write_all(b"hi").unwrap();
+        zw.finish().unwrap();
+
+        let mut archive = zip::ZipArchive::new(Cursor::new(raw)).unwrap();
+        let err = validate_zip_archive(&mut archive).unwrap_err();
+        assert!(err.contains("unsafe path"), "got: {err}");
+    }
 }

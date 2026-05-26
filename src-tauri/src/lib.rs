@@ -2,11 +2,16 @@ mod db;
 mod commands;
 
 use parking_lot::Mutex;
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use tauri::Manager;
 
 pub struct AppState {
     pub db: Arc<Mutex<rusqlite::Connection>>,
+    /// Exclusive flag held during `import_zip`. Every mutating command should
+    /// `if state.importing.load(...) { return Err(...) }` early so a parallel
+    /// invoke can't write into a transient throwaway connection (EI-03).
+    pub importing: Arc<AtomicBool>,
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -24,6 +29,7 @@ pub fn run() {
             let conn = db::open(&db_path).expect("failed to open db");
             app.manage(AppState {
                 db: Arc::new(Mutex::new(conn)),
+                importing: Arc::new(AtomicBool::new(false)),
             });
             Ok(())
         })
