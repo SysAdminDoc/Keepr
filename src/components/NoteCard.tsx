@@ -180,6 +180,7 @@ export function NoteCard({ note }: Props) {
       role="button"
       tabIndex={0}
       aria-label={cardLabel}
+      data-note-id={note.id}
     >
       {!inTrash && (
         <button

@@ -12,6 +12,8 @@ import { api } from "./api";
 import { filterNotes } from "./lib/filterNotes";
 import { findExpiredTrashed } from "./lib/trashRetention";
 import { useGlobalHotkey } from "./hooks/useGlobalHotkey";
+import { useKeepShortcuts } from "./hooks/useKeepShortcuts";
+import { HelpOverlay } from "./components/HelpOverlay";
 import { Lightbulb, Archive, Trash2, Tag, Loader2 } from "lucide-react";
 
 export default function App() {
@@ -30,9 +32,12 @@ export default function App() {
   const trashRetentionDays = useStore((s) => s.trashRetentionDays);
   const [sidebarExpanded, setSidebarExpanded] = useState(true);
   const [emptyTrashOpen, setEmptyTrashOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
 
   // NF-23 — Ctrl+G toggles between grid and list view.
   useGlobalHotkey({ key: "g", mod: true }, toggleViewMode);
+  // NF-03 — bind Keep's canonical shortcuts (c, l, /, ?, j, k, f, e, #).
+  useKeepShortcuts(() => setHelpOpen(true));
 
   // NF-17 — sweep expired trashed notes once after the initial load() and
   // again every hour while the app is open. Errors are swallowed; the
@@ -143,6 +148,7 @@ export default function App() {
       <NoteEditor />
       <SettingsModal />
       <LabelsManager />
+      <HelpOverlay open={helpOpen} onClose={() => setHelpOpen(false)} />
 
       <ConfirmDialog
         open={emptyTrashOpen}

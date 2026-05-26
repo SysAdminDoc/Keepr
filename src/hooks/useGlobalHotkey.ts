@@ -32,7 +32,12 @@ function matches(e: KeyboardEvent, hk: Hotkey): boolean {
   if (e.key.toLowerCase() !== hk.key.toLowerCase()) return false;
   const mod = isMac ? e.metaKey : e.ctrlKey;
   if (Boolean(hk.mod) !== mod) return false;
-  if (Boolean(hk.shift) !== e.shiftKey) return false;
+  // For keys that are inherently shifted (like "?" or "#"), the user's
+  // shift state matches the typed character — we don't need to require
+  // an explicit `shift: true` in the descriptor. Only when the descriptor
+  // *requires* a shift modifier on an unshifted key (e.g. Shift+J) do we
+  // enforce it.
+  if (hk.shift !== undefined && Boolean(hk.shift) !== e.shiftKey) return false;
   if (Boolean(hk.alt) !== e.altKey) return false;
   return true;
 }
