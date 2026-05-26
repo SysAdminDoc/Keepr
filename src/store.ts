@@ -40,6 +40,20 @@ interface UIState {
    *  button (5s default if action present, 2.5s default otherwise). */
   showToast: (text: string, opts?: { action?: ToastAction; durationMs?: number }) => void;
   dismissToast: (id: number) => void;
+
+  // EI-24 — optimistic in-place reducers. Call site flow is:
+  //   await api.foo(...);            // command returns the new Note (or void)
+  //   useStore.getState().patchNote(id, { pinned: true });
+  // No full load() round-trip per mutation. Sorting is recomputed below so
+  // pin/unpin still moves the card into the right section.
+  upsertNote: (note: Note) => void;
+  patchNote: (id: string, patch: Partial<Note>) => void;
+  removeNote: (id: string) => void;
+  upsertLabel: (label: Label) => void;
+  patchLabel: (id: string, patch: Partial<Label>) => void;
+  removeLabel: (id: string) => void;
+  /** Drop every note whose predicate matches (used by Empty Trash). */
+  removeNotesWhere: (predicate: (n: Note) => boolean) => void;
 }
 
 let toastSeq = 0;
@@ -118,4 +132,63 @@ export const useStore = create<UIState>((set, get) => ({
   dismissToast: (id) => {
     set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) }));
   },
+
+  upsertNote: (note) =>
+    set((s) => {
+      const i = s.notes.findIndex((n) => n.id === note.id);
+      const next = [...s.notes];
+      if (i >= 0) next[i] = note;
+      else next.unshift(note);
+      return { notes: sortNotes(next) };
+    }),
+  patchNote: (id, patch) =>
+    set((s) => ({
+      notes: sortNotes(
+        s.notes.map((n) => (n.id === id ? { ...n, ...patch } : n)),
+      ),
+    })),
+  removeNote: (id) =>
+    set((s) => ({ notes: s.notes.filter((n) => n.id !== id) })),
+  removeNotesWhere: (predicate) =>
+    set((s) => ({ notes: s.notes.filter((n) => !predicate(n)) })),
+  upsertLabel: (label) =>
+    set((s) => {
+      const i = s.labels.findIndex((l) => l.id === label.id);
+      const next = [...s.labels];
+      if (i >= 0) next[i] = label;
+      else next.push(label);
+      return { labels: sortLabels(next) };
+    }),
+  patchLabel: (id, patch) =>
+    set((s) => ({
+      labels: sortLabels(
+        s.labels.map((l) => (l.id === id ? { ...l, ...patch } : l)),
+      ),
+    })),
+  removeLabel: (id) =>
+    set((s) => ({
+      labels: s.labels.filter((l) => l.id !== id),
+      // Also strip the deleted label from any note that referenced it.
+      notes: s.notes.map((n) => ({
+        ...n,
+        labels: n.labels.filter((lid) => lid !== id),
+      })),
+    })),
 }));
+
+// --- sort helpers (mirror Rust's list_notes ORDER BY) ---
+
+function sortNotes(notes: Note[]): Note[] {
+  // Sort by pinned DESC, then updated_at DESC. Match SQL's behavior so the
+  // grid stays in sync without a re-fetch.
+  return [...notes].sort((a, b) => {
+    if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
+    return a.updated_at < b.updated_at ? 1 : a.updated_at > b.updated_at ? -1 : 0;
+  });
+}
+
+function sortLabels(labels: Label[]): Label[] {
+  return [...labels].sort((a, b) =>
+    a.name.localeCompare(b.name, undefined, { sensitivity: "base" }),
+  );
+}

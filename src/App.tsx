@@ -21,6 +21,7 @@ export default function App() {
   const toasts = useStore((s) => s.toasts);
   const dismissToast = useStore((s) => s.dismissToast);
   const showToast = useStore((s) => s.showToast);
+  const removeNotesWhere = useStore((s) => s.removeNotesWhere);
   const loaded = useStore((s) => s.loaded);
 
   const [sidebarExpanded, setSidebarExpanded] = useState(true);
@@ -30,7 +31,7 @@ export default function App() {
     setEmptyTrashOpen(false);
     try {
       await api.emptyTrash();
-      await load();
+      removeNotesWhere((n) => n.trashed);
       showToast("Trash emptied");
     } catch (e) {
       showToast("Could not empty trash: " + String(e));

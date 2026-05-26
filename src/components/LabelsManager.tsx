@@ -10,8 +10,10 @@ export function LabelsManager() {
   const labelsManagerOpen = useStore((s) => s.labelsManagerOpen);
   const closeLabelsManager = useStore((s) => s.closeLabelsManager);
   const labels = useStore((s) => s.labels);
-  const load = useStore((s) => s.load);
   const showToast = useStore((s) => s.showToast);
+  const upsertLabel = useStore((s) => s.upsertLabel);
+  const patchLabel = useStore((s) => s.patchLabel);
+  const removeLabel = useStore((s) => s.removeLabel);
 
   const [newName, setNewName] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -36,9 +38,9 @@ export function LabelsManager() {
     const name = newName.trim();
     if (!name) return;
     try {
-      await api.createLabel(name);
+      const lbl = await api.createLabel(name);
       setNewName("");
-      await load();
+      upsertLabel(lbl);
     } catch (e) {
       showToast("Could not create label: " + String(e));
     }
@@ -53,8 +55,8 @@ export function LabelsManager() {
     }
     try {
       await api.renameLabel(editingId, name);
+      patchLabel(editingId, { name });
       setEditingId(null);
-      await load();
     } catch (e) {
       showToast("Could not rename label: " + String(e));
     }
@@ -66,7 +68,7 @@ export function LabelsManager() {
     setPendingDeleteId(null);
     try {
       await api.deleteLabel(id);
-      await load();
+      removeLabel(id);
     } catch (e) {
       showToast("Could not delete label: " + String(e));
     }

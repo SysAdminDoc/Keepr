@@ -25,9 +25,10 @@ interface Props {
 export function NoteCard({ note }: Props) {
   const section = useStore((s) => s.section);
   const dark = useStore((s) => s.dark);
-  const load = useStore((s) => s.load);
   const openEditor = useStore((s) => s.openEditor);
   const showToast = useStore((s) => s.showToast);
+  const patchNote = useStore((s) => s.patchNote);
+  const removeNote = useStore((s) => s.removeNote);
   const [colorOpen, setColorOpen] = useState(false);
   const popoverRef = useRef<HTMLDivElement>(null);
   useClickOutside(popoverRef, colorOpen, () => setColorOpen(false));
@@ -51,8 +52,14 @@ export function NoteCard({ note }: Props) {
   const togglePin = (e: React.MouseEvent) => {
     e.stopPropagation();
     return withToast("update note", async () => {
-      await api.setPinned(note.id, !note.pinned);
-      await load();
+      const next = !note.pinned;
+      await api.setPinned(note.id, next);
+      // EI-24 — patch in place. setPinned also clears `archived` server-side.
+      patchNote(note.id, {
+        pinned: next,
+        archived: false,
+        updated_at: new Date().toISOString(),
+      });
     });
   };
 
@@ -61,14 +68,22 @@ export function NoteCard({ note }: Props) {
     return withToast("archive note", async () => {
       const becomingArchived = !note.archived;
       await api.setArchived(note.id, becomingArchived);
-      await load();
+      patchNote(note.id, {
+        archived: becomingArchived,
+        trashed: false,
+        trashed_at: null,
+        updated_at: new Date().toISOString(),
+      });
       // EI-15 — Undo for archive (Keep parity).
       showToast(becomingArchived ? "Note archived" : "Note unarchived", {
         action: {
           label: "Undo",
           onClick: async () => {
             await api.setArchived(note.id, !becomingArchived);
-            await load();
+            patchNote(note.id, {
+              archived: !becomingArchived,
+              updated_at: new Date().toISOString(),
+            });
           },
         },
       });
@@ -78,15 +93,26 @@ export function NoteCard({ note }: Props) {
   const trash = (e: React.MouseEvent) => {
     e.stopPropagation();
     return withToast("trash note", async () => {
+      const now = new Date().toISOString();
       await api.setTrashed(note.id, true);
-      await load();
+      patchNote(note.id, {
+        trashed: true,
+        archived: false,
+        pinned: false,
+        trashed_at: now,
+        updated_at: now,
+      });
       // EI-15 — Undo for trash (Keep parity, 5s window).
       showToast("Note moved to Trash", {
         action: {
           label: "Undo",
           onClick: async () => {
             await api.setTrashed(note.id, false);
-            await load();
+            patchNote(note.id, {
+              trashed: false,
+              trashed_at: null,
+              updated_at: new Date().toISOString(),
+            });
           },
         },
       });
@@ -97,7 +123,11 @@ export function NoteCard({ note }: Props) {
     e.stopPropagation();
     return withToast("restore note", async () => {
       await api.setTrashed(note.id, false);
-      await load();
+      patchNote(note.id, {
+        trashed: false,
+        trashed_at: null,
+        updated_at: new Date().toISOString(),
+      });
       showToast("Note restored");
     });
   };
@@ -106,7 +136,7 @@ export function NoteCard({ note }: Props) {
     e.stopPropagation();
     return withToast("delete note", async () => {
       await api.deleteNotePermanent(note.id);
-      await load();
+      removeNote(note.id);
       showToast("Note deleted");
     });
   };
@@ -127,7 +157,10 @@ export function NoteCard({ note }: Props) {
     withToast("change color", async () => {
       await api.setColor(note.id, color);
       setColorOpen(false);
-      await load();
+      patchNote(note.id, {
+        color: color as Note["color"],
+        updated_at: new Date().toISOString(),
+      });
     });
 
   const cardLabel = note.title || (note.body ? note.body.slice(0, 60) : "Untitled note");

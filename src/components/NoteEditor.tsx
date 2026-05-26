@@ -49,8 +49,11 @@ export function NoteEditor() {
   const closeEditor = useStore((s) => s.closeEditor);
   const labels = useStore((s) => s.labels);
   const dark = useStore((s) => s.dark);
-  const load = useStore((s) => s.load);
   const showToast = useStore((s) => s.showToast);
+  const upsertNote = useStore((s) => s.upsertNote);
+  const removeNote = useStore((s) => s.removeNote);
+  const patchNote = useStore((s) => s.patchNote);
+  const upsertLabel = useStore((s) => s.upsertLabel);
 
   // EI-06 — Snapshot the existing note once on open. We deliberately do NOT
   // depend on the store's `notes` array because a background load() would
@@ -141,25 +144,22 @@ export function NoteEditor() {
           // Was empty when opened, still empty — keep as a permanent empty
           // note (EI-23). We only delete if the original had content.
           await api.deleteNotePermanent(ex.id);
+          removeNote(ex.id);
           showToast("Empty note discarded");
-        } else if (isEmptyNow) {
-          // EI-23 — don't permanently delete when the user merely cleared
-          // a previously-non-empty note via setKind/etc. Just update with
-          // the empty payload so they keep the record.
-          await api.updateNote(ex.id, payload);
         } else {
-          await api.updateNote(ex.id, payload);
+          const updated = await api.updateNote(ex.id, payload);
+          upsertNote(updated);
         }
       } else if (!isEmptyNow) {
-        await api.createNote(payload);
+        const created = await api.createNote(payload);
+        upsertNote(created);
       }
-      await load();
     } catch (e) {
       showToast("Could not save: " + String(e));
     } finally {
       closeEditor();
     }
-  }, [closeEditor, load, showToast]);
+  }, [closeEditor, removeNote, upsertNote, showToast]);
 
   // Escape closes (EI-45). One stable handler, only re-binds when editor
   // open/close flips, not on every keystroke.
@@ -274,16 +274,21 @@ export function NoteEditor() {
   const addNewLabel = async () => {
     const name = newLabelName.trim();
     if (!name) return;
-    const lbl = await api.createLabel(name);
-    setNewLabelName("");
-    await load();
-    setDraft((d) => ({ ...d, labels: [...new Set([...d.labels, lbl.id])] }));
+    try {
+      const lbl = await api.createLabel(name);
+      setNewLabelName("");
+      upsertLabel(lbl);
+      setDraft((d) => ({ ...d, labels: [...new Set([...d.labels, lbl.id])] }));
+    } catch (e) {
+      showToast("Could not create label: " + String(e));
+    }
   };
 
   // EI-21 — flush the in-progress draft before archive/trash so the
-  // user's most recent edits aren't discarded.
-  const flushDraft = async () => {
-    if (!existing) return;
+  // user's most recent edits aren't discarded. Returns the updated Note
+  // so the caller can upsert it into the store.
+  const flushDraft = async (): Promise<Note | null> => {
+    if (!existing) return null;
     const d = draftRef.current;
     const payload: NoteInput = {
       kind: d.kind,
@@ -296,16 +301,23 @@ export function NoteEditor() {
         .map((c, i) => ({ ...c, position: i })),
       labels: d.labels,
     };
-    await api.updateNote(existing.id, payload);
+    return await api.updateNote(existing.id, payload);
   };
 
   const archive = async () => {
     if (!existing) return;
     try {
-      await flushDraft();
-      await api.setArchived(existing.id, !existing.archived);
-      await load();
-      showToast(existing.archived ? "Note unarchived" : "Note archived");
+      const updated = await flushDraft();
+      if (updated) upsertNote(updated);
+      const becomingArchived = !existing.archived;
+      await api.setArchived(existing.id, becomingArchived);
+      patchNote(existing.id, {
+        archived: becomingArchived,
+        trashed: false,
+        trashed_at: null,
+        updated_at: new Date().toISOString(),
+      });
+      showToast(becomingArchived ? "Note archived" : "Note unarchived");
     } catch (e) {
       showToast("Could not archive: " + String(e));
     } finally {
@@ -316,9 +328,17 @@ export function NoteEditor() {
   const trash = async () => {
     if (!existing) return;
     try {
-      await flushDraft();
+      const updated = await flushDraft();
+      if (updated) upsertNote(updated);
+      const now = new Date().toISOString();
       await api.setTrashed(existing.id, true);
-      await load();
+      patchNote(existing.id, {
+        trashed: true,
+        archived: false,
+        pinned: false,
+        trashed_at: now,
+        updated_at: now,
+      });
       showToast("Note moved to Trash");
     } catch (e) {
       showToast("Could not trash: " + String(e));
