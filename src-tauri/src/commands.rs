@@ -1991,4 +1991,306 @@ mod tests {
         let err = validate_zip_archive(&mut archive).unwrap_err();
         assert!(err.contains("unsafe path"), "got: {err}");
     }
+
+    // --- Pure helpers ---
+
+    #[test]
+    fn sanitize_extension_handles_uppercase_and_specials() {
+        use std::path::Path;
+        assert_eq!(sanitize_extension(Path::new("foo.PNG")), "png");
+        assert_eq!(sanitize_extension(Path::new("foo.JPEG")), "jpeg");
+        // No extension → default
+        assert_eq!(sanitize_extension(Path::new("README")), "bin");
+        // Non-alphanumeric characters dropped
+        assert_eq!(sanitize_extension(Path::new("foo.t!@#xt")), "txt");
+        // Truncated at 8 chars
+        assert_eq!(
+            sanitize_extension(Path::new("foo.abcdefghij")),
+            "abcdefgh"
+        );
+    }
+
+    #[test]
+    fn sanitize_vault_filename_strips_unsafe_chars() {
+        assert_eq!(
+            sanitize_vault_filename("Hello / World: <test>", "abc12345"),
+            "Hello - World- -test-",
+        );
+        // Pure-unsafe input that collapses to nothing falls back to
+        // "note-<short id>". (Slashes/asterisks become dashes, not
+        // empty — so we need actual nothings: empty input.)
+        assert_eq!(
+            sanitize_vault_filename("", "abc12345-rest-of-uuid"),
+            "note-abc12345",
+        );
+        // Trims leading dots/spaces
+        assert_eq!(
+            sanitize_vault_filename("  .hidden  ", "xyz"),
+            "hidden",
+        );
+    }
+
+    #[test]
+    fn yaml_quote_if_needed_quotes_special() {
+        assert_eq!(yaml_quote_if_needed("safe"), "safe");
+        assert_eq!(yaml_quote_if_needed("with: colon"), "\"with: colon\"");
+        assert_eq!(yaml_quote_if_needed("- starts-with-dash"), "\"- starts-with-dash\"");
+        assert_eq!(yaml_quote_if_needed(""), "\"\"");
+        // Backslash + quote escape
+        assert_eq!(yaml_quote_if_needed("she said \"hi\""), "\"she said \\\"hi\\\"\"");
+    }
+
+    #[test]
+    fn map_keep_color_covers_full_enum() {
+        for (k, v) in [
+            ("RED", "red"),
+            ("ORANGE", "orange"),
+            ("YELLOW", "yellow"),
+            ("GREEN", "green"),
+            ("TEAL", "teal"),
+            ("BLUE", "blue"),
+            ("DARK_BLUE", "darkblue"),
+            ("PURPLE", "purple"),
+            ("PINK", "pink"),
+            ("BROWN", "brown"),
+            ("GRAY", "gray"),
+            ("UNKNOWN", "default"),
+            ("", "default"),
+        ] {
+            assert_eq!(map_keep_color(k), v, "for {k}");
+        }
+    }
+
+    #[test]
+    fn takeout_usec_to_rfc3339_round_trips() {
+        // 2024-01-01T00:00:00Z = 1704067200 seconds = 1704067200_000_000 µs
+        let usec = serde_json::json!(1704067200u64 * 1_000_000);
+        let out = takeout_usec_to_rfc3339(Some(&usec)).unwrap();
+        assert!(out.starts_with("2024-01-01T00:00:00"), "got: {out}");
+        // Missing input → None
+        assert_eq!(takeout_usec_to_rfc3339(None), None);
+        // Non-number → None
+        assert_eq!(
+            takeout_usec_to_rfc3339(Some(&serde_json::json!("not a number"))),
+            None
+        );
+    }
+
+    #[test]
+    fn takeout_reminder_fire_at_handles_multiple_shapes() {
+        let fire_on = serde_json::json!({ "fireOn": "2024-06-15T08:00:00Z" });
+        assert_eq!(
+            takeout_reminder_fire_at(&fire_on),
+            Some("2024-06-15T08:00:00Z".to_string())
+        );
+        let snake = serde_json::json!({ "fire_on": "2024-06-15T08:00:00Z" });
+        assert_eq!(
+            takeout_reminder_fire_at(&snake),
+            Some("2024-06-15T08:00:00Z".to_string())
+        );
+        let usec = serde_json::json!({
+            "reminderTimeUsec": 1718438400u64 * 1_000_000u64,
+        });
+        let result = takeout_reminder_fire_at(&usec).unwrap();
+        assert!(result.starts_with("2024-06-15"), "got: {result}");
+        let nested = serde_json::json!({
+            "time": { "formattedDate": "2024-06-15T08:00:00Z" }
+        });
+        assert_eq!(
+            takeout_reminder_fire_at(&nested),
+            Some("2024-06-15T08:00:00Z".to_string())
+        );
+        let empty = serde_json::json!({});
+        assert_eq!(takeout_reminder_fire_at(&empty), None);
+        // Garbage timestamp → None
+        let garbage = serde_json::json!({ "fireOn": "not-a-date" });
+        assert_eq!(takeout_reminder_fire_at(&garbage), None);
+    }
+
+    #[test]
+    fn guess_mime_for_ext_handles_known_and_unknown() {
+        assert_eq!(guess_mime_for_ext("png"), "image/png");
+        assert_eq!(guess_mime_for_ext("jpg"), "image/jpeg");
+        assert_eq!(guess_mime_for_ext("jpeg"), "image/jpeg");
+        assert_eq!(guess_mime_for_ext("gif"), "image/gif");
+        assert_eq!(guess_mime_for_ext("webp"), "image/webp");
+        assert_eq!(guess_mime_for_ext("svg"), "image/svg+xml");
+        assert_eq!(guess_mime_for_ext("unknown"), "application/octet-stream");
+    }
+
+    // --- Direct-AppState integration tests ---
+    //
+    // These construct an AppState manually with an in-memory SQLite
+    // connection so we can call commands' inner logic without going
+    // through Tauri's State extractor. The commands wrapped in
+    // #[tauri::command] still take State<'_, AppState>, so we duplicate
+    // the body of the smaller ones into test-local helpers.
+
+    fn test_state() -> AppState {
+        use parking_lot::Mutex;
+        use std::sync::atomic::AtomicBool;
+        use std::sync::Arc;
+        let tmp = tempfile::tempdir().unwrap();
+        let db_path = tmp.path().join("test.db");
+        let conn = crate::db::open(&db_path).unwrap();
+        // Leak the tempdir so it lives for the test's lifetime; we never
+        // delete it explicitly. Test processes are short-lived; OS cleans
+        // up %TEMP% eventually.
+        let data_dir = tmp.into_path();
+        AppState {
+            db: Arc::new(Mutex::new(conn)),
+            importing: Arc::new(AtomicBool::new(false)),
+            data_dir,
+        }
+    }
+
+    fn insert_test_note(state: &AppState, id: &str, title: &str) {
+        let conn = state.db.lock();
+        let now = "2026-01-01T00:00:00Z";
+        conn.execute(
+            "INSERT INTO notes (id, kind, title, body, color, pinned, archived, trashed, position, created_at, updated_at)
+             VALUES (?1, 'text', ?2, '', 'default', 0, 0, 0, 0, ?3, ?3)",
+            params![id, title, now],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn peek_due_reminders_returns_only_pending_and_due() {
+        let state = test_state();
+        insert_test_note(&state, "n1", "due note");
+        insert_test_note(&state, "n2", "future note");
+        insert_test_note(&state, "n3", "fired note");
+        let now = "2026-05-26T12:00:00Z";
+        let conn = state.db.lock();
+        conn.execute(
+            "INSERT INTO reminders (id, note_id, fire_at, created_at) VALUES ('r1', 'n1', '2026-05-26T11:00:00Z', ?1)",
+            params![now],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO reminders (id, note_id, fire_at, created_at) VALUES ('r2', 'n2', '2026-05-26T13:00:00Z', ?1)",
+            params![now],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO reminders (id, note_id, fire_at, fired_at, created_at) VALUES ('r3', 'n3', '2026-05-26T11:00:00Z', ?1, ?1)",
+            params![now],
+        ).unwrap();
+        drop(conn);
+        let due = peek_due_reminders(&state, now).unwrap();
+        assert_eq!(due.len(), 1);
+        assert_eq!(due[0].0.id, "r1");
+        assert_eq!(due[0].1, "due note");
+    }
+
+    #[test]
+    fn peek_due_reminders_excludes_trashed_notes() {
+        let state = test_state();
+        insert_test_note(&state, "n_trash", "trashed");
+        let conn = state.db.lock();
+        conn.execute(
+            "UPDATE notes SET trashed = 1 WHERE id = 'n_trash'",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO reminders (id, note_id, fire_at, created_at) VALUES ('r1', 'n_trash', '2026-05-26T11:00:00Z', '2026-05-26T11:00:00Z')",
+            [],
+        )
+        .unwrap();
+        drop(conn);
+        let due = peek_due_reminders(&state, "2026-05-26T12:00:00Z").unwrap();
+        assert_eq!(due.len(), 0);
+    }
+
+    #[test]
+    fn mark_reminder_fired_sets_the_column() {
+        let state = test_state();
+        insert_test_note(&state, "n1", "x");
+        let conn = state.db.lock();
+        conn.execute(
+            "INSERT INTO reminders (id, note_id, fire_at, created_at) VALUES ('r1', 'n1', '2026-05-26T11:00:00Z', '2026-05-26T11:00:00Z')",
+            [],
+        )
+        .unwrap();
+        drop(conn);
+        mark_reminder_fired(&state, "r1", "2026-05-26T12:00:00Z").unwrap();
+        let conn = state.db.lock();
+        let fired: Option<String> = conn
+            .query_row(
+                "SELECT fired_at FROM reminders WHERE id = 'r1'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(fired.as_deref(), Some("2026-05-26T12:00:00Z"));
+    }
+
+    #[test]
+    fn peek_does_not_write_fired_at() {
+        // EI-V0.5-2 regression test: peek_due_reminders must NEVER mark
+        // fired_at; only mark_reminder_fired does. Otherwise a failed
+        // notification permanently loses the reminder.
+        let state = test_state();
+        insert_test_note(&state, "n1", "x");
+        let conn = state.db.lock();
+        conn.execute(
+            "INSERT INTO reminders (id, note_id, fire_at, created_at) VALUES ('r1', 'n1', '2026-05-26T11:00:00Z', '2026-05-26T11:00:00Z')",
+            [],
+        )
+        .unwrap();
+        drop(conn);
+        let _ = peek_due_reminders(&state, "2026-05-26T12:00:00Z").unwrap();
+        let _ = peek_due_reminders(&state, "2026-05-26T12:00:00Z").unwrap();
+        let _ = peek_due_reminders(&state, "2026-05-26T12:00:00Z").unwrap();
+        let conn = state.db.lock();
+        let fired: Option<String> = conn
+            .query_row(
+                "SELECT fired_at FROM reminders WHERE id = 'r1'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(fired.is_none(), "fired_at should still be NULL after peek");
+    }
+
+    #[test]
+    fn migration_v4_backfills_positions() {
+        // EI-V0.5-1 regression test: every note after a fresh migrate
+        // should have a unique position (0..N-1).
+        let state = test_state();
+        insert_test_note(&state, "a", "first");
+        insert_test_note(&state, "b", "second");
+        insert_test_note(&state, "c", "third");
+        // Mutate updated_at so the ROW_NUMBER OVER (ORDER BY updated_at DESC) sees
+        // a deterministic order.
+        let conn = state.db.lock();
+        conn.execute("UPDATE notes SET updated_at = '2026-05-01' WHERE id = 'a'", []).unwrap();
+        conn.execute("UPDATE notes SET updated_at = '2026-05-03' WHERE id = 'b'", []).unwrap();
+        conn.execute("UPDATE notes SET updated_at = '2026-05-02' WHERE id = 'c'", []).unwrap();
+        // Re-run the v4 migration body directly.
+        conn.execute_batch(
+            "WITH ordered AS (
+                SELECT id,
+                       ROW_NUMBER() OVER (ORDER BY pinned DESC, updated_at DESC) - 1 AS rn
+                FROM notes
+            )
+            UPDATE notes
+            SET position = (SELECT rn FROM ordered WHERE ordered.id = notes.id);",
+        )
+        .unwrap();
+        let mut stmt = conn
+            .prepare("SELECT id, position FROM notes ORDER BY position ASC")
+            .unwrap();
+        let rows: Vec<(String, i64)> = stmt
+            .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect();
+        assert_eq!(rows.len(), 3);
+        assert_eq!(rows[0].1, 0);
+        assert_eq!(rows[1].1, 1);
+        assert_eq!(rows[2].1, 2);
+        // First (most recent) should be b.
+        assert_eq!(rows[0].0, "b");
+    }
 }
