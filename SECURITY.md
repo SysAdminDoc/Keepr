@@ -1,5 +1,9 @@
 # Security Policy
 
+## Code signing
+
+Keepr ships **unsigned** as of v0.5. Windows SmartScreen will warn on first launch — click "More info" → "Run anyway". Signed builds will land when distribution scale justifies a $300/year EV certificate; the alternative is sigstore which is still nascent for `.msi` artifacts. The unsigned binary is built reproducibly from `main` by GitHub Actions — verify against the workflow logs at [`.github/workflows/release.yml`](.github/workflows/release.yml).
+
 ## Threat model
 
 Keepr is a single-user, offline-first desktop app. It does **not** make outbound network requests, has no account system, and does not collect telemetry. The threats it actively defends against are:

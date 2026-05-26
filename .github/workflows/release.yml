@@ -1,0 +1,110 @@
+name: Release
+
+# NF-V0.5-F — bundled-release pipeline. Fires on any tag matching
+# v*.*.* and produces an NSIS installer + MSI + raw portable .exe
+# uploaded to a fresh GitHub Release. Unsigned per the v0.5 open-question
+# resolution; users will see a SmartScreen warning the first time —
+# documented in README + CHANGELOG.
+#
+# Trigger manually with `gh workflow run release.yml` for a dry-run on
+# a non-tag commit (the resulting Release becomes a draft).
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    name: Build Windows (unsigned)
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Build with tauri-action (NSIS + MSI bundles)
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          # Reuse the pushed tag; tauri-action will publish a draft
+          # Release containing the bundles.
+          tagName: ${{ github.ref_name || 'v0.0.0-dev' }}
+          releaseName: "Keepr ${{ github.ref_name || 'dev' }}"
+          releaseBody: |
+            Keepr ${{ github.ref_name || 'dev' }} — unsigned Windows build.
+
+            - `*.msi` — Windows Installer (recommended).
+            - `*-setup.exe` — NSIS installer.
+            - `Keepr-portable.zip` — extract anywhere, drop `portable.flag` next to `keepr.exe` for USB-stick mode.
+
+            First-run SmartScreen warning is expected — click "More info → Run anyway" to install. See [SECURITY.md](https://github.com/SysAdminDoc/Keepr/blob/main/SECURITY.md) for why we ship unsigned today.
+
+            Full release notes: [CHANGELOG.md](https://github.com/SysAdminDoc/Keepr/blob/main/CHANGELOG.md).
+          releaseDraft: true
+          prerelease: false
+          # Bundle config in src-tauri/tauri.conf.json already lists
+          # ["nsis", "msi"]; tauri-action picks them up.
+          args: ""
+
+      # NF-V0.5-F — also publish a raw portable .exe. tauri-action only
+      # uploads the bundle targets, so we attach the unbundled binary
+      # ourselves as `Keepr-portable.zip` so users have the no-install
+      # path the README promises.
+      - name: Package portable zip
+        run: |
+          $exe = "src-tauri/target/release/keepr.exe"
+          if (-not (Test-Path $exe)) {
+            Write-Error "keepr.exe not found at $exe"
+            exit 1
+          }
+          $stage = "stage-portable"
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          Copy-Item $exe $stage
+          # An empty `portable.flag` flips data-dir resolution into
+          # next-to-EXE mode on first launch (EI-V0.5-1's helper from
+          # v0.2: lib.rs::resolve_data_dir).
+          New-Item -ItemType File -Path "$stage/portable.flag" | Out-Null
+          # README inside the zip explains the gesture.
+          @"
+          Keepr portable — extract this folder anywhere (USB stick, network share,
+          Documents/Apps). Run keepr.exe. The presence of portable.flag tells the
+          app to store keepr.db next to the exe instead of in %APPDATA%.
+
+          To upgrade: replace keepr.exe with a newer build, keep portable.flag
+          and keepr.db in place.
+          "@ | Out-File -FilePath "$stage/README.txt" -Encoding utf8
+          Compress-Archive -Path "$stage/*" -DestinationPath "Keepr-portable.zip" -Force
+
+      - name: Attach portable zip to release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload ${{ github.ref_name }} Keepr-portable.zip --clobber
+
+      - name: Upload portable zip as workflow artifact (dry runs)
+        if: github.ref_type != 'tag'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Keepr-portable
+          path: Keepr-portable.zip

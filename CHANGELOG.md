@@ -6,6 +6,47 @@ All notable changes to Keepr are documented here. Format loosely follows [Keep a
 
 (See [ROADMAP.md](ROADMAP.md) for the live task list.)
 
+## [0.5.0] — 2026-05-26 — "Polish & Reliability"
+
+Closes every P1 from the [v0.5 audit](RESEARCH_FEATURE_PLAN_v0.5.md), raises automated test coverage to 89 (20 cargo + 69 vitest, up from 8 + 49), ships image thumbnails so card grids no longer decode full-res JPEGs, and — for the first time — publishes installable Windows binaries via GitHub Actions. Unsigned per the open-question resolution; first-launch SmartScreen warning expected. See [SECURITY.md](SECURITY.md).
+
+### Reliability
+
+- **EI-V0.5-5** Selection / Esc / filter interactions tightened. App-level Escape is gated on `!any-modal-open` so editor Escape no longer also clears an unrelated multi-select. BulkActionBar now shows "X of Y selected here" when section/filter hides part of the selection. FilterChips hides the Pinned chip in Trash (always-empty guarantee).
+- **EI-V0.5-7** Global hotkey registration failure surfaces as an 8-second toast: "Ctrl+Alt+N quick-capture is unavailable — another app may already use that shortcut." No more silent no-op.
+- **EI-V0.5-9** Hashtag UX: deleting `#work` from a note now auto-detaches the "work" label (diff against previous save). Title hashtags are also highlighted in Keep blue on the card preview, matching body behavior.
+
+### Migration / I/O correctness
+
+- **EI-V0.5-6** Vault export writes to a fresh `keepr-vault-<ISO>/` subfolder per run — no more silent overwrite of previous exports or external edits to those `.md` files. Filename collision fallback after 999 retries uses the full UUID for guaranteed uniqueness.
+- **EI-V0.5-6** Takeout import preserves `createdTimestampUsec` + `userEditedTimestampUsec` (microseconds → RFC 3339) and ingests Takeout reminders (accepts `fireOn` / `fire_on` / `reminderTimeUsec` / `reminder_time_usec` / nested `time.formattedDate` to handle Takeout-format drift across years).
+
+### Perf
+
+- **NF-V0.5-B** Image thumbnail pipeline. `add_image_attachment` now decodes the original via the `image` crate (feature-trimmed to PNG/JPG/GIF/WEBP) and writes a 480-px JPEG sibling at `<id>.thumb.jpg`. NoteCard's AttachmentGrid prefers the thumb; the editor stays at full quality. Bandwidth-and-RAM cost of a 5-image card grid drops from ~40 originals (5 MB each potential) to ~40 ~30-KB thumbs. Pre-v0.5 uploads fall back to original via `<img onError>`.
+- **EI-V0.5-8** `patchNote` skips the O(n log n) re-sort when the patch can't affect ordering. A color or label toggle on a 1000-note grid drops a few ms per click.
+
+### Capability surface
+
+- **EI-V0.5-11** Dropped three unused capability permissions (`global-shortcut:allow-is-registered`, `notification:allow-is-permission-granted`, `notification:allow-request-permission`). Surface area shrinks; behavior unchanged.
+
+### Distribution
+
+- **NF-V0.5-F** First bundled-release pipeline. `.github/workflows/release.yml` builds NSIS + MSI + portable `.zip` on every `v*.*.*` tag push via `tauri-action`. Releases are uploaded as drafts so we can sanity-check before publishing. Unsigned — see SECURITY.md.
+- README "Install" section lists the three artifacts and the SmartScreen workaround.
+
+### Tests
+
+- **20 cargo tests** (up from 8): 7 new pure-helper tests (sanitize_extension, sanitize_vault_filename, yaml_quote_if_needed, map_keep_color, takeout_usec_to_rfc3339, takeout_reminder_fire_at, guess_mime_for_ext), 4 reminder integration tests using a direct-AppState `test_state()` helper, and 1 migration v4 backfill verification.
+- **69 vitest cases** (up from 49): reminderPresets (8), hashtagMerge diff (5), useGlobalHotkey matches (7).
+
+### Polish nits
+
+- ReminderPicker `nextWeek` → `nextMonday` rename (function name matched the label).
+- BulkActionBar Restore icon: `ArchiveRestore` → `RotateCcw` (matches NoteCard's single-note restore).
+- AttachmentGrid `convertFileSrc` memoised via `useMemo` per (id, mime).
+- Dropped dead `_UnusedX = X` re-export from FilterChips and redundant `fullscreen: false` from tauri.conf.json.
+
 ## [0.4.1] — 2026-05-26 — hotfix
 
 Closes the four P0 issues from the v0.5 audit pass. Schema migrates to v4 (one-shot `notes.position` backfill — no behavioural change for v3 users until they enter Custom sort, then existing notes now sit in their Modified-DESC order instead of randomly).

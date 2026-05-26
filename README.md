@@ -37,6 +37,16 @@ Drop an empty file named `portable.flag` next to `keepr.exe`. On startup Keepr d
 - [CHANGELOG.md](CHANGELOG.md) — what shipped in each release
 - [RESEARCH_FEATURE_PLAN.md](RESEARCH_FEATURE_PLAN.md) — the long-form research that backs the roadmap
 
+## Install
+
+Pick one of the published builds from [Releases](https://github.com/SysAdminDoc/Keepr/releases):
+
+- **`Keepr_<version>_x64-setup.exe`** — NSIS installer (default).
+- **`Keepr_<version>_x64_en-US.msi`** — Windows Installer alternative.
+- **`Keepr-portable.zip`** — extract anywhere, run `keepr.exe`. The bundled `portable.flag` makes the app store `keepr.db` next to the EXE so it travels on a USB stick.
+
+Keepr is unsigned today (see [SECURITY.md](SECURITY.md) for rationale). First launch shows Windows SmartScreen — click "More info" → "Run anyway".
+
 ## Build from source
 
 Prereqs: Node 20+, Rust 1.80+. The Tauri CLI is bundled as a dev-dependency — no global install.
@@ -48,6 +58,8 @@ npm run tauri build        # release MSI/NSIS in src-tauri/target/release/bundle
 npm test                   # vitest (frontend)
 cargo test --manifest-path src-tauri/Cargo.toml --lib   # rust unit tests
 ```
+
+The GitHub Actions workflow at [`.github/workflows/release.yml`](.github/workflows/release.yml) builds + uploads a release on every `v*.*.*` tag push.
 
 ## Contributing
 

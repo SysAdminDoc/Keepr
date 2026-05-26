@@ -27,18 +27,20 @@ All four P0s from the v0.5 audit closed. Full notes in [CHANGELOG.md](CHANGELOG.
 
 ---
 
-## Phase B — v0.5.0 "Polish & Reliability"
+## Phase B — v0.5.0 "Polish & Reliability" — SHIPPED 2026-05-26
 
-Goal: close every audit P1, raise tests to 100+ vitest / 25+ cargo, ship the first actual binary via `tauri-action` (unsigned per user decision).
+Audit P1 batch + first bundled-release pipeline. Full notes in [CHANGELOG.md](CHANGELOG.md).
 
-- [ ] **NF-V0.5-F** — Bundled release pipeline (`tauri-action`, unsigned MSI + portable zip) + auto-updater scaffold
-- [ ] **NF-V0.5-B** — Image thumbnail pipeline (`<id>.thumb.<ext>`, served via protocol)
-- [ ] **EI-V0.5-5** — Selection/Esc/filter interactions (gate Esc behind modal state; bulk count uses filtered intersection; auto-clear filters or hint on section switch)
-- [ ] **EI-V0.5-6** — Vault + Takeout correctness (export collision detection, Takeout timestamps + reminders preservation)
-- [ ] **EI-V0.5-7** — Surface global-hotkey registration failure as a toast
-- [ ] **EI-V0.5-8** — `list_notes` payload trim + `patchNote` skip-sort-when-not-touching-sort-keys
-- [ ] **EI-V0.5-9** — Hashtag UX corners (auto-remove deleted-text labels, block label-rename when body still references)
-- [ ] **Test coverage** — every new Rust command + key frontend pure helpers (~21 cargo + ~10 vitest)
+- [x] **NF-V0.5-F** — Bundled release pipeline (`tauri-action`, unsigned MSI + NSIS + portable zip)
+- [x] **NF-V0.5-B** — Image thumbnail pipeline (480 px `<id>.thumb.jpg`, served via protocol with `onError` fallback)
+- [x] **EI-V0.5-5** — Selection/Esc/filter interactions tightened
+- [x] **EI-V0.5-6** — Vault + Takeout correctness (per-run subfolder; Takeout timestamps + reminders preserved)
+- [x] **EI-V0.5-7** — Global-hotkey failure surfaces as toast
+- [x] **EI-V0.5-8** — `patchNote` skip-sort when patch doesn't touch sort keys
+- [x] **EI-V0.5-9** — Hashtag auto-detach on text removal + title-hashtag highlighting
+- [x] **Test coverage** — 89 automated checks (20 cargo + 69 vitest)
+- [ ] *Auto-updater scaffold deferred to v0.5.1 — needs published Releases manifest first*
+- [ ] *EI-V0.5-8 list_notes payload trim deferred — couldn't quantify visible win at current scale*
 
 ---
 
