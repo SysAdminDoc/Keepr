@@ -213,6 +213,24 @@ export default function App() {
   // re-fire.
   useIdleLock(lockAfterMinutes, lock, appLockEnabled && !locked);
 
+  // Ctrl+Wheel anywhere in the app resizes the masonry cards. Up = zoom
+  // in (wider), down = zoom out (narrower). Bound to the window with
+  // `passive: false` so we can preventDefault and stop WebView2's
+  // built-in page-zoom from also firing.
+  const bumpCardWidth = useStore((s) => s.bumpCardWidth);
+  useEffect(() => {
+    const onWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey) return;
+      e.preventDefault();
+      // deltaY > 0 = scroll down = zoom out (narrower cards = negative step).
+      // deltaY < 0 = scroll up   = zoom in  (wider cards   = positive step).
+      const steps = e.deltaY > 0 ? -1 : 1;
+      bumpCardWidth(steps);
+    };
+    window.addEventListener("wheel", onWheel, { passive: false });
+    return () => window.removeEventListener("wheel", onWheel);
+  }, [bumpCardWidth]);
+
   const filters = useStore((s) => s.filters);
   const reminders = useStore((s) => s.reminders);
   const searchMatchIds = useStore((s) => s.searchMatchIds);

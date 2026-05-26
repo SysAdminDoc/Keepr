@@ -35,6 +35,7 @@ export function NoteGrid({ notes }: Props) {
   const sortMode = useStore((s) => s.sortMode);
   const section = useStore((s) => s.section);
   const showToast = useStore((s) => s.showToast);
+  const cardWidth = useStore((s) => s.cardWidth);
 
   // EI-V0.5-1 — drag-reorder is only safe in the Notes section. In
   // Archive/Trash/Label sections, a drop would write `position` for the
@@ -92,15 +93,21 @@ export function NoteGrid({ notes }: Props) {
 
   // EI-10 — replaced react-masonry-css (last release Aug 2022, no
   // virtualization, blocking NF-05 work) with CSS multi-column layout.
-  // `column-count` + `break-inside: avoid` produces the same visual
-  // (cards fill columns top-to-bottom) with zero runtime cost and no
-  // ResizeObserver shim needed. List mode collapses to one column.
+  // `column-width` (instead of `column-count`) + `break-inside: avoid`
+  // lets the browser fit as many columns as the container can hold at
+  // the user's preferred card width — so Ctrl+Wheel "zoom" just bumps
+  // `cardWidth` and the layout reflows itself, no JS needed for the
+  // breakpoint math. List mode collapses to one column.
   const cards = (
     <div
-      className={
+      className={viewMode === "list" ? "max-w-3xl mx-auto" : "gap-4"}
+      style={
         viewMode === "list"
-          ? "max-w-3xl mx-auto"
-          : "columns-1 sm:columns-2 lg:columns-3 xl:columns-4 2xl:columns-5 gap-4"
+          ? undefined
+          : {
+              columnWidth: `${cardWidth}px`,
+              columnGap: "1rem",
+            }
       }
     >
       {notes.map((n) => (

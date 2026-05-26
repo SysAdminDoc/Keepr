@@ -93,6 +93,15 @@ interface UIState {
   setAutoBackupCadence: (c: AutoBackupCadence) => void;
   setAutoBackupFolder: (folder: string | null) => void;
   setAutoBackupLastAt: (iso: string | null) => void;
+  /** Masonry-grid card width in px. Adjusted by Ctrl+Wheel over the
+   *  notes area (scroll up zooms in / wider cards, scroll down zooms
+   *  out / narrower cards). Persisted to localStorage. */
+  cardWidth: number;
+  setCardWidth: (px: number) => void;
+  /** Step the card width by ±CARD_WIDTH_STEP — used by the Ctrl+Wheel
+   *  handler. Positive = zoom in (wider). Clamped to MIN/MAX. */
+  bumpCardWidth: (deltaSteps: number) => void;
+  resetCardWidth: () => void;
   openEditor: (id: string | null) => void;
   closeEditor: () => void;
   openSettings: () => void;
@@ -151,9 +160,17 @@ const MOVE_CHECKED_KEY = "keepr:move-checked-to-bottom"; // "true" | "false"
 const AUTOBACKUP_CADENCE_KEY = "keepr:autobackup-cadence"; // "off"|"daily"|"weekly"
 const AUTOBACKUP_FOLDER_KEY = "keepr:autobackup-folder"; // absolute path
 const AUTOBACKUP_LAST_KEY = "keepr:autobackup-last-at"; // ISO
+const CARD_WIDTH_KEY = "keepr:card-width"; // integer px, clamped to MIN/MAX_CARD_WIDTH
 
 const DEFAULT_TRASH_RETENTION_DAYS = 7;
 const DEFAULT_MOVE_CHECKED_TO_BOTTOM = true;
+// Default card width tuned to ~3 columns at 1024px and ~4 at 1440px,
+// matching the old `lg:columns-3 xl:columns-4` breakpoints. Ctrl+Wheel
+// adjusts in `CARD_WIDTH_STEP` notches between MIN and MAX.
+export const DEFAULT_CARD_WIDTH = 240;
+export const MIN_CARD_WIDTH = 160;
+export const MAX_CARD_WIDTH = 480;
+export const CARD_WIDTH_STEP = 16;
 
 // EI-37 — the inline boot script in `index.html` toggles the `.dark` class on
 // <html> BEFORE the first React paint, so there's no flash of wrong theme.
@@ -220,6 +237,20 @@ function readInitialAutoBackupLastAt(): string | null {
   return localStorage.getItem(AUTOBACKUP_LAST_KEY);
 }
 
+function clampCardWidth(n: number): number {
+  if (!Number.isFinite(n)) return DEFAULT_CARD_WIDTH;
+  return Math.max(MIN_CARD_WIDTH, Math.min(MAX_CARD_WIDTH, Math.round(n)));
+}
+
+function readInitialCardWidth(): number {
+  if (typeof localStorage === "undefined") return DEFAULT_CARD_WIDTH;
+  const raw = localStorage.getItem(CARD_WIDTH_KEY);
+  if (raw == null) return DEFAULT_CARD_WIDTH;
+  const n = parseInt(raw, 10);
+  if (Number.isNaN(n)) return DEFAULT_CARD_WIDTH;
+  return clampCardWidth(n);
+}
+
 function effectiveDark(mode: ThemeMode): boolean {
   if (mode === "dark") return true;
   if (mode === "light") return false;
@@ -272,6 +303,7 @@ export const useStore = create<UIState>((set, get) => ({
   autoBackupCadence: readInitialAutoBackupCadence(),
   autoBackupFolder: readInitialAutoBackupFolder(),
   autoBackupLastAt: readInitialAutoBackupLastAt(),
+  cardWidth: readInitialCardWidth(),
   toasts: [],
   selectedIds: new Set(),
   locked: false,
@@ -351,6 +383,19 @@ export const useStore = create<UIState>((set, get) => ({
     if (folder) localStorage.setItem(AUTOBACKUP_FOLDER_KEY, folder);
     else localStorage.removeItem(AUTOBACKUP_FOLDER_KEY);
     set({ autoBackupFolder: folder });
+  },
+  setCardWidth: (px) => {
+    const clamped = clampCardWidth(px);
+    localStorage.setItem(CARD_WIDTH_KEY, String(clamped));
+    set({ cardWidth: clamped });
+  },
+  bumpCardWidth: (deltaSteps) => {
+    const current = get().cardWidth;
+    get().setCardWidth(current + deltaSteps * CARD_WIDTH_STEP);
+  },
+  resetCardWidth: () => {
+    localStorage.removeItem(CARD_WIDTH_KEY);
+    set({ cardWidth: DEFAULT_CARD_WIDTH });
   },
   setAutoBackupLastAt: (iso) => {
     if (iso) localStorage.setItem(AUTOBACKUP_LAST_KEY, iso);

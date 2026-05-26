@@ -6,6 +6,17 @@ All notable changes to Keepr are documented here. Format loosely follows [Keep a
 
 (See [ROADMAP.md](ROADMAP.md) for the live task list.)
 
+## [0.16.5] — 2026-05-26 — "Ctrl+Wheel zoom for card size"
+
+### Added
+
+- **Ctrl+Wheel resizes masonry cards.** Hold Ctrl, scroll up → cards get wider (zooms in, fewer columns per row). Scroll down → cards get narrower (zooms out, more columns per row). Step is 16px per wheel notch, clamped to 160-480px, default 240px. The choice persists across launches (`keepr:card-width` in localStorage).
+- Note: plain wheel still scrolls the page normally — only Ctrl+Wheel zooms. The wheel listener is bound at the window level with `passive: false` so `preventDefault()` suppresses WebView2's built-in page-zoom shortcut at the same time.
+
+### Changed
+
+- **NoteGrid uses `column-width` instead of `column-count`.** The old `columns-1 sm:columns-2 lg:columns-3 xl:columns-4 2xl:columns-5` Tailwind classes forced a discrete column count at each Tailwind breakpoint. Now the grid sets `style={{ columnWidth: cardWidth + 'px' }}` and the browser fits as many columns as the container can hold at that width — so resizing the window AND zooming both reflow with no JS in the loop. List mode (one-column) is unchanged.
+
 ## [0.16.4] — 2026-05-26 — "Settings modal: wider + scrollable"
 
 ### Fixed
