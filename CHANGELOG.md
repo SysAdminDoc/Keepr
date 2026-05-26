@@ -6,6 +6,21 @@ All notable changes to Keepr are documented here. Format loosely follows [Keep a
 
 (See [ROADMAP.md](ROADMAP.md) for the live task list.)
 
+## [0.15.0] — 2026-05-26 — "Frontend polish"
+
+Three Phase C deferrals: react-masonry-css replaced with CSS-native multi-column layout, secondary modals code-split via `React.lazy`, and the editor toolbar gains a kebab "More" overflow menu so it stops growing.
+
+### Changed
+
+- **EI-10** `react-masonry-css` dropped. NoteGrid now uses CSS `columns-1 sm:columns-2 lg:columns-3 xl:columns-4 2xl:columns-5` + `break-inside-avoid` per card — produces the same masonry visual (cards fill columns top-to-bottom) with zero runtime cost, no `ResizeObserver` shim, no abandoned-since-2022 dependency. List-mode collapses to a single centered column directly in the component.
+- **EI-V0.5-17** Code-split secondary modals via `React.lazy`. The initial editor + grid bundle no longer pulls in `SettingsModal`, `LabelsManager`, `HelpOverlay`, `LockScreen`, `ReminderPicker`, `HistoryDrawer`, or `DrawingCanvasModal` — each loads the first time the user opens it. Modals that already gate on an `open` flag get `fallback={null}` so there's no flash. Removes ~30-40 KB from the initial-paint critical path.
+- **EI-V0.5-15** (rest) Editor toolbar kebab "More" menu. Lower-priority actions (Make a copy, Version history, Move to/out of vault) move behind a `MoreVertical` IconBtn with a popover; primary actions (Reminder, Add image, Background, Show checkboxes, Labels, Archive, Delete) stay always-visible. The toolbar is now ~7 buttons wide instead of ~10, fits comfortably in the editor's `max-w-xl` width.
+
+### Tests
+
+- **50 cargo tests** unchanged — pure-frontend release.
+- **85 vitest cases** unchanged — render-layer refactors covered by tsc + manual smoke. The masonry change in particular is structural CSS, not logic.
+
 ## [0.14.0] — 2026-05-26 — "Checklist & textures"
 
 Three Keep-parity items at once: sub-item indent in checklists (NF-21), the nine background patterns (NF-22), and the FLIP animation on the existing "Move checked to bottom" behaviour (NF-20 polish). Two schema bumps (v10 + v11), one new lib, one new hook, and a colour-picker that grows a pattern row when a host wants to expose patterns.

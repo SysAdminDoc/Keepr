@@ -28,11 +28,11 @@ These are the items still on deck. They batch into the next handful of minor rel
 - [x] **NF-22** — Background patterns. Schema v11 adds `background_pattern`; `src/lib/backgroundPatterns.ts` ships 9 inline-SVG data URIs; ColorPicker grows an opt-in pattern row; NoteCard + editor render via inline `backgroundImage`
 - [x] **NF-20 polish** — FLIP animation. New `useFlip<K>` hook captures pre/post rects and animates the delta via `transform: translate(…)` → 200 ms transition; honours `prefers-reduced-motion`; keyed on the checklist's checked-state bitmap
 
-### v0.15.0 "Frontend polish"
+### v0.15.0 "Frontend polish" — SHIPPED 2026-05-26
 
-- [ ] **EI-10** — Replace `react-masonry-css` (unmaintained since Aug 2022; no virtualization). Adopt `masonic` or roll a CSS-Grid `grid-template-rows: masonry` component with a `ResizeObserver` shim for non-Firefox.
-- [ ] **EI-V0.5-17** — Code-split secondary modals via `React.lazy` (SettingsModal, LabelsManager, HistoryDrawer, ReminderPicker, VaultSection, AppLockSection, DrawingCanvasModal); tree-shake `lucide-react` to per-icon imports.
-- [ ] **EI-V0.5-15** (rest) — Kebab "More" overflow on the editor toolbar (current toolbar is wide; collapse non-essential actions into a dropdown when window narrows).
+- [x] **EI-10** — react-masonry-css dropped. NoteGrid uses CSS `columns-*` + `break-inside-avoid` (zero runtime cost, no shim, list-mode collapses inline)
+- [x] **EI-V0.5-17** — Secondary modals lazy-loaded (SettingsModal / LabelsManager / HelpOverlay / LockScreen / ReminderPicker / HistoryDrawer / DrawingCanvasModal) — initial bundle drops the modal trees until first open
+- [x] **EI-V0.5-15** — Kebab "More" overflow on the editor toolbar (Make a copy / Version history / Move to vault collapse into a `MoreVertical` popover; primaries stay always-visible)
 
 ### v0.16.0 "Refactor pass"
 
