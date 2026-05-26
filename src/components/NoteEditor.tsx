@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import clsx from "clsx";
+import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import {
   Pin,
   PinOff,
@@ -19,7 +20,7 @@ import { useStore } from "../store";
 import { api } from "../api";
 import { bgFor, borderFor } from "../colors";
 import { ColorPicker } from "./ColorPicker";
-import type { ChecklistItemInput, ColorKey, NoteKind, NoteInput } from "../types";
+import type { ChecklistItemInput, ColorKey, Note, NoteKind, NoteInput } from "../types";
 
 interface Draft {
   kind: NoteKind;
@@ -42,20 +43,19 @@ const emptyDraft = (): Draft => ({
 });
 
 export function NoteEditor() {
-  const {
-    editorOpen,
-    editorNoteId,
-    closeEditor,
-    notes,
-    labels,
-    dark,
-    load,
-    showToast,
-  } = useStore();
-  const existing = useMemo(
-    () => notes.find((n) => n.id === editorNoteId) || null,
-    [notes, editorNoteId],
-  );
+  const editorOpen = useStore((s) => s.editorOpen);
+  const editorNoteId = useStore((s) => s.editorNoteId);
+  const closeEditor = useStore((s) => s.closeEditor);
+  const labels = useStore((s) => s.labels);
+  const dark = useStore((s) => s.dark);
+  const load = useStore((s) => s.load);
+  const showToast = useStore((s) => s.showToast);
+
+  // EI-06 — Snapshot the existing note once on open. We deliberately do NOT
+  // depend on the store's `notes` array because a background load() would
+  // swap the array reference and clobber in-progress edits. The snapshot
+  // is captured imperatively in the open effect below.
+  const [existing, setExisting] = useState<Note | null>(null);
 
   const [draft, setDraft] = useState<Draft>(emptyDraft());
   const [colorOpen, setColorOpen] = useState(false);
@@ -64,39 +64,145 @@ export function NoteEditor() {
   const titleRef = useRef<HTMLTextAreaElement>(null);
   const bodyRef = useRef<HTMLTextAreaElement>(null);
 
+  // EI-07 — re-entrant guard on close().
+  const closingRef = useRef(false);
+  // Stable reference to the latest draft for the close handlers / OS
+  // close-requested listener (which capture by closure at registration).
+  const draftRef = useRef(draft);
+  const existingRef = useRef<Note | null>(null);
+  useEffect(() => {
+    draftRef.current = draft;
+  }, [draft]);
+  useEffect(() => {
+    existingRef.current = existing;
+  }, [existing]);
+
   useEffect(() => {
     if (!editorOpen) return;
-    if (existing) {
+    closingRef.current = false;
+    // Read latest store snapshot once — does not subscribe.
+    const found = useStore
+      .getState()
+      .notes.find((n) => n.id === editorNoteId) || null;
+    setExisting(found);
+    if (found) {
       setDraft({
-        kind: existing.kind,
-        title: existing.title,
-        body: existing.body,
-        color: existing.color,
-        pinned: existing.pinned,
-        checklist: existing.checklist.map((c) => ({
+        kind: found.kind,
+        title: found.title,
+        body: found.body,
+        color: found.color,
+        pinned: found.pinned,
+        checklist: found.checklist.map((c) => ({
           id: c.id,
           text: c.text,
           checked: c.checked,
           position: c.position,
         })),
-        labels: [...existing.labels],
+        labels: [...found.labels],
       });
     } else {
       setDraft(emptyDraft());
     }
     setColorOpen(false);
     setLabelMenuOpen(false);
-  }, [editorOpen, existing]);
+    // Auto-focus title for new notes (audit item 96).
+    if (!editorNoteId) {
+      // RAF so the textarea is mounted before we focus.
+      requestAnimationFrame(() => titleRef.current?.focus());
+    }
+  }, [editorOpen, editorNoteId]);
 
+  // Save + close. Stable identity via useCallback that reads from refs so
+  // it never closes over stale state (EI-07).
+  const close = useCallback(async () => {
+    if (closingRef.current) return; // re-entrant guard
+    closingRef.current = true;
+    const d = draftRef.current;
+    const ex = existingRef.current;
+    const payload: NoteInput = {
+      kind: d.kind,
+      title: d.title,
+      body: d.body,
+      color: d.color,
+      pinned: d.pinned,
+      checklist: d.checklist
+        .filter((c) => c.text.trim().length > 0)
+        .map((c, i) => ({ ...c, position: i })),
+      labels: d.labels,
+    };
+    const isEmptyNow =
+      !d.title.trim() &&
+      !d.body.trim() &&
+      !d.checklist.some((c) => c.text.trim());
+    try {
+      if (ex) {
+        if (isEmptyNow && ex.kind === "text" && ex.title === "" && ex.body === "") {
+          // Was empty when opened, still empty — keep as a permanent empty
+          // note (EI-23). We only delete if the original had content.
+          await api.deleteNotePermanent(ex.id);
+          showToast("Empty note discarded");
+        } else if (isEmptyNow) {
+          // EI-23 — don't permanently delete when the user merely cleared
+          // a previously-non-empty note via setKind/etc. Just update with
+          // the empty payload so they keep the record.
+          await api.updateNote(ex.id, payload);
+        } else {
+          await api.updateNote(ex.id, payload);
+        }
+      } else if (!isEmptyNow) {
+        await api.createNote(payload);
+      }
+      await load();
+    } catch (e) {
+      showToast("Could not save: " + String(e));
+    } finally {
+      closeEditor();
+    }
+  }, [closeEditor, load, showToast]);
+
+  // Escape closes (EI-45). One stable handler, only re-binds when editor
+  // open/close flips, not on every keystroke.
   useEffect(() => {
     if (!editorOpen) return;
     const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") close();
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        close();
+      }
     };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [editorOpen, draft, existing]);
+  }, [editorOpen, close]);
+
+  // EI-07 — ALT-F4 / OS close button must flush the in-progress draft.
+  useEffect(() => {
+    if (!editorOpen) return;
+    let unlisten: (() => void) | null = null;
+    let cancelled = false;
+    (async () => {
+      try {
+        const win = getCurrentWebviewWindow();
+        const u = await win.onCloseRequested(async (event) => {
+          // Prevent the immediate close so we have time to await save.
+          event.preventDefault();
+          await close();
+          // Now actually close.
+          await win.destroy();
+        });
+        if (cancelled) {
+          u();
+        } else {
+          unlisten = u;
+        }
+      } catch {
+        // No-op outside Tauri (e.g. vitest, pure browser preview).
+      }
+    })();
+    return () => {
+      cancelled = true;
+      if (unlisten) unlisten();
+    };
+  }, [editorOpen, close]);
 
   if (!editorOpen) return null;
 
@@ -108,47 +214,29 @@ export function NoteEditor() {
     !draft.body.trim() &&
     !draft.checklist.some((c) => c.text.trim());
 
-  const close = async () => {
-    const payload: NoteInput = {
-      kind: draft.kind,
-      title: draft.title,
-      body: draft.body,
-      color: draft.color,
-      pinned: draft.pinned,
-      checklist: draft.checklist
-        .filter((c) => c.text.trim().length > 0)
-        .map((c, i) => ({ ...c, position: i })),
-      labels: draft.labels,
-    };
-    try {
-      if (existing) {
-        if (isEmpty) {
-          await api.deleteNotePermanent(existing.id);
-          showToast("Empty note discarded");
-        } else {
-          await api.updateNote(existing.id, payload);
-        }
-      } else if (!isEmpty) {
-        await api.createNote(payload);
-      }
-      await load();
-    } finally {
-      closeEditor();
-    }
-  };
-
+  // EI-22 — `setKind` round-trip is now lossless. text -> list parses
+  // GFM-style `- [x] item` / `- [ ] item` markers; list -> text writes
+  // the same markers so subsequent text -> list recovers `checked`.
   const setKind = (k: NoteKind) => {
     if (k === "list" && draft.kind === "text") {
       const lines = draft.body
         .split(/\r?\n/)
-        .map((s) => s.trim())
+        .map((s) => s.replace(/^\s+|\s+$/g, ""))
         .filter(Boolean);
       const items: ChecklistItemInput[] = lines.length
-        ? lines.map((t, i) => ({ text: t, checked: false, position: i }))
+        ? lines.map((line, i) => {
+            const m = /^[-*]?\s*\[( |x|X)\]\s+(.*)$/.exec(line);
+            if (m) {
+              return { text: m[2], checked: m[1].toLowerCase() === "x", position: i };
+            }
+            return { text: line, checked: false, position: i };
+          })
         : [{ text: "", checked: false, position: 0 }];
       setDraft({ ...draft, kind: "list", body: "", checklist: items });
     } else if (k === "text" && draft.kind === "list") {
-      const body = draft.checklist.map((c) => c.text).join("\n");
+      const body = draft.checklist
+        .map((c) => `- [${c.checked ? "x" : " "}] ${c.text}`)
+        .join("\n");
       setDraft({ ...draft, kind: "text", body, checklist: [] });
     }
   };
@@ -191,20 +279,51 @@ export function NoteEditor() {
     setDraft((d) => ({ ...d, labels: [...new Set([...d.labels, lbl.id])] }));
   };
 
+  // EI-21 — flush the in-progress draft before archive/trash so the
+  // user's most recent edits aren't discarded.
+  const flushDraft = async () => {
+    if (!existing) return;
+    const d = draftRef.current;
+    const payload: NoteInput = {
+      kind: d.kind,
+      title: d.title,
+      body: d.body,
+      color: d.color,
+      pinned: d.pinned,
+      checklist: d.checklist
+        .filter((c) => c.text.trim().length > 0)
+        .map((c, i) => ({ ...c, position: i })),
+      labels: d.labels,
+    };
+    await api.updateNote(existing.id, payload);
+  };
+
   const archive = async () => {
     if (!existing) return;
-    await api.setArchived(existing.id, !existing.archived);
-    await load();
-    closeEditor();
-    showToast(existing.archived ? "Note unarchived" : "Note archived");
+    try {
+      await flushDraft();
+      await api.setArchived(existing.id, !existing.archived);
+      await load();
+      showToast(existing.archived ? "Note unarchived" : "Note archived");
+    } catch (e) {
+      showToast("Could not archive: " + String(e));
+    } finally {
+      closeEditor();
+    }
   };
 
   const trash = async () => {
     if (!existing) return;
-    await api.setTrashed(existing.id, true);
-    await load();
-    closeEditor();
-    showToast("Note moved to Trash");
+    try {
+      await flushDraft();
+      await api.setTrashed(existing.id, true);
+      await load();
+      showToast("Note moved to Trash");
+    } catch (e) {
+      showToast("Could not trash: " + String(e));
+    } finally {
+      closeEditor();
+    }
   };
 
   return (
