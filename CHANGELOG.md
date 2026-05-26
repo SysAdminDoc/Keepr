@@ -6,6 +6,57 @@ All notable changes to Keepr are documented here. Format loosely follows [Keep a
 
 (See [ROADMAP.md](ROADMAP.md) for the live task list.)
 
+## [0.3.0] — 2026-05-25 — "Power & Parity"
+
+Every P1 Keep-parity feature plus the v0.2 deferred items that didn't need new infrastructure. Schema unchanged (still v2); no migration needed when upgrading from v0.2.
+
+### Power-user
+
+- **NF-03** Keyboard shortcuts: `c` / `l` (new note), `/` (focus search), `?` (help overlay), `j` / `k` (focus next/prev note), `f` (pin), `e` (archive), `#` (trash), `Ctrl+G` (toggle list/grid view), `Ctrl+A` (select all visible), `Esc` (clear selection / close modals). All canonical Keep bindings except the ones gated on features we haven't shipped (sub-item indent, Shift+J/K move). A `?` overlay lists everything with styled `<kbd>` chips.
+- **NF-04** Multi-select + bulk actions: hover a card to reveal a select checkmark, or press `x` while focused, or `Ctrl+A` to grab everything visible. The TopBar swaps to a yellow BulkActionBar with bulk Pin / Color / Labels (tri-state) / Archive / Trash. Selection survives section switches and clears on Escape.
+- **NF-05** Drag-and-drop reorder + Custom sort:
+  - Sort menu in the TopBar — Modified (default), Created, Title (A-Z), Custom.
+  - When sort is Custom, NoteCards become draggable via `@dnd-kit/sortable`; drop rearranges and persists via a new `reorder_notes(ids[])` Rust command that writes `notes.position`.
+  - Checklist items in the editor are draggable any time via a GripVertical handle next to each unchecked row.
+- **NF-06** System-tray icon + global hotkey: tray menu with "Show / hide Keepr", "New note", "Quit Keepr"; left-click toggles the window; `Ctrl+Alt+N` from anywhere shows the window and opens a fresh editor. Window close minimizes to tray so the auto-backup tick + global hotkey keep working.
+
+### Editor
+
+- **NF-18** "Make a copy" duplicates the open note via a new `duplicate_note(id)` Rust command. New note lands unpinned in the active Notes section with " (copy)" appended to the title.
+- **NF-19** Editor's text↔list toggle is now labeled "Show checkboxes" / "Hide checkboxes" to match Keep.
+- **NF-20** Settings toggle (default ON) renders checked items in a collapsible "N Checked items" group at the bottom of the list; unchecked stay in stored order at the top. FLIP animation deferred to v0.4 polish.
+
+### Find
+
+- **NF-09** Filter chip row sits below the TopBar: Type (Notes / Lists), Color (12-swatch grid), Label (multi-select), Pinned. Chips OR within a facet, AND across facets. A "Clear filters" link appears when any facet is active.
+
+### Theme / view
+
+- **NF-16** Theme is now Light / Dark / System (default = System, follows `prefers-color-scheme` and re-flips when the OS theme changes). Boot script in `index.html` honors the System mode pre-paint.
+- **NF-23** Grid / List view toggle in the TopBar (also `Ctrl+G`); List view clamps the masonry to a single 600px-max column.
+
+### Backup
+
+- **NF-15** Auto-backup schedule: Settings dropdown (Off / Daily / Weekly) + a folder picker. Keepr writes a timestamped `.zip` into the folder on cadence; missed windows catch up on next launch. Point the folder at your Google Drive / OneDrive / Dropbox sync folder for cloud backups with no plumbing.
+- **NF-17** Configurable trash retention: Settings number input (default 7 days, max 3650, 0 = never). App sweeps expired trashed notes on startup and every hour. Trashed cards now show a "X days left" badge.
+
+### Perf / hygiene
+
+- **EI-24** Optimistic in-place store updates: every mutation patches the local store instead of calling `list_notes` again. New `upsertNote` / `patchNote` / `removeNote` / `upsertLabel` / `patchLabel` / `removeLabel` / `removeNotesWhere` reducers. Pin / archive / trash / color / label edits no longer trigger a full grid rerender at scale.
+- **EI-25** Slice subscriptions completed everywhere — every component reads only the store slices it needs via `useStore((s) => s.x)`.
+- **EI-30** Single source of truth for the color palette: `src/keep-palette.js` is imported by both `src/colors.ts` and `tailwind.config.js`. No more drift.
+- **EI-39** WCAG contrast audit verified: every LIGHT_HEX × dark-text and DARK_HEX × light-text combo exceeds AAA (7:1). Documented in `src/keep-palette.js`.
+
+### Tests
+
+- Added 24 new vitest cases (trash retention 7, auto-backup math 11, sort modes 6) on top of the existing 16 — total 40 vitest + 8 cargo = 48 automated checks. CI runs them all on every PR.
+
+### Deferred from v0.3
+
+- **EI-10** Replace `react-masonry-css` — moved to v0.4. Drag-reorder works fine on top of it, and the library is small enough that replacing for replacement's sake isn't worth the diff.
+- **EI-18** FTS5 backend — moved to v0.4. Client-side `filterNotes` still runs in <1ms at 1k notes; FTS5 only pays off above 10k.
+- **NF-20 FLIP animation** — moved to v0.4. The React reorder is already smooth on small lists; a measure/transform dance without a library is more risk than the polish is worth.
+
 ## [0.2.0] — 2026-05-25 — "Trust & Foundations"
 
 The first hardening pass — every P0 audit finding from `RESEARCH_FEATURE_PLAN.md` is closed, the renderer is accessible and trapped-focus, and the primitives that v0.3+ multimodal work needs (schema migrations, custom protocol, portable mode) are in place. Schema is now versioned at v2.

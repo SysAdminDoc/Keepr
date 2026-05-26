@@ -3,6 +3,13 @@
  * Imported by both `src/colors.ts` (the React renderer) and
  * `tailwind.config.js` (the build-time theme tokens). DO NOT
  * duplicate these values anywhere else.
+ *
+ * EI-39 — WCAG contrast verified 2026-05-25. Body text in light
+ * mode is #202124, in dark mode is #e8eaed. Every LIGHT_HEX value
+ * against #202124 measures >= 7:1; every DARK_HEX value against
+ * #e8eaed measures >= 7:1. All 24 combinations exceed WCAG AAA
+ * (7:1) for normal text, so no per-swatch text-color overrides
+ * are needed.
  */
 
 export const COLOR_KEYS = /** @type {const} */ ([
