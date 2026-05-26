@@ -22,6 +22,7 @@ function makeNote(over: Partial<Note> = {}): Note {
     trashed_at: over.trashed_at ?? null,
     checklist: over.checklist ?? [],
     labels: over.labels ?? [],
+    attachments: over.attachments ?? [],
   };
 }
 

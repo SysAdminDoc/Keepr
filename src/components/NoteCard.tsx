@@ -16,6 +16,7 @@ import { useStore } from "../store";
 import { api } from "../api";
 import { ColorPicker } from "./ColorPicker";
 import { IconBtn } from "./IconBtn";
+import { AttachmentGrid } from "./AttachmentGrid";
 import { useClickOutside } from "../hooks/useClickOutside";
 import { daysLeftInTrash } from "../lib/trashRetention";
 import { useSortable } from "@dnd-kit/sortable";
@@ -253,6 +254,10 @@ export function NoteCard({ note }: Props) {
         >
           {note.pinned ? <Pin size={18} aria-hidden /> : <PinOff size={18} aria-hidden />}
         </button>
+      )}
+
+      {note.attachments.length > 0 && (
+        <AttachmentGrid attachments={note.attachments} maxVisible={4} />
       )}
 
       <div className="px-4 pt-3 pb-2 pr-10">

@@ -4,7 +4,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::io::{Read, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tauri::State;
 use uuid::Uuid;
@@ -16,6 +16,21 @@ pub struct ChecklistItem {
     pub text: String,
     pub checked: bool,
     pub position: i64,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct Attachment {
+    pub id: String,
+    pub note_id: String,
+    pub kind: String, // "image" | "drawing" | "audio" | "file"
+    pub mime: String,
+    pub filename: String,
+    pub byte_size: i64,
+    pub width: Option<i64>,
+    pub height: Option<i64>,
+    pub position: i64,
+    pub created_at: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -34,6 +49,7 @@ pub struct Note {
     pub trashed_at: Option<String>,
     pub checklist: Vec<ChecklistItem>,
     pub labels: Vec<String>, // label IDs
+    pub attachments: Vec<Attachment>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -126,6 +142,7 @@ fn load_note(conn: &Connection, id: &str) -> Result<Option<Note>, rusqlite::Erro
                 trashed_at: row.get(11)?,
                 checklist: vec![],
                 labels: vec![],
+                attachments: vec![],
             })
         })
         .optional()?;
@@ -153,6 +170,28 @@ fn load_note(conn: &Connection, id: &str) -> Result<Option<Note>, rusqlite::Erro
         .query_map(params![id], |row| row.get::<_, String>(0))?
         .collect::<Result<Vec<_>, _>>()?;
     note.labels = labels;
+
+    let mut astmt = conn.prepare(
+        "SELECT id, note_id, kind, mime, filename, byte_size, width, height, position, created_at
+         FROM attachments WHERE note_id = ?1 ORDER BY position ASC, rowid ASC",
+    )?;
+    let attachments = astmt
+        .query_map(params![id], |row| {
+            Ok(Attachment {
+                id: row.get(0)?,
+                note_id: row.get(1)?,
+                kind: row.get(2)?,
+                mime: row.get(3)?,
+                filename: row.get(4)?,
+                byte_size: row.get(5)?,
+                width: row.get(6)?,
+                height: row.get(7)?,
+                position: row.get(8)?,
+                created_at: row.get(9)?,
+            })
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    note.attachments = attachments;
     Ok(Some(note))
 }
 
@@ -188,6 +227,7 @@ pub fn list_notes(state: State<'_, AppState>) -> Result<Vec<Note>, String> {
                 trashed_at: row.get(11)?,
                 checklist: Vec::new(),
                 labels: Vec::new(),
+                attachments: Vec::new(),
             })
         })
         .map_err(err)?
@@ -230,6 +270,31 @@ pub fn list_notes(state: State<'_, AppState>) -> Result<Vec<Note>, String> {
         let label_id: String = row.get(1).map_err(err)?;
         if let Some(&i) = idx.get(&note_id) {
             notes[i].labels.push(label_id);
+        }
+    }
+
+    let mut astmt = conn
+        .prepare(
+            "SELECT note_id, id, kind, mime, filename, byte_size, width, height, position, created_at
+             FROM attachments ORDER BY position ASC, rowid ASC",
+        )
+        .map_err(err)?;
+    let mut arows = astmt.query([]).map_err(err)?;
+    while let Some(row) = arows.next().map_err(err)? {
+        let note_id: String = row.get(0).map_err(err)?;
+        if let Some(&i) = idx.get(&note_id) {
+            notes[i].attachments.push(Attachment {
+                id: row.get(1).map_err(err)?,
+                note_id: note_id.clone(),
+                kind: row.get(2).map_err(err)?,
+                mime: row.get(3).map_err(err)?,
+                filename: row.get(4).map_err(err)?,
+                byte_size: row.get(5).map_err(err)?,
+                width: row.get(6).map_err(err)?,
+                height: row.get(7).map_err(err)?,
+                position: row.get(8).map_err(err)?,
+                created_at: row.get(9).map_err(err)?,
+            });
         }
     }
 
@@ -311,6 +376,7 @@ pub fn create_note(state: State<'_, AppState>, input: NoteInput) -> Result<Note,
         trashed_at: None,
         checklist: checklist_out,
         labels: input.labels,
+        attachments: Vec::new(),
     })
 }
 
@@ -383,6 +449,11 @@ pub fn update_note(
     }
     tx.commit().map_err(err)?;
     drop(conn);
+    // Re-read attachments (we don't change them in update_note) for the
+    // returned Note. Cheap — one indexed SELECT.
+    let conn = state.db.lock();
+    let attachments = load_attachments(&conn, &id).map_err(err)?;
+    drop(conn);
     Ok(Note {
         id,
         kind: input.kind,
@@ -398,7 +469,35 @@ pub fn update_note(
         trashed_at,
         checklist: checklist_out,
         labels: input.labels,
+        attachments,
     })
+}
+
+fn load_attachments(
+    conn: &Connection,
+    note_id: &str,
+) -> Result<Vec<Attachment>, rusqlite::Error> {
+    let mut stmt = conn.prepare(
+        "SELECT id, note_id, kind, mime, filename, byte_size, width, height, position, created_at
+         FROM attachments WHERE note_id = ?1 ORDER BY position ASC, rowid ASC",
+    )?;
+    let rows = stmt
+        .query_map(params![note_id], |row| {
+            Ok(Attachment {
+                id: row.get(0)?,
+                note_id: row.get(1)?,
+                kind: row.get(2)?,
+                mime: row.get(3)?,
+                filename: row.get(4)?,
+                byte_size: row.get(5)?,
+                width: row.get(6)?,
+                height: row.get(7)?,
+                position: row.get(8)?,
+                created_at: row.get(9)?,
+            })
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(rows)
 }
 
 /// NF-18 — "Make a copy". Server-side duplicate so timestamps and ID
@@ -467,7 +566,202 @@ pub fn duplicate_note(state: State<'_, AppState>, id: String) -> Result<Note, St
         trashed_at: None,
         checklist: checklist_out,
         labels: source.labels,
+        // v0.4 — duplicate_note intentionally does NOT copy attachments;
+        // they'd be deep clones of file blobs and the use case (template
+        // notes) usually doesn't want a megabyte image duplicated. The
+        // user can manually re-attach if they really want a copy. Calling
+        // it out so the absence isn't a bug.
+        attachments: Vec::new(),
     })
+}
+
+// --- NF-01 attachments ---
+//
+// File model: bytes live under <data_dir>/resources/<id>.<ext>, served
+// to the renderer through the keepr-resource://<id>.<ext> protocol
+// (registered in lib.rs). The attachments table holds metadata. We
+// resolve the filename suffix from the source file's extension so the
+// protocol's content-type whitelist (guess_content_type) picks the
+// right MIME.
+
+const RESOURCES_DIR: &str = "resources";
+
+// Mirror of MAX_PER_FILE_BYTES but lower for in-app uploads, matching
+// the spirit of Keep's ~10 MB-per-image cap.
+const MAX_ATTACHMENT_BYTES: u64 = 32 * 1024 * 1024; // 32 MiB
+
+fn sanitize_extension(src: &Path) -> String {
+    // Take at most 8 ASCII letter/digit chars from the extension; default
+    // to "bin" if missing/weird. Avoids smuggling odd shell metachars
+    // into a filename.
+    src.extension()
+        .and_then(|s| s.to_str())
+        .map(|s| {
+            s.chars()
+                .filter(|c| c.is_ascii_alphanumeric())
+                .take(8)
+                .collect::<String>()
+                .to_ascii_lowercase()
+        })
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "bin".to_string())
+}
+
+fn guess_mime_for_ext(ext: &str) -> &'static str {
+    match ext {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "svg" => "image/svg+xml",
+        _ => "application/octet-stream",
+    }
+}
+
+#[tauri::command]
+pub fn add_image_attachment(
+    state: State<'_, AppState>,
+    note_id: String,
+    src_path: String,
+) -> Result<Attachment, String> {
+    if state.importing.load(std::sync::atomic::Ordering::SeqCst) {
+        return Err("a restore is currently in progress".into());
+    }
+    let src = PathBuf::from(&src_path);
+    let metadata = std::fs::metadata(&src).map_err(err)?;
+    if metadata.len() > MAX_ATTACHMENT_BYTES {
+        return Err(format!(
+            "image exceeds {} bytes (got {})",
+            MAX_ATTACHMENT_BYTES,
+            metadata.len()
+        ));
+    }
+    let ext = sanitize_extension(&src);
+    let mime = guess_mime_for_ext(&ext);
+    let original_name = src
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("image")
+        .chars()
+        .take(255)
+        .collect::<String>();
+
+    // Insert metadata first so we know the id; then write the file at
+    // <data_dir>/resources/<id>.<ext>. If the write fails, roll back.
+    let new_id = Uuid::new_v4().to_string();
+    let stored_name = format!("{new_id}.{ext}");
+    let resources_dir = state.data_dir.join(RESOURCES_DIR);
+    std::fs::create_dir_all(&resources_dir).map_err(err)?;
+    let dest = resources_dir.join(&stored_name);
+
+    // Verify the note exists + read the next position in one transaction.
+    let mut conn = state.db.lock();
+    let now = now_iso();
+    let position: i64 = {
+        let tx = conn.transaction().map_err(err)?;
+        let exists: i64 = tx
+            .query_row(
+                "SELECT COUNT(*) FROM notes WHERE id = ?1",
+                params![note_id],
+                |r| r.get(0),
+            )
+            .map_err(err)?;
+        if exists == 0 {
+            return Err(format!("note {note_id} not found"));
+        }
+        let pos: i64 = tx
+            .query_row(
+                "SELECT COALESCE(MAX(position) + 1, 0) FROM attachments WHERE note_id = ?1",
+                params![note_id],
+                |r| r.get(0),
+            )
+            .map_err(err)?;
+        tx.execute(
+            "INSERT INTO attachments (id, note_id, kind, mime, filename, byte_size, position, created_at)
+             VALUES (?1, ?2, 'image', ?3, ?4, ?5, ?6, ?7)",
+            params![
+                new_id,
+                note_id,
+                mime,
+                original_name,
+                metadata.len() as i64,
+                pos,
+                now,
+            ],
+        )
+        .map_err(err)?;
+        // Bump notes.updated_at so the card re-sorts to the top in
+        // Modified view.
+        tx.execute(
+            "UPDATE notes SET updated_at = ?1 WHERE id = ?2",
+            params![now, note_id],
+        )
+        .map_err(err)?;
+        tx.commit().map_err(err)?;
+        pos
+    };
+    drop(conn);
+
+    // Now copy the file. If the copy fails we delete the row we just
+    // inserted so the DB doesn't reference a missing blob.
+    if let Err(copy_err) = std::fs::copy(&src, &dest) {
+        let conn = state.db.lock();
+        let _ = conn.execute("DELETE FROM attachments WHERE id = ?1", params![new_id]);
+        return Err(format!("could not copy attachment: {copy_err}"));
+    }
+
+    Ok(Attachment {
+        id: new_id,
+        note_id,
+        kind: "image".into(),
+        mime: mime.into(),
+        filename: original_name,
+        byte_size: metadata.len() as i64,
+        width: None,
+        height: None,
+        position,
+        created_at: now,
+    })
+}
+
+#[tauri::command]
+pub fn delete_attachment(state: State<'_, AppState>, id: String) -> Result<(), String> {
+    if state.importing.load(std::sync::atomic::Ordering::SeqCst) {
+        return Err("a restore is currently in progress".into());
+    }
+    let conn = state.db.lock();
+    // Read filename suffix so we can delete the blob.
+    let (note_id, ext): (String, String) = conn
+        .query_row(
+            "SELECT note_id, mime FROM attachments WHERE id = ?1",
+            params![id],
+            |r| {
+                let note_id: String = r.get(0)?;
+                let mime: String = r.get(1)?;
+                let ext = match mime.as_str() {
+                    "image/png" => "png",
+                    "image/jpeg" => "jpg",
+                    "image/gif" => "gif",
+                    "image/webp" => "webp",
+                    "image/svg+xml" => "svg",
+                    _ => "bin",
+                };
+                Ok((note_id, ext.to_string()))
+            },
+        )
+        .map_err(|_| format!("attachment {id} not found"))?;
+    conn.execute("DELETE FROM attachments WHERE id = ?1", params![id])
+        .map_err(err)?;
+    // Best-effort: bump updated_at so cards re-sort.
+    let now = now_iso();
+    let _ = conn.execute(
+        "UPDATE notes SET updated_at = ?1 WHERE id = ?2",
+        params![now, note_id],
+    );
+    drop(conn);
+    let path = state.data_dir.join(RESOURCES_DIR).join(format!("{id}.{ext}"));
+    let _ = std::fs::remove_file(path);
+    Ok(())
 }
 
 /// NF-05 — drag-reorder support for Custom sort mode. Writes 0..N-1 into

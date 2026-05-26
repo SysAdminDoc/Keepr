@@ -28,6 +28,19 @@ export interface ChecklistItemInput {
   position: number;
 }
 
+export interface Attachment {
+  id: string;
+  noteId: string;
+  kind: "image" | "drawing" | "audio" | "file";
+  mime: string;
+  filename: string;
+  byteSize: number;
+  width: number | null;
+  height: number | null;
+  position: number;
+  createdAt: string;
+}
+
 export interface Note {
   id: string;
   kind: NoteKind;
@@ -43,6 +56,7 @@ export interface Note {
   trashed_at: string | null;
   checklist: ChecklistItem[];
   labels: string[];
+  attachments: Attachment[];
 }
 
 export interface NoteInput {

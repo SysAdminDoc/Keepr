@@ -17,7 +17,10 @@ import {
   AlignLeft,
   Copy,
   GripVertical,
+  Image as ImageIcon,
 } from "lucide-react";
+import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
+import type { Attachment } from "../types";
 import {
   DndContext,
   PointerSensor,
@@ -39,6 +42,7 @@ import { bgFor, borderFor } from "../colors";
 import { ColorPicker } from "./ColorPicker";
 import { IconBtn } from "./IconBtn";
 import { extractHashtagsFromNote } from "../lib/hashtags";
+import { AttachmentGrid } from "./AttachmentGrid";
 import type { ChecklistItemInput, ColorKey, Note, NoteKind, NoteInput } from "../types";
 
 interface ChecklistRowProps {
@@ -180,6 +184,11 @@ export function NoteEditor() {
   const upsertLabel = useStore((s) => s.upsertLabel);
   const moveCheckedToBottom = useStore((s) => s.moveCheckedToBottom);
   const [checkedCollapsed, setCheckedCollapsed] = useState(false);
+  // NF-01 — attachments live alongside draft state but aren't part of the
+  // NoteInput payload (add/remove go through their own commands so the
+  // file copy + DB write stay transactional). We snapshot existing
+  // attachments on open and append optimistically on add.
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
 
   // EI-06 — Snapshot the existing note once on open. We deliberately do NOT
   // depend on the store's `notes` array because a background load() would
@@ -230,8 +239,10 @@ export function NoteEditor() {
         })),
         labels: [...found.labels],
       });
+      setAttachments([...found.attachments]);
     } else {
       setDraft(emptyDraft());
+      setAttachments([]);
     }
     setColorOpen(false);
     setLabelMenuOpen(false);
@@ -538,6 +549,73 @@ export function NoteEditor() {
     }
   };
 
+  // NF-01 — image attachment flow. New notes must be saved first so we
+  // have a note_id to attach to; we transparently call createNote then
+  // promote the newly-created note to `existing` mid-edit.
+  const ensureExistingId = async (): Promise<string | null> => {
+    if (existing) return existing.id;
+    const d = draftRef.current;
+    try {
+      const created = await api.createNote({
+        kind: d.kind,
+        title: d.title,
+        body: d.body,
+        color: d.color,
+        pinned: d.pinned,
+        checklist: d.checklist
+          .filter((c) => c.text.trim().length > 0)
+          .map((c, i) => ({ ...c, position: i })),
+        labels: d.labels,
+      });
+      upsertNote(created);
+      setExisting(created);
+      return created.id;
+    } catch (e) {
+      showToast("Could not save note: " + String(e));
+      return null;
+    }
+  };
+
+  const addImage = async () => {
+    try {
+      const picked = await openFileDialog({
+        title: "Add image to note",
+        multiple: false,
+        filters: [
+          { name: "Image", extensions: ["png", "jpg", "jpeg", "gif", "webp"] },
+        ],
+      });
+      if (!picked) return;
+      const noteId = await ensureExistingId();
+      if (!noteId) return;
+      const att = await api.addImageAttachment(noteId, picked as string);
+      setAttachments((prev) => [...prev, att]);
+      // Refresh the note in the store so the card shows the new attachment.
+      patchNote(noteId, {
+        attachments: [...attachments, att],
+        updated_at: new Date().toISOString(),
+      });
+    } catch (e) {
+      showToast("Could not add image: " + String(e));
+    }
+  };
+
+  const removeAttachment = async (att: Attachment) => {
+    try {
+      await api.deleteAttachment(att.id);
+      const next = attachments.filter((a) => a.id !== att.id);
+      setAttachments(next);
+      if (existing) {
+        patchNote(existing.id, {
+          attachments: next,
+          updated_at: new Date().toISOString(),
+        });
+      }
+    } catch (e) {
+      showToast("Could not remove image: " + String(e));
+    }
+  };
+
   // NF-18 — duplicate the open note. Flushes any unsaved edits to the
   // source first, then asks the Rust side to copy.
   const duplicate = async () => {
@@ -565,6 +643,14 @@ export function NoteEditor() {
         style={{ background: bg, borderColor: border }}
         onClick={(e) => e.stopPropagation()}
       >
+        {attachments.length > 0 && (
+          <AttachmentGrid
+            attachments={attachments}
+            onRemove={removeAttachment}
+            editable
+          />
+        )}
+
         <div className="relative">
           <textarea
             ref={titleRef}
@@ -717,6 +803,9 @@ export function NoteEditor() {
         )}
 
         <div className="flex items-center px-1 pb-1 relative">
+          <IconBtn ariaLabel="Add image" onClick={addImage}>
+            <ImageIcon size={18} aria-hidden />
+          </IconBtn>
           <IconBtn ariaLabel="Background options" onClick={() => setColorOpen((v) => !v)}>
             <Palette size={18} aria-hidden />
           </IconBtn>

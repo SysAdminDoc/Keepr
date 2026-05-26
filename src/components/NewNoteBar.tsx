@@ -26,11 +26,10 @@ export function NewNoteBar() {
           </button>
           <button
             type="button"
-            disabled
-            aria-label="Add image (coming in v0.4)"
-            title="Image (coming v0.4)"
-            aria-disabled="true"
-            className="p-2 rounded-full opacity-40 cursor-not-allowed"
+            onClick={() => openEditor(null)}
+            aria-label="New note with image (open editor first)"
+            title="Open editor to add an image"
+            className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-[#3c4043]"
           >
             <Image size={20} aria-hidden />
           </button>

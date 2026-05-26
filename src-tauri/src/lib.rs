@@ -265,6 +265,8 @@ pub fn run() {
             commands::update_note,
             commands::duplicate_note,
             commands::reorder_notes,
+            commands::add_image_attachment,
+            commands::delete_attachment,
             commands::delete_note_permanent,
             commands::set_archived,
             commands::set_trashed,
