@@ -604,14 +604,23 @@ fn sanitize_vault_filename(stem: &str, id: &str) -> String {
 pub fn export_vault(
     state: State<'_, AppState>,
     dest_dir: String,
-) -> Result<u32, String> {
+) -> Result<String, String> {
     if state.importing.load(std::sync::atomic::Ordering::SeqCst) {
         return Err("a restore is currently in progress".into());
     }
-    let dest = PathBuf::from(&dest_dir);
-    if !dest.is_dir() {
+    let parent = PathBuf::from(&dest_dir);
+    if !parent.is_dir() {
         return Err(format!("not a directory: {dest_dir}"));
     }
+    // EI-V0.5-6 — write to a fresh per-run subfolder so re-exporting
+    // never silently overwrites a previous vault (or external edits
+    // to those .md files). Folder name is `keepr-vault-<ISO>` with
+    // colon and dot stripped for filesystem safety.
+    let stamp = chrono::Utc::now()
+        .format("%Y-%m-%dT%H-%M-%S")
+        .to_string();
+    let dest = parent.join(format!("keepr-vault-{stamp}"));
+    std::fs::create_dir_all(&dest).map_err(err)?;
     let resources_out = dest.join(VAULT_RESOURCES_DIR);
     std::fs::create_dir_all(&resources_out).map_err(err)?;
 
@@ -634,7 +643,6 @@ pub fn export_vault(
     };
 
     let notes = list_notes(state.clone())?;
-    let mut written: u32 = 0;
     let mut used_names: std::collections::HashSet<String> = std::collections::HashSet::new();
 
     for n in &notes {
@@ -642,14 +650,18 @@ pub fn export_vault(
             continue; // never export deleted notes
         }
         let mut name = sanitize_vault_filename(&n.title, &n.id);
-        let mut base = name.clone();
+        let base = name.clone();
         let mut counter = 2;
         while used_names.contains(&name) {
             name = format!("{base}-{counter}");
             counter += 1;
             if counter > 999 {
-                base = n.id.chars().take(8).collect();
-                name = base.clone();
+                // EI-V0.5-6 — fall back to the full UUID + re-check so we
+                // never insert a duplicate name even after 999 collisions.
+                name = format!("{base}-{}", &n.id);
+                if used_names.contains(&name) {
+                    name = n.id.clone();
+                }
                 break;
             }
         }
@@ -700,9 +712,10 @@ pub fn export_vault(
         }
         let md_path = dest.join(format!("{name}.md"));
         std::fs::write(&md_path, content).map_err(err)?;
-        written += 1;
     }
-    Ok(written)
+    // Return the absolute path to the freshly-written vault folder so the
+    // renderer can show it in the toast.
+    Ok(dest.to_string_lossy().to_string())
 }
 
 fn build_frontmatter(
@@ -887,9 +900,49 @@ pub fn import_takeout(
             Err(_) => continue,
         };
 
+        // EI-V0.5-6 — preserve original Takeout chronology. Keep stores
+        // created/updated in microseconds since the Unix epoch under
+        // `createdTimestampUsec` and `userEditedTimestampUsec`. We rewrite
+        // notes.created_at / updated_at directly via SQL rather than
+        // through update_note (which would set updated_at = now).
+        let created_iso = takeout_usec_to_rfc3339(v.get("createdTimestampUsec"));
+        let updated_iso = takeout_usec_to_rfc3339(v.get("userEditedTimestampUsec"));
+        if created_iso.is_some() || updated_iso.is_some() {
+            let conn = state.db.lock();
+            if let Some(ts) = &created_iso {
+                let _ = conn.execute(
+                    "UPDATE notes SET created_at = ?1 WHERE id = ?2",
+                    params![ts, created.id],
+                );
+            }
+            if let Some(ts) = &updated_iso {
+                let _ = conn.execute(
+                    "UPDATE notes SET updated_at = ?1 WHERE id = ?2",
+                    params![ts, created.id],
+                );
+            }
+        }
+
         // Set archived after creation (NoteInput has no archived field).
         if archived {
             let _ = set_archived(state.clone(), created.id.clone(), true);
+        }
+
+        // EI-V0.5-6 — preserve Takeout reminders. Takeout's shape varies
+        // by export year; we accept several common forms. Single-shot
+        // only; recurring reminders (when they exist in the JSON) get
+        // their fire_at imported but the rrule field is ignored.
+        if let Some(reminders) = v.get("reminders").and_then(|x| x.as_array()) {
+            for r in reminders {
+                if let Some(fire_at) = takeout_reminder_fire_at(r) {
+                    let _ = set_reminder(
+                        state.clone(),
+                        created.id.clone(),
+                        fire_at,
+                    );
+                    break; // schema only supports one pending reminder per note
+                }
+            }
         }
 
         // Attachments — Takeout stores them as siblings of the json,
@@ -961,6 +1014,47 @@ fn map_keep_color(c: &str) -> String {
         "GRAY" => "gray".into(),
         _ => "default".into(),
     }
+}
+
+/// Takeout JSON stores timestamps as microseconds since the Unix epoch
+/// in number fields like `createdTimestampUsec`. Convert to RFC 3339.
+/// Returns `None` for null / missing / non-finite inputs.
+fn takeout_usec_to_rfc3339(v: Option<&serde_json::Value>) -> Option<String> {
+    let usec = v?.as_u64()?;
+    let secs = (usec / 1_000_000) as i64;
+    let nsec = ((usec % 1_000_000) * 1_000) as u32;
+    let dt = chrono::DateTime::<chrono::Utc>::from_timestamp(secs, nsec)?;
+    Some(dt.to_rfc3339())
+}
+
+/// Best-effort extraction of a fire_at RFC3339 string from a Takeout
+/// reminder object. Takeout's shape has drifted over years; we accept
+/// `fireOn`/`fire_on` (ISO), `reminderTimeUsec`/`reminder_time_usec`
+/// (microseconds), or the nested `time.formattedDate` (ISO).
+fn takeout_reminder_fire_at(r: &serde_json::Value) -> Option<String> {
+    if let Some(s) = r.get("fireOn").and_then(|x| x.as_str()) {
+        if chrono::DateTime::parse_from_rfc3339(s).is_ok() {
+            return Some(s.to_string());
+        }
+    }
+    if let Some(s) = r.get("fire_on").and_then(|x| x.as_str()) {
+        if chrono::DateTime::parse_from_rfc3339(s).is_ok() {
+            return Some(s.to_string());
+        }
+    }
+    if let Some(usec_value) = r.get("reminderTimeUsec").or_else(|| r.get("reminder_time_usec")) {
+        if let Some(iso) = takeout_usec_to_rfc3339(Some(usec_value)) {
+            return Some(iso);
+        }
+    }
+    if let Some(time_obj) = r.get("time") {
+        if let Some(s) = time_obj.get("formattedDate").and_then(|x| x.as_str()) {
+            if chrono::DateTime::parse_from_rfc3339(s).is_ok() {
+                return Some(s.to_string());
+            }
+        }
+    }
+    None
 }
 
 // --- NF-02 reminders ---

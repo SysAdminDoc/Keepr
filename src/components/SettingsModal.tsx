@@ -317,8 +317,8 @@ export function SettingsModal() {
                       });
                       if (!picked) return;
                       setBusy(true);
-                      const count = await api.exportVault(picked as string);
-                      showToast(`Exported ${count} notes as Markdown`);
+                      const writtenTo = await api.exportVault(picked as string);
+                      showToast(`Vault exported to ${writtenTo}`);
                     } catch (e) {
                       showToast("Vault export failed: " + String(e));
                     } finally {

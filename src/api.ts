@@ -19,7 +19,7 @@ export const api = {
     invoke<void>("clear_reminder", { noteId }),
   listReminders: () => invoke<Reminder[]>("list_reminders"),
   exportVault: (destDir: string) =>
-    invoke<number>("export_vault", { destDir }),
+    invoke<string>("export_vault", { destDir }),
   importTakeout: (src: string) =>
     invoke<number>("import_takeout", { src }),
   deleteNotePermanent: (id: string) =>
