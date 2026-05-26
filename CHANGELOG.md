@@ -6,6 +6,20 @@ All notable changes to Keepr are documented here. Format loosely follows [Keep a
 
 (See [ROADMAP.md](ROADMAP.md) for the live task list.)
 
+## [0.16.2] — 2026-05-26 — "Editor open crash fix"
+
+P0 — the editor failed to open at all on a fresh v0.16.1 install. Clicking "Take a note" (or any of the new-note affordances, including the global hotkey + tray quick-capture) blanked the entire window with no recovery.
+
+### Fixed
+
+- **NoteEditor Rules-of-Hooks violation.** `useClickOutside(moreMenuRef, …)` and `const [dropActive, setDropActive] = useState(false)` were both declared *below* the `if (!editorOpen) return null;` early return in `NoteEditor.tsx`. When `editorOpen` flipped true, the component called two extra hooks compared to the previous render — React threw `Rendered more hooks than during the previous render`, the error propagated past the (missing) root-level boundary, and React 18 unmounted the entire tree. Both hooks now live above the early return; identical behaviour, but the hook-call order is stable.
+  - The misplaced `useClickOutside` was added with EI-V0.5-15 (kebab "More" overflow) in v0.15.0.
+  - The misplaced `useState(dropActive)` was added with the paste/drop image flow (NF-V0.5-I).
+
+### Added
+
+- **`<ErrorBoundary>` around the app root in `src/main.tsx`.** Future render-time exceptions render a recoverable "Something went wrong — Reload" panel with the error message instead of silently blanking the window. The full error + componentStack are logged to the console so `tauri-plugin-log` captures them too.
+
 ## [0.16.1] — 2026-05-26 — "First published Windows binary"
 
 Release-only patch. No code changes from v0.16.0 — this is the **first version with attached installer artifacts on the GitHub Releases page**.

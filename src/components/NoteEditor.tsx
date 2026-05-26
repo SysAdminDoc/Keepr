@@ -140,6 +140,7 @@ export function NoteEditor() {
   const [colorOpen, setColorOpen] = useState(false);
   const [labelMenuOpen, setLabelMenuOpen] = useState(false);
   const [newLabelName, setNewLabelName] = useState("");
+  const [dropActive, setDropActive] = useState(false);
   const titleRef = useRef<HTMLTextAreaElement>(null);
   const bodyRef = useRef<HTMLTextAreaElement>(null);
 
@@ -354,6 +355,13 @@ export function NoteEditor() {
     };
   }, [editorOpen, close]);
 
+  // EI-V0.5-15 — `useClickOutside` *must* run before any early return so
+  // its underlying useEffect is called on every render of NoteEditor.
+  // Previously this lived below `if (!editorOpen) return null;`, which
+  // caused a Rules-of-Hooks violation the first time editorOpen flipped
+  // true and crashed the entire app tree (no error boundary).
+  useClickOutside(moreMenuRef, moreMenuOpen, () => setMoreMenuOpen(false));
+
   if (!editorOpen) return null;
 
   const bg = bgFor(draft.color, dark);
@@ -395,8 +403,6 @@ export function NoteEditor() {
   // removeItem / indentItem / dedentItem / sortable bookkeeping / FLIP
   // animator) all moved into ChecklistSection. The editor just hands
   // it `draft.checklist` and an onChange that splats back into draft.
-
-  useClickOutside(moreMenuRef, moreMenuOpen, () => setMoreMenuOpen(false));
 
   const toggleLabel = (id: string) => {
     setDraft({
@@ -607,7 +613,6 @@ export function NoteEditor() {
     }
   };
 
-  const [dropActive, setDropActive] = useState(false);
   const onDragOver = (e: React.DragEvent) => {
     if (e.dataTransfer.types.includes("Files")) {
       e.preventDefault();
