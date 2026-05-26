@@ -645,6 +645,75 @@ export function NoteEditor() {
     }
   };
 
+  // NF-V0.5-I — paste + drop image. Both paths fall through to a single
+  // addImageBlob helper that wraps add_image_attachment_bytes. Supported
+  // MIMEs match the file-picker filter (png/jpg/gif/webp); other types
+  // are silently ignored so a paste of unrelated content doesn't surprise
+  // the user.
+  const SUPPORTED_PASTE_MIME = new Set([
+    "image/png",
+    "image/jpeg",
+    "image/gif",
+    "image/webp",
+  ]);
+
+  const addImageBlob = async (file: File | Blob, hint?: string) => {
+    const mime = file.type;
+    if (!SUPPORTED_PASTE_MIME.has(mime)) {
+      showToast(`Unsupported image type: ${mime || "unknown"}`);
+      return;
+    }
+    try {
+      const noteId = await ensureExistingId();
+      if (!noteId) return;
+      const buf = new Uint8Array(await file.arrayBuffer());
+      // Tauri's invoke serializes Uint8Array via JSON-with-base64 by way
+      // of the standard array conversion. Spread into a plain number[]
+      // so the IPC layer doesn't choke on typed arrays.
+      const bytes = Array.from(buf);
+      const att = await api.addImageAttachmentBytes(noteId, bytes, mime, hint);
+      setAttachments((prev) => [...prev, att]);
+      patchNote(noteId, {
+        attachments: [...attachments, att],
+        updated_at: new Date().toISOString(),
+      });
+    } catch (e) {
+      showToast("Could not add image: " + String(e));
+    }
+  };
+
+  const onPaste = (e: React.ClipboardEvent) => {
+    if (!e.clipboardData) return;
+    for (const item of Array.from(e.clipboardData.items)) {
+      if (item.kind === "file") {
+        const file = item.getAsFile();
+        if (file && SUPPORTED_PASTE_MIME.has(file.type)) {
+          e.preventDefault();
+          void addImageBlob(file, file.name);
+          return;
+        }
+      }
+    }
+  };
+
+  const [dropActive, setDropActive] = useState(false);
+  const onDragOver = (e: React.DragEvent) => {
+    if (e.dataTransfer.types.includes("Files")) {
+      e.preventDefault();
+      setDropActive(true);
+    }
+  };
+  const onDragLeave = () => setDropActive(false);
+  const onDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setDropActive(false);
+    for (const file of Array.from(e.dataTransfer.files)) {
+      if (SUPPORTED_PASTE_MIME.has(file.type)) {
+        void addImageBlob(file, file.name);
+      }
+    }
+  };
+
   const removeAttachment = async (att: Attachment) => {
     try {
       await api.deleteAttachment(att.id);
@@ -709,9 +778,16 @@ export function NoteEditor() {
   return (
     <div className="fixed inset-0 z-50 modal-backdrop grid place-items-center p-4" onClick={close}>
       <div
-        className="w-full max-w-xl rounded-lg border shadow-keep-hover overflow-hidden"
+        className={clsx(
+          "w-full max-w-xl rounded-lg border shadow-keep-hover overflow-hidden",
+          dropActive && "ring-2 ring-[#1a73e8] ring-offset-2",
+        )}
         style={{ background: bg, borderColor: border }}
         onClick={(e) => e.stopPropagation()}
+        onPaste={onPaste}
+        onDragOver={onDragOver}
+        onDragLeave={onDragLeave}
+        onDrop={onDrop}
       >
         {attachments.length > 0 && (
           <AttachmentGrid

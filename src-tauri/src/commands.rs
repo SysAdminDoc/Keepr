@@ -1408,6 +1408,60 @@ pub fn add_image_attachment(
     })
 }
 
+/// NF-V0.5-I — companion to add_image_attachment for paste-from-
+/// clipboard and drag-drop flows where the renderer has the raw bytes
+/// but no on-disk file path. Bytes come over IPC as a Vec<u8> (Tauri
+/// serializes via base64). `filename_hint` carries the original name
+/// when known (e.g. dropped File.name); otherwise we infer from MIME.
+#[tauri::command]
+pub fn add_image_attachment_bytes(
+    state: State<'_, AppState>,
+    note_id: String,
+    bytes: Vec<u8>,
+    mime: String,
+    filename_hint: Option<String>,
+) -> Result<Attachment, String> {
+    if state.importing.load(std::sync::atomic::Ordering::SeqCst) {
+        return Err("a restore is currently in progress".into());
+    }
+    if bytes.len() as u64 > MAX_ATTACHMENT_BYTES {
+        return Err(format!(
+            "image exceeds {} bytes (got {})",
+            MAX_ATTACHMENT_BYTES,
+            bytes.len()
+        ));
+    }
+    // Stage bytes in a temp file so add_image_attachment's existing flow
+    // (file copy + thumbnail + DB insert + rollback) is reused. The temp
+    // file is dropped right after the call regardless of outcome.
+    let ext = match mime.as_str() {
+        "image/png" => "png",
+        "image/jpeg" => "jpg",
+        "image/gif" => "gif",
+        "image/webp" => "webp",
+        "image/svg+xml" => "svg",
+        _ => return Err(format!("unsupported mime: {mime}")),
+    };
+    let tmp = std::env::temp_dir().join(format!(
+        "keepr-paste-{}.{ext}",
+        Uuid::new_v4()
+    ));
+    if let Err(e) = std::fs::write(&tmp, &bytes) {
+        return Err(format!("could not stage clipboard bytes: {e}"));
+    }
+    let original_name = filename_hint.unwrap_or_else(|| format!("pasted.{ext}"));
+    // Reuse the file-path flow with a faked-but-real path.
+    let tmp_path_str = tmp.to_string_lossy().to_string();
+    let result = add_image_attachment(state, note_id, tmp_path_str);
+    let _ = std::fs::remove_file(&tmp);
+    // Override filename on success — add_image_attachment derives it
+    // from the temp file's name; for paste we want the hint.
+    result.map(|mut a| {
+        a.filename = original_name;
+        a
+    })
+}
+
 #[tauri::command]
 pub fn delete_attachment(state: State<'_, AppState>, id: String) -> Result<(), String> {
     if state.importing.load(std::sync::atomic::Ordering::SeqCst) {

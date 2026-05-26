@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { Lightbulb, Tag, Archive, Trash2, Pencil } from "lucide-react";
 import clsx from "clsx";
 import { useStore } from "../store";
@@ -14,7 +15,22 @@ export function Sidebar({ expanded }: Props) {
   const section = useStore((s) => s.section);
   const setSection = useStore((s) => s.setSection);
   const labels = useStore((s) => s.labels);
+  const notes = useStore((s) => s.notes);
   const openLabelsManager = useStore((s) => s.openLabelsManager);
+
+  // NF-V0.5-H — per-label note counts. Computed once per labels/notes
+  // change, not per render. Excludes trashed notes (they're not visible
+  // when clicking a label anyway).
+  const labelCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const n of notes) {
+      if (n.trashed) continue;
+      for (const id of n.labels) {
+        counts.set(id, (counts.get(id) ?? 0) + 1);
+      }
+    }
+    return counts;
+  }, [notes]);
 
   const isActive = (s: Section): boolean => {
     if (section.kind === "label" && s.kind === "label")
@@ -26,6 +42,7 @@ export function Sidebar({ expanded }: Props) {
     s: Section,
     icon: React.ReactNode,
     label: string,
+    count?: number,
   ) => {
     const active = isActive(s);
     return (
@@ -42,13 +59,26 @@ export function Sidebar({ expanded }: Props) {
           )}
           onClick={() => setSection(s)}
           aria-current={active ? "page" : undefined}
-          aria-label={label}
+          aria-label={count !== undefined ? `${label}, ${count} notes` : label}
           title={label}
         >
           <span className="w-6 grid place-items-center" aria-hidden>
             {icon}
           </span>
-          {expanded && <span className="ml-7 truncate">{label}</span>}
+          {expanded && (
+            <span className="ml-7 truncate flex-1">{label}</span>
+          )}
+          {expanded && count !== undefined && count > 0 && (
+            <span
+              className={clsx(
+                "ml-2 text-xs tabular-nums",
+                active ? "opacity-90" : "opacity-50",
+              )}
+              aria-hidden
+            >
+              {count}
+            </span>
+          )}
         </button>
       </li>
     );
@@ -70,7 +100,12 @@ export function Sidebar({ expanded }: Props) {
           </li>
         )}
         {labels.map((l) =>
-          item({ kind: "label", labelId: l.id }, <Tag size={20} />, l.name),
+          item(
+            { kind: "label", labelId: l.id },
+            <Tag size={20} />,
+            l.name,
+            labelCounts.get(l.id) ?? 0,
+          ),
         )}
         <li>
           <button

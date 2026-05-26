@@ -11,6 +11,18 @@ export const api = {
   reorderNotes: (ids: string[]) => invoke<void>("reorder_notes", { ids }),
   addImageAttachment: (noteId: string, srcPath: string) =>
     invoke<Attachment>("add_image_attachment", { noteId, srcPath }),
+  addImageAttachmentBytes: (
+    noteId: string,
+    bytes: number[],
+    mime: string,
+    filenameHint?: string,
+  ) =>
+    invoke<Attachment>("add_image_attachment_bytes", {
+      noteId,
+      bytes,
+      mime,
+      filenameHint,
+    }),
   deleteAttachment: (id: string) =>
     invoke<void>("delete_attachment", { id }),
   setReminder: (noteId: string, fireAt: string) =>

@@ -344,6 +344,7 @@ pub fn run() {
             commands::duplicate_note,
             commands::reorder_notes,
             commands::add_image_attachment,
+            commands::add_image_attachment_bytes,
             commands::delete_attachment,
             commands::set_reminder,
             commands::clear_reminder,
