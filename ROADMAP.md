@@ -80,11 +80,14 @@ NF-V0.5-C split in half: App Lock (UI-gating PIN with Argon2id) shipped first; P
 
 ---
 
-## Phase E — v0.7+ "Long-running bets"
+## Phase E — v0.9.0 "History & Calendar" — SHIPPED 2026-05-26
 
-- [ ] **NF-V0.5-D** — Note version history with diff [P2, M]
+- [x] **NF-V0.5-D** — Note version history with one-click restore (last 20 per note, vault snapshots store ciphertext as-is)
+- [x] **NF-V0.5-G** — ICS export of active reminders (RFC 5545 VCALENDAR/VEVENT, RRULE preserved, vault titles redacted)
+
+## Phase E — v0.10+ "Long-running bets remaining"
+
 - [ ] **NF-V0.5-E** — Drawing notes (vector canvas) [P3, L]
-- [ ] **NF-V0.5-G** — ICS export of reminders [P3, S]
 - [ ] **NF-V0.5-K** — macOS + Linux CI matrix (no platform support promise) [P3, S]
 - [ ] **NF-12** Image OCR via Windows OCR API [P3, M]
 - [ ] **NF-13** Rich URL preview cards [P3, M]

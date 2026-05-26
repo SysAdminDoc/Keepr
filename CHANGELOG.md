@@ -6,6 +6,26 @@ All notable changes to Keepr are documented here. Format loosely follows [Keep a
 
 (See [ROADMAP.md](ROADMAP.md) for the live task list.)
 
+## [0.9.0] — 2026-05-26 — "History & Calendar"
+
+Two Phase E items in one shot: per-note version history with one-click restore (NF-V0.5-D) and iCalendar export of active reminders (NF-V0.5-G). Both ship the missing-bit-of-trust Trash alone couldn't cover and let users see their reminders in their existing calendar without writing any sync glue.
+
+### Added
+
+- **NF-V0.5-D** Note version history.
+  - Schema v7 adds `note_snapshots(id, note_id, kind, title, body, color, pinned, checklist_json, vault, vault_ciphertext, taken_at)` plus a `note_snapshots_trim_to_20` trigger that caps each note's history to the most recent 20 snapshots after every insert.
+  - `update_note` snapshots the prior state before applying changes; `restore_snapshot` snapshots the current state first so the restore itself is undoable. Vault rows snapshot their ciphertext as-is (no DEK required for the history path) and restore puts the ciphertext back into place.
+  - New Tauri commands: `list_snapshots(note_id)` returns the chronologically-newest-first list; `restore_snapshot(snapshot_id)` swaps the row back.
+  - New `<HistoryDrawer />` opens from a History toolbar button in NoteEditor — shows relative timestamps ("3 minutes ago" / "2 days ago"), a 6-line body preview, checklist-item count, and a per-row Restore button. Vault snapshots show a "ciphertext" pill and a generic "Encrypted vault payload" message instead of the raw ciphertext.
+- **NF-V0.5-G** ICS export of reminders.
+  - New `export_reminders_ics(dest)` Tauri command writes every active (non-fired, non-dismissed) reminder as an RFC 5545 VCALENDAR with one VEVENT per reminder. Effective fire time honours `snooze_until` over `fire_at`; recurring reminders carry their RRULE through. Vault note titles export as "Keepr — locked vault note" so the calendar import doesn't leak the encrypted title.
+  - Settings → "Export reminders as iCalendar (.ics)…" button picks a destination and writes the file via a save dialog.
+
+### Tests
+
+- **43 cargo tests** (up from 40): 1 schema v7 migration test (table + trigger + 25→20 trim behaviour), 1 ICS UTC-offset roundtrip, 1 ICS special-character escape coverage.
+- **80 vitest cases** unchanged — the new surface is a Settings button + a Drawer + Rust-mediated state, all covered by tsc + manual smoke.
+
 ## [0.8.0] — 2026-05-26 — "Private Vault"
 
 Closes the second half of NF-V0.5-C. Vaulting a note encrypts its
