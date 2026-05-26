@@ -6,6 +6,22 @@ All notable changes to Keepr are documented here. Format loosely follows [Keep a
 
 (See [ROADMAP.md](ROADMAP.md) for the live task list.)
 
+## [0.17.0] — 2026-05-26 — "Editor goes big · pinned stays put · free drag"
+
+### Added
+
+- **Editor opens near-full-screen.** The modal was capped at `max-w-xl` (576px) and laid out as a single non-scrolling block, which felt cramped for anything longer than a paragraph. New layout: `w-[95vw] max-w-[1400px] max-h-[90vh] flex flex-col`. Content area (attachments → title → body → label chips) is `flex-1 overflow-y-auto`; toolbar is pinned at the bottom with `shrink-0` and a hairline top border. Body textarea bumped from `min-h-[6rem]` to `min-h-[20rem]` and now grows (`flex-1`) to fill available height when the modal is tall. Long notes scroll inside the editor without the toolbar moving.
+- **Free drag-to-rearrange in every sort mode.** Previously drag was gated to Custom sort, so a user in the default Modified mode had no way to manually order their notes. Now the whole-card drag handle is active in any sort mode within the Notes section. On the first drop under Modified/Created/Title, sort auto-flips to Custom (with a one-line toast) so the drop is actually visible — under the old sort key the cards would snap back. Archive/Trash/Label sections are still drag-disabled (`reorder_notes` would corrupt the active-Notes positions, see EI-V0.5-1).
+
+### Fixed
+
+- **Clicking a pinned note no longer shuffles it to the front of the pinned row.** Two compounding bugs: (1) closing the editor unconditionally called `update_note`, which bumped `updated_at` even when nothing changed; (2) under Modified sort the freshly-bumped note jumped to the head of the pinned row. Fix: (1) a `payloadMatchesExisting(ex, payload)` dirty-check in `NoteEditor.close()` skips the DB round-trip when no field changed; (2) `sortNotes` now sorts the pinned subset by `position` (then `created_at`) regardless of the active sort mode, so even when a pinned note IS edited it stays in its slot. The only way to reorder pinned notes is now to drag them. Added a regression test (`pinned notes always sort by position, regardless of mode`).
+- **Label chips in the editor switched from `rounded-full` to `rounded`.** Per the global "no pill backdrops" rule.
+
+### Tests
+
+- 86 vitest (was 85). New: `sortNotes › pinned notes always sort by position, regardless of mode`.
+
 ## [0.16.6] — 2026-05-26 — "Use the full width on wide displays"
 
 ### Fixed

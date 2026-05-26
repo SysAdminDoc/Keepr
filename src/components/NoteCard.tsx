@@ -33,7 +33,6 @@ interface Props {
 export function NoteCard({ note }: Props) {
   const section = useStore((s) => s.section);
   const dark = useStore((s) => s.dark);
-  const sortMode = useStore((s) => s.sortMode);
   const openEditor = useStore((s) => s.openEditor);
   const showToast = useStore((s) => s.showToast);
   const patchNote = useStore((s) => s.patchNote);
@@ -47,12 +46,15 @@ export function NoteCard({ note }: Props) {
   const selectMode = selectedIds.size > 0;
   const isSelected = selectedIds.has(note.id);
 
-  // NF-05 — make the whole card a sortable handle when in Custom sort
-  // AND when we're in the Notes section (EI-V0.5-1 — Archive/Trash/Label
-  // sections must not drag-reorder; reorder_notes would corrupt the
-  // active-Notes ordering). useSortable returns no-op refs when there's
-  // no surrounding SortableContext, so this is safe in any combination.
-  const dragEnabled = sortMode === "custom" && section.kind === "notes";
+  // NF-05 — make the whole card a sortable handle whenever we're in the
+  // Notes section (EI-V0.5-1 — Archive/Trash/Label sections must not
+  // drag-reorder; reorder_notes would corrupt the active-Notes
+  // ordering). Drag works in every sort mode now; on the first drop
+  // under non-Custom modes NoteGrid auto-switches the sort to Custom
+  // so the user actually sees their reorder. useSortable returns no-op
+  // refs when there's no surrounding SortableContext, so this is safe
+  // in any combination.
+  const dragEnabled = section.kind === "notes";
   const sortable = useSortable({
     id: note.id,
     disabled: !dragEnabled,

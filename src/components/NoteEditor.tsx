@@ -52,6 +52,32 @@ import type {
 } from "../types";
 import { BACKGROUND_PATTERNS, normalizePattern } from "../lib/backgroundPatterns";
 
+/** Compare a NoteInput payload against the existing Note. Returns true
+ *  if every persisted field is identical — used by close() to skip the
+ *  update_note round-trip on view-only opens, so `updated_at` doesn't
+ *  bump and the note doesn't jump to the top of the "Modified" sort.
+ *  Reminders/attachments mutate via their own commands and don't pass
+ *  through this payload, so they're irrelevant here. */
+function payloadMatchesExisting(ex: Note, p: NoteInput): boolean {
+  if (ex.kind !== p.kind) return false;
+  if (ex.title !== p.title) return false;
+  if (ex.body !== p.body) return false;
+  if (ex.color !== p.color) return false;
+  if (ex.pinned !== p.pinned) return false;
+  if ((ex.backgroundPattern ?? "") !== (p.backgroundPattern ?? "")) return false;
+  const aLabels = new Set(ex.labels ?? []);
+  if (aLabels.size !== p.labels.length) return false;
+  for (const id of p.labels) if (!aLabels.has(id)) return false;
+  const aChecklist = ex.checklist ?? [];
+  if (aChecklist.length !== p.checklist.length) return false;
+  for (let i = 0; i < p.checklist.length; i++) {
+    const ai = aChecklist[i];
+    const bi = p.checklist[i];
+    if (ai.text !== bi.text || ai.checked !== bi.checked) return false;
+  }
+  return true;
+}
+
 /** EI-V0.5-15 — single row of the kebab "More actions" popover. */
 function MoreMenuItem({
   icon,
@@ -296,6 +322,11 @@ export function NoteEditor() {
           // Defensive: clear any stray reminder entry too.
           useStore.getState().removeReminder(ex.id);
           showToast("Empty note discarded");
+        } else if (payloadMatchesExisting(ex, payload)) {
+          // No-op: opened the note, didn't change anything, closed it.
+          // Skipping update_note keeps updated_at stable so the note
+          // doesn't jump to the top under "Modified" sort. (Pinned
+          // notes also rely on this — see sortNotes pinned-by-position.)
         } else {
           const updated = await api.updateNote(ex.id, payload);
           upsertNote(updated);
@@ -702,7 +733,7 @@ export function NoteEditor() {
     <div className="fixed inset-0 z-50 modal-backdrop grid place-items-center p-4" onClick={close}>
       <div
         className={clsx(
-          "w-full max-w-xl rounded-lg border shadow-keep-hover overflow-hidden",
+          "w-[95vw] max-w-[1400px] max-h-[90vh] flex flex-col rounded-lg border shadow-keep-hover overflow-hidden",
           dropActive && "ring-2 ring-[#1a73e8] ring-offset-2",
         )}
         style={{
@@ -717,6 +748,10 @@ export function NoteEditor() {
         onDragLeave={onDragLeave}
         onDrop={onDrop}
       >
+        {/* Scrollable content area — header attachments through label
+            chips. Toolbar lives outside this wrapper so it stays
+            pinned at the bottom even on long notes. */}
+        <div className="flex-1 min-h-0 overflow-y-auto flex flex-col">
         {attachments.length > 0 && (
           <AttachmentGrid
             attachments={attachments}
@@ -749,8 +784,7 @@ export function NoteEditor() {
             value={draft.body}
             onChange={(e) => setDraft({ ...draft, body: e.target.value })}
             placeholder="Take a note…"
-            rows={4}
-            className="w-full resize-none bg-transparent outline-none px-4 pb-3 text-[14px] placeholder-gray-500 dark:placeholder-gray-400 min-h-[6rem]"
+            className="flex-1 w-full resize-none bg-transparent outline-none px-4 pb-3 text-[14px] placeholder-gray-500 dark:placeholder-gray-400 min-h-[20rem]"
           />
         ) : (
           // EI-V0.5-10 (v0.16) — checklist editor extracted to its own
@@ -772,7 +806,7 @@ export function NoteEditor() {
               return (
                 <span
                   key={id}
-                  className="flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-black/5 dark:bg-white/10"
+                  className="flex items-center gap-1 text-xs px-2 py-0.5 rounded bg-black/5 dark:bg-white/10"
                 >
                   {lbl.name}
                   <button onClick={() => toggleLabel(id)} title="Remove">
@@ -784,7 +818,9 @@ export function NoteEditor() {
           </div>
         )}
 
-        <div className="flex items-center px-1 pb-1 relative">
+        </div>{/* end scroll wrapper */}
+
+        <div className="flex items-center px-1 pb-1 pt-1 relative shrink-0 border-t border-black/5 dark:border-white/5">
           <IconBtn
             ariaLabel={noteReminder ? "Edit reminder" : "Set reminder"}
             onClick={() => setReminderPickerOpen(true)}

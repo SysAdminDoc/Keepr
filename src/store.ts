@@ -562,6 +562,15 @@ export function sortNotes(notes: Note[], mode: SortMode = "modified"): Note[] {
   // Pinned-first is universal; the secondary key changes per mode (NF-05).
   const cmp = (a: Note, b: Note): number => {
     if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
+    // Pinned notes always sort by `position` regardless of the active
+    // sort mode — editing a pinned note shouldn't shuffle it to the top
+    // of the pinned row (which feels like the pin "moved"). Position is
+    // user-controlled via drag-reorder; ties fall back to creation time
+    // so newly-pinned notes land at a predictable spot.
+    if (a.pinned && b.pinned) {
+      if (a.position !== b.position) return a.position - b.position;
+      return a.created_at < b.created_at ? 1 : a.created_at > b.created_at ? -1 : 0;
+    }
     if (mode === "created") {
       return a.created_at < b.created_at ? 1 : a.created_at > b.created_at ? -1 : 0;
     }

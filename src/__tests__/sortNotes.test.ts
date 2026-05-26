@@ -74,4 +74,36 @@ describe("sortNotes", () => {
     const b = makeNote({ id: "b", position: 0, updated_at: "2026-05-01T00:00:00Z" });
     expect(sortNotes([a, b], "custom").map((n) => n.id)).toEqual(["b", "a"]);
   });
+
+  it("pinned notes always sort by position, regardless of mode", () => {
+    // Editing a pinned note bumps updated_at — under "modified" mode
+    // pinned ordering must NOT follow that bump, or the pin appears to
+    // jump on every click. position is the only stable key.
+    const oldP = makeNote({
+      id: "old-pin",
+      pinned: true,
+      position: 0,
+      updated_at: "2026-01-01T00:00:00Z",
+    });
+    const newP = makeNote({
+      id: "newly-edited-pin",
+      pinned: true,
+      position: 1,
+      updated_at: "2026-05-26T00:00:00Z",
+    });
+    // Under "modified" the unpinned section would put newly-edited first,
+    // but among pinned we expect position-asc.
+    expect(sortNotes([newP, oldP], "modified").map((n) => n.id)).toEqual([
+      "old-pin",
+      "newly-edited-pin",
+    ]);
+    expect(sortNotes([newP, oldP], "created").map((n) => n.id)).toEqual([
+      "old-pin",
+      "newly-edited-pin",
+    ]);
+    expect(sortNotes([newP, oldP], "title").map((n) => n.id)).toEqual([
+      "old-pin",
+      "newly-edited-pin",
+    ]);
+  });
 });

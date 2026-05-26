@@ -33,6 +33,7 @@ interface Props {
 export function NoteGrid({ notes }: Props) {
   const viewMode = useStore((s) => s.viewMode);
   const sortMode = useStore((s) => s.sortMode);
+  const setSortMode = useStore((s) => s.setSortMode);
   const section = useStore((s) => s.section);
   const showToast = useStore((s) => s.showToast);
   const cardWidth = useStore((s) => s.cardWidth);
@@ -40,8 +41,11 @@ export function NoteGrid({ notes }: Props) {
   // EI-V0.5-1 — drag-reorder is only safe in the Notes section. In
   // Archive/Trash/Label sections, a drop would write `position` for the
   // dragged ids only, leaving every other note with stale positions and
-  // corrupting Custom-sort ordering on the next full load.
-  const dragEnabled = sortMode === "custom" && section.kind === "notes";
+  // corrupting Custom-sort ordering on the next full load. Drag works
+  // in every sort mode now; on a drop under non-Custom modes we flip
+  // sortMode to "custom" below so the visible order matches what the
+  // user just dragged into place.
+  const dragEnabled = section.kind === "notes";
 
   const sensors = useSensors(
     // Require a small pointer drag distance before starting — so click-to-
@@ -82,13 +86,23 @@ export function NoteGrid({ notes }: Props) {
       // We pass the full visible set (the only notes whose order changed).
       try {
         await api.reorderNotes(positionedIds);
+        // Auto-switch to Custom sort so the drop is visible. Under
+        // Modified/Created/Title the displayed order would snap back to
+        // the chosen key and the drag would feel like it did nothing.
+        // The pinned section sorts by position regardless of mode, so
+        // pinned-only drags don't trigger the flip + toast.
+        const draggedAllPinned = notes.every((n) => n.pinned);
+        if (!draggedAllPinned && sortMode !== "custom") {
+          setSortMode("custom");
+          showToast("Switched to Custom sort to keep your order");
+        }
       } catch (err) {
         showToast("Could not reorder: " + String(err));
       }
     },
     // We deliberately don't depend on allNotes — its identity changes on
     // every store update and would re-create this callback unnecessarily.
-    [notes, showToast],
+    [notes, showToast, sortMode, setSortMode],
   );
 
   // EI-10 — replaced react-masonry-css (last release Aug 2022, no
