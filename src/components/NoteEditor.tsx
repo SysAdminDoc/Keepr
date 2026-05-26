@@ -16,7 +16,23 @@ import {
   ListChecks,
   AlignLeft,
   Copy,
+  GripVertical,
 } from "lucide-react";
+import {
+  DndContext,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  arrayMove,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import { useStore } from "../store";
 import { api } from "../api";
 import { bgFor, borderFor } from "../colors";
@@ -25,6 +41,12 @@ import { IconBtn } from "./IconBtn";
 import type { ChecklistItemInput, ColorKey, Note, NoteKind, NoteInput } from "../types";
 
 interface ChecklistRowProps {
+  /** Sortable id — unique per row (we use the row's stable key). */
+  sortId: string;
+  /** Whether this row participates in the drag sortable (false for
+   *  rows inside the "Checked items" group — moving them around does
+   *  nothing the user cares about). */
+  draggable: boolean;
   item: ChecklistItemInput;
   onToggle: () => void;
   onText: (t: string) => void;
@@ -34,6 +56,8 @@ interface ChecklistRowProps {
 }
 
 function ChecklistRow({
+  sortId,
+  draggable,
   item,
   onToggle,
   onText,
@@ -41,8 +65,39 @@ function ChecklistRow({
   onBackspaceEmpty,
   onRemove,
 }: ChecklistRowProps) {
+  // NF-05 — useSortable on every row. Listeners are attached only to
+  // the GripVertical handle so dragging from the input field doesn't
+  // hijack text selection.
+  const sortable = useSortable({ id: sortId, disabled: !draggable });
+  const style: React.CSSProperties = draggable
+    ? {
+        transform: CSS.Transform.toString(sortable.transform),
+        transition: sortable.transition,
+      }
+    : {};
   return (
-    <div className="group/item flex items-center gap-2 px-2 py-1">
+    <div
+      ref={sortable.setNodeRef}
+      style={style}
+      className={clsx(
+        "group/item flex items-center gap-1 px-2 py-1",
+        sortable.isDragging && "opacity-50",
+      )}
+    >
+      {draggable ? (
+        <button
+          type="button"
+          aria-label="Reorder item"
+          title="Drag to reorder"
+          {...sortable.attributes}
+          {...sortable.listeners}
+          className="p-0.5 rounded opacity-0 group-hover/item:opacity-100 focus:opacity-100 cursor-grab active:cursor-grabbing"
+        >
+          <GripVertical size={14} aria-hidden />
+        </button>
+      ) : (
+        <span className="w-[18px]" aria-hidden />
+      )}
       <button
         type="button"
         onClick={onToggle}
@@ -332,6 +387,39 @@ export function NoteEditor() {
     setDraft({ ...draft, checklist: next });
   };
 
+  // NF-05 — sortable id per row. We mint a stable sort-id by using the
+  // item's underlying id if present, falling back to its original index
+  // (new items added during this editing session won't yet have an id).
+  const sortIdFor = (idx: number): string => {
+    const it = draft.checklist[idx];
+    return it?.id ?? `__new:${idx}`;
+  };
+  // Map sort id -> original draft.checklist index, so drag-end can
+  // resolve the array slot reliably even after group splitting.
+  const indexOfSortId = (id: string): number => {
+    for (let i = 0; i < draft.checklist.length; i++) {
+      if (sortIdFor(i) === id) return i;
+    }
+    return -1;
+  };
+
+  const checklistSensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+  );
+
+  const onChecklistDragEnd = (e: DragEndEvent) => {
+    const { active, over } = e;
+    if (!over || active.id === over.id) return;
+    const oldIdx = indexOfSortId(String(active.id));
+    const newIdx = indexOfSortId(String(over.id));
+    if (oldIdx < 0 || newIdx < 0) return;
+    const next = arrayMove(draft.checklist, oldIdx, newIdx).map((it, i) => ({
+      ...it,
+      position: i,
+    }));
+    setDraft({ ...draft, checklist: next });
+  };
+
   const toggleLabel = (id: string) => {
     setDraft({
       ...draft,
@@ -488,21 +576,39 @@ export function NoteEditor() {
             const checkedRows = moveCheckedToBottom
               ? indexed.filter(({ item }) => item.checked)
               : [];
+            const uncheckedSortIds = uncheckedRows.map(({ originalIndex }) =>
+              sortIdFor(originalIndex),
+            );
             return (
               <div className="px-2 py-1">
-                {uncheckedRows.map(({ item: it, originalIndex: i }) => (
-                  <ChecklistRow
-                    key={i}
-                    item={it}
-                    onToggle={() => setItem(i, { checked: !it.checked })}
-                    onText={(t) => setItem(i, { text: t })}
-                    onEnter={addItem}
-                    onBackspaceEmpty={
-                      draft.checklist.length > 1 ? () => removeItem(i) : undefined
-                    }
-                    onRemove={() => removeItem(i)}
-                  />
-                ))}
+                <DndContext
+                  sensors={checklistSensors}
+                  collisionDetection={closestCenter}
+                  onDragEnd={onChecklistDragEnd}
+                >
+                  <SortableContext
+                    items={uncheckedSortIds}
+                    strategy={verticalListSortingStrategy}
+                  >
+                    {uncheckedRows.map(({ item: it, originalIndex: i }) => (
+                      <ChecklistRow
+                        key={sortIdFor(i)}
+                        sortId={sortIdFor(i)}
+                        draggable
+                        item={it}
+                        onToggle={() => setItem(i, { checked: !it.checked })}
+                        onText={(t) => setItem(i, { text: t })}
+                        onEnter={addItem}
+                        onBackspaceEmpty={
+                          draft.checklist.length > 1
+                            ? () => removeItem(i)
+                            : undefined
+                        }
+                        onRemove={() => removeItem(i)}
+                      />
+                    ))}
+                  </SortableContext>
+                </DndContext>
                 <button
                   type="button"
                   onClick={addItem}
@@ -535,7 +641,9 @@ export function NoteEditor() {
                     {!checkedCollapsed &&
                       checkedRows.map(({ item: it, originalIndex: i }) => (
                         <ChecklistRow
-                          key={i}
+                          key={sortIdFor(i)}
+                          sortId={sortIdFor(i)}
+                          draggable={false}
                           item={it}
                           onToggle={() => setItem(i, { checked: !it.checked })}
                           onText={(t) => setItem(i, { text: t })}
