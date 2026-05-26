@@ -1,6 +1,6 @@
 [package]
 name = "keepr"
-version = "0.6.0"
+version = "0.7.0"
 description = "Offline-first Google Keep clone"
 authors = ["Matthew Ashton"]
 edition = "2021"
@@ -30,6 +30,11 @@ serde_json = "1"
 # Image decoding/resizing for NF-V0.5-B thumbnail pipeline. Default
 # features pull in heavyweight formats we don't need (TIFF, BMP, etc).
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
+# Password hashing for NF-V0.5-C App Lock. argon2 produces PHC strings
+# that contain the salt + parameters, so we only need to persist one
+# column. `std` for OsRng.
+argon2 = { version = "0.5", features = ["std"] }
+password-hash = "0.5"
 
 [dev-dependencies]
 tempfile = "3"

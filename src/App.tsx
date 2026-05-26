@@ -15,9 +15,11 @@ import { findExpiredTrashed } from "./lib/trashRetention";
 import { backupFilename, backupPath, isBackupDue } from "./lib/autoBackup";
 import { useGlobalHotkey } from "./hooks/useGlobalHotkey";
 import { useKeepShortcuts } from "./hooks/useKeepShortcuts";
+import { useIdleLock } from "./hooks/useIdleLock";
 import { HelpOverlay } from "./components/HelpOverlay";
 import { BulkActionBar } from "./components/BulkActionBar";
 import { FilterChips } from "./components/FilterChips";
+import { LockScreen } from "./components/LockScreen";
 import { Lightbulb, Archive, Trash2, Tag, Loader2, Bell } from "lucide-react";
 
 export default function App() {
@@ -183,6 +185,20 @@ export default function App() {
     load();
   }, [load]);
 
+  // NF-V0.5-C — load App Lock config and auto-lock on launch if enabled.
+  const initAppLock = useStore((s) => s.initAppLock);
+  const lock = useStore((s) => s.lock);
+  const locked = useStore((s) => s.locked);
+  const appLockEnabled = useStore((s) => s.appLockEnabled);
+  const lockAfterMinutes = useStore((s) => s.lockAfterMinutes);
+  useEffect(() => {
+    initAppLock();
+  }, [initAppLock]);
+  // Idle timer is only armed while App Lock is configured AND the UI is
+  // currently unlocked — locked → already on the overlay, no need to
+  // re-fire.
+  useIdleLock(lockAfterMinutes, lock, appLockEnabled && !locked);
+
   const filters = useStore((s) => s.filters);
   const reminders = useStore((s) => s.reminders);
   const filtered = useMemo(
@@ -280,6 +296,7 @@ export default function App() {
       <SettingsModal />
       <LabelsManager />
       <HelpOverlay open={helpOpen} onClose={() => setHelpOpen(false)} />
+      <LockScreen />
 
       <ConfirmDialog
         open={emptyTrashOpen}

@@ -4,7 +4,7 @@ use std::path::Path;
 
 /// Current schema version. Bump and add a new arm to `apply_migration` for every
 /// schema change. Migrations are forward-only and ordered.
-pub const SCHEMA_VERSION: i32 = 4;
+pub const SCHEMA_VERSION: i32 = 5;
 
 pub fn open(path: &Path) -> Result<Connection> {
     let mut conn = Connection::open(path)?;
@@ -49,6 +49,7 @@ fn apply_migration(tx: &rusqlite::Transaction, version: i32) -> Result<()> {
         2 => tx.execute_batch(MIGRATION_V2)?,
         3 => tx.execute_batch(MIGRATION_V3)?,
         4 => tx.execute_batch(MIGRATION_V4)?,
+        5 => tx.execute_batch(MIGRATION_V5)?,
         v => bail!("no migration defined for schema v{v}"),
     }
     Ok(())
@@ -150,6 +151,18 @@ SET position = (SELECT rn FROM ordered WHERE ordered.id = notes.id)
 WHERE position = 0;
 "#;
 
+/// v5 — `app_settings` key/value table (NF-V0.5-C App Lock). Keys
+/// currently used: `app_lock_pin_phc` (Argon2id PHC string, NULL row
+/// when lock is disabled) and `app_lock_after_minutes` (idle minutes
+/// before the UI auto-locks). The table stays generic so future
+/// preferences can land without a migration.
+const MIGRATION_V5: &str = r#"
+CREATE TABLE IF NOT EXISTS app_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+"#;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -229,6 +242,34 @@ mod tests {
             .unwrap();
         let err = migrate(&mut conn).unwrap_err();
         assert!(err.to_string().contains("upgrade Keepr"));
+    }
+
+    #[test]
+    fn migration_v5_creates_app_settings_table() {
+        let conn = fresh_conn();
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master \
+                 WHERE type='table' AND name='app_settings'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1, "app_settings table should exist after migration");
+        // Roundtrip a key to prove the schema is actually usable.
+        conn.execute(
+            "INSERT INTO app_settings(key, value) VALUES('k', 'v')",
+            [],
+        )
+        .unwrap();
+        let v: String = conn
+            .query_row(
+                "SELECT value FROM app_settings WHERE key = 'k'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(v, "v");
     }
 
     #[test]

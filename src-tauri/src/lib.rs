@@ -1,5 +1,6 @@
 mod db;
 mod commands;
+mod lock;
 
 use parking_lot::Mutex;
 use std::path::{Path, PathBuf};
@@ -366,6 +367,11 @@ pub fn run() {
             commands::export_zip,
             commands::import_zip,
             commands::get_data_dir,
+            commands::get_app_lock_settings,
+            commands::enable_app_lock,
+            commands::disable_app_lock,
+            commands::verify_app_lock_pin,
+            commands::set_app_lock_minutes,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

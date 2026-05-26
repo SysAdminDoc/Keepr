@@ -57,6 +57,14 @@ interface UIState {
   toasts: Toast[];
   /** Set of note IDs the user has currently multi-selected (NF-04). */
   selectedIds: Set<string>;
+  /** NF-V0.5-C — when true, the App Lock overlay is shown and the rest
+   *  of the UI is hidden. Computed from `appLockEnabled` at startup
+   *  (locked-on-launch) and the idle timer (locked-after-N-minutes). */
+  locked: boolean;
+  /** Whether the user has set a PIN. Mirrored from Rust on startup. */
+  appLockEnabled: boolean;
+  /** Idle minutes before the UI auto-locks. */
+  lockAfterMinutes: number;
   load: () => Promise<void>;
   setSection: (s: Section) => void;
   setSearch: (q: string) => void;
@@ -103,6 +111,14 @@ interface UIState {
   toggleSelected: (id: string) => void;
   setSelected: (ids: string[]) => void;
   clearSelection: () => void;
+  /** NF-V0.5-C — load lock config from Rust then auto-lock if enabled. */
+  initAppLock: () => Promise<void>;
+  /** Set by the LockScreen after a successful PIN verify. */
+  unlock: () => void;
+  /** Set by the idle hook after the lock-after-N-minutes timeout. */
+  lock: () => void;
+  /** After a settings change (enable/disable/change minutes). */
+  refreshAppLockState: () => Promise<void>;
   /** @internal — used by the system-theme matchMedia listener. */
   _setDarkFromSystem: (dark: boolean) => void;
 }
@@ -243,6 +259,9 @@ export const useStore = create<UIState>((set, get) => ({
   autoBackupLastAt: readInitialAutoBackupLastAt(),
   toasts: [],
   selectedIds: new Set(),
+  locked: false,
+  appLockEnabled: false,
+  lockAfterMinutes: 5,
   load: async () => {
     try {
       const [notes, labels, reminders] = await Promise.all([
@@ -417,6 +436,36 @@ export const useStore = create<UIState>((set, get) => ({
     }),
   setSelected: (ids) => set({ selectedIds: new Set(ids) }),
   clearSelection: () => set({ selectedIds: new Set() }),
+  initAppLock: async () => {
+    try {
+      const cfg = await api.getAppLockSettings();
+      // Lock at startup if the user enabled App Lock at all — the
+      // idle timer takes over once they unlock the first time.
+      set({
+        appLockEnabled: cfg.enabled,
+        lockAfterMinutes: cfg.lockAfterMinutes,
+        locked: cfg.enabled,
+      });
+    } catch {
+      // Older binaries without the command — leave defaults.
+    }
+  },
+  unlock: () => set({ locked: false }),
+  lock: () => {
+    const s = get();
+    if (s.appLockEnabled) set({ locked: true });
+  },
+  refreshAppLockState: async () => {
+    try {
+      const cfg = await api.getAppLockSettings();
+      set({
+        appLockEnabled: cfg.enabled,
+        lockAfterMinutes: cfg.lockAfterMinutes,
+      });
+    } catch {
+      /* ignore */
+    }
+  },
 }));
 
 // Wire the forward-declared ref now that useStore exists. The

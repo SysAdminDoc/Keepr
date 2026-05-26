@@ -1849,6 +1849,127 @@ pub fn get_data_dir(state: State<'_, AppState>) -> Result<String, String> {
     Ok(state.data_dir.to_string_lossy().to_string())
 }
 
+// --- App Lock (NF-V0.5-C) ---------------------------------------------------
+//
+// Stores the Argon2id PHC string in `app_settings.app_lock_pin_phc` and
+// the idle timeout in `app_settings.app_lock_after_minutes`. PHC absence
+// (or NULL) means the lock is disabled. Hashing is the slow step
+// (~150-300 ms) and runs on the Tauri command worker — we deliberately
+// don't spawn_blocking because the renderer is already waiting on the
+// invoke promise and async-blocking would just add overhead.
+
+const KEY_APP_LOCK_PHC: &str = "app_lock_pin_phc";
+const KEY_APP_LOCK_MINUTES: &str = "app_lock_after_minutes";
+const DEFAULT_LOCK_MINUTES: u32 = 5;
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AppLockSettings {
+    pub enabled: bool,
+    pub lock_after_minutes: u32,
+}
+
+fn read_app_setting(conn: &rusqlite::Connection, key: &str) -> Result<Option<String>, String> {
+    conn.query_row(
+        "SELECT value FROM app_settings WHERE key = ?1",
+        params![key],
+        |r| r.get::<_, String>(0),
+    )
+    .map(Some)
+    .or_else(|e| match e {
+        rusqlite::Error::QueryReturnedNoRows => Ok(None),
+        other => Err(err(other)),
+    })
+}
+
+fn write_app_setting(conn: &rusqlite::Connection, key: &str, value: &str) -> Result<(), String> {
+    conn.execute(
+        "INSERT INTO app_settings(key, value) VALUES(?1, ?2)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        params![key, value],
+    )
+    .map_err(err)?;
+    Ok(())
+}
+
+fn delete_app_setting(conn: &rusqlite::Connection, key: &str) -> Result<(), String> {
+    conn.execute("DELETE FROM app_settings WHERE key = ?1", params![key])
+        .map_err(err)?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn get_app_lock_settings(state: State<'_, AppState>) -> Result<AppLockSettings, String> {
+    let conn = state.db.lock();
+    let enabled = read_app_setting(&conn, KEY_APP_LOCK_PHC)?
+        .map(|s| !s.is_empty())
+        .unwrap_or(false);
+    let lock_after_minutes = read_app_setting(&conn, KEY_APP_LOCK_MINUTES)?
+        .and_then(|s| s.parse::<u32>().ok())
+        .unwrap_or(DEFAULT_LOCK_MINUTES);
+    Ok(AppLockSettings {
+        enabled,
+        lock_after_minutes,
+    })
+}
+
+#[tauri::command]
+pub fn enable_app_lock(
+    state: State<'_, AppState>,
+    pin: String,
+    lock_after_minutes: u32,
+) -> Result<(), String> {
+    if pin.is_empty() {
+        return Err("PIN must not be empty".into());
+    }
+    if !(1..=240).contains(&lock_after_minutes) {
+        return Err("lock_after_minutes must be between 1 and 240".into());
+    }
+    let phc = crate::lock::hash_pin(&pin).map_err(|e| e.to_string())?;
+    let conn = state.db.lock();
+    write_app_setting(&conn, KEY_APP_LOCK_PHC, &phc)?;
+    write_app_setting(&conn, KEY_APP_LOCK_MINUTES, &lock_after_minutes.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn disable_app_lock(state: State<'_, AppState>, current_pin: String) -> Result<(), String> {
+    let conn = state.db.lock();
+    let phc = read_app_setting(&conn, KEY_APP_LOCK_PHC)?;
+    let Some(phc) = phc.filter(|s| !s.is_empty()) else {
+        return Err("App Lock is not enabled".into());
+    };
+    let ok = crate::lock::verify_pin(&current_pin, &phc).map_err(|e| e.to_string())?;
+    if !ok {
+        return Err("Incorrect PIN".into());
+    }
+    delete_app_setting(&conn, KEY_APP_LOCK_PHC)?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn verify_app_lock_pin(state: State<'_, AppState>, pin: String) -> Result<bool, String> {
+    let conn = state.db.lock();
+    let phc = read_app_setting(&conn, KEY_APP_LOCK_PHC)?;
+    let Some(phc) = phc.filter(|s| !s.is_empty()) else {
+        return Err("App Lock is not enabled".into());
+    };
+    crate::lock::verify_pin(&pin, &phc).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn set_app_lock_minutes(
+    state: State<'_, AppState>,
+    lock_after_minutes: u32,
+) -> Result<(), String> {
+    if !(1..=240).contains(&lock_after_minutes) {
+        return Err("lock_after_minutes must be between 1 and 240".into());
+    }
+    let conn = state.db.lock();
+    write_app_setting(&conn, KEY_APP_LOCK_MINUTES, &lock_after_minutes.to_string())?;
+    Ok(())
+}
+
 // --- Backup / restore -------------------------------------------------------
 //
 // EI-01: Validate every zip entry before writing it. Even though zip's

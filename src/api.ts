@@ -57,4 +57,14 @@ export const api = {
   exportZip: (dest: string) => invoke<string>("export_zip", { dest }),
   importZip: (src: string) => invoke<void>("import_zip", { src }),
   getDataDir: () => invoke<string>("get_data_dir"),
+  getAppLockSettings: () =>
+    invoke<{ enabled: boolean; lockAfterMinutes: number }>("get_app_lock_settings"),
+  enableAppLock: (pin: string, lockAfterMinutes: number) =>
+    invoke<void>("enable_app_lock", { pin, lockAfterMinutes }),
+  disableAppLock: (currentPin: string) =>
+    invoke<void>("disable_app_lock", { currentPin }),
+  verifyAppLockPin: (pin: string) =>
+    invoke<boolean>("verify_app_lock_pin", { pin }),
+  setAppLockMinutes: (lockAfterMinutes: number) =>
+    invoke<void>("set_app_lock_minutes", { lockAfterMinutes }),
 };
