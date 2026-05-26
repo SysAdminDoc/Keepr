@@ -7,6 +7,7 @@ import {
   Trash2,
   RotateCcw,
   Check,
+  Bell,
 } from "lucide-react";
 import clsx from "clsx";
 import { useRef, useState } from "react";
@@ -37,6 +38,9 @@ export function NoteCard({ note }: Props) {
   const trashRetentionDays = useStore((s) => s.trashRetentionDays);
   const selectedIds = useStore((s) => s.selectedIds);
   const toggleSelected = useStore((s) => s.toggleSelected);
+  const reminder = useStore((s) =>
+    s.reminders.find((r) => r.noteId === note.id) ?? null,
+  );
   const selectMode = selectedIds.size > 0;
   const isSelected = selectedIds.has(note.id);
 
@@ -312,6 +316,14 @@ export function NoteCard({ note }: Props) {
         </div>
       )}
 
+      {reminder && !reminder.firedAt && (
+        <div className="flex flex-wrap gap-1 px-3 pb-1">
+          <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-black/5 dark:bg-white/10">
+            <Bell size={11} aria-hidden /> {formatReminder(reminder.fireAt)}
+          </span>
+        </div>
+      )}
+
       <ChipsRow noteLabelIds={note.labels} />
 
       <div className="hover-actions flex items-center px-1 pb-1">
@@ -404,6 +416,38 @@ function HighlightHashtags({ text }: { text: string }) {
   }
   if (lastIndex < text.length) parts.push(text.slice(lastIndex));
   return <>{parts}</>;
+}
+
+/** NF-02 — turn an ISO fire_at into a Keep-shaped relative date string.
+ *  "Today, 3:00 PM", "Tomorrow, 8:00 AM", "Mon, May 26, 3:00 PM",
+ *  or "May 12, 3:00 PM" if more than a week out. */
+function formatReminder(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  const now = new Date();
+  const sameDay =
+    d.getFullYear() === now.getFullYear() &&
+    d.getMonth() === now.getMonth() &&
+    d.getDate() === now.getDate();
+  const tomorrow = new Date(now);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const isTomorrow =
+    d.getFullYear() === tomorrow.getFullYear() &&
+    d.getMonth() === tomorrow.getMonth() &&
+    d.getDate() === tomorrow.getDate();
+  const time = d.toLocaleTimeString([], {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+  if (sameDay) return `Today, ${time}`;
+  if (isTomorrow) return `Tomorrow, ${time}`;
+  const dayDelta = (d.getTime() - now.getTime()) / 86_400_000;
+  if (dayDelta > 0 && dayDelta < 7) {
+    return d.toLocaleDateString([], {
+      weekday: "short",
+    }) + `, ${time}`;
+  }
+  return d.toLocaleDateString([], { month: "short", day: "numeric" }) + `, ${time}`;
 }
 
 function ChipsRow({ noteLabelIds }: { noteLabelIds: string[] }) {

@@ -74,6 +74,17 @@ export interface Label {
   name: string;
 }
 
+export interface Reminder {
+  id: string;
+  noteId: string;
+  fireAt: string;
+  rrule: string | null;
+  snoozeUntil: string | null;
+  firedAt: string | null;
+  dismissedAt: string | null;
+  createdAt: string;
+}
+
 export type Section =
   | { kind: "notes" }
   | { kind: "archive" }

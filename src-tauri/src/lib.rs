@@ -154,6 +154,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(move |app, shortcut, event| {
@@ -256,6 +257,38 @@ pub fn run() {
                 eprintln!("keepr: failed to register Ctrl+Alt+N: {e}");
             }
 
+            // NF-02 — reminder scheduler thread. Polls take_due_reminders
+            // every 30s, fires a native notification per due reminder via
+            // tauri-plugin-notification, and emits keepr://reminder-fired
+            // so the renderer can refresh the bell badge.
+            let app_handle = app.handle().clone();
+            std::thread::spawn(move || {
+                use std::thread::sleep;
+                use std::time::Duration;
+                loop {
+                    let now = chrono::Utc::now().to_rfc3339();
+                    let state: tauri::State<'_, AppState> = app_handle.state();
+                    match commands::take_due_reminders(&state, &now) {
+                        Ok(items) if !items.is_empty() => {
+                            for (rem, preview) in &items {
+                                let _ = tauri_plugin_notification::NotificationExt::notification(
+                                    &app_handle,
+                                )
+                                .builder()
+                                .title("Keepr reminder")
+                                .body(preview)
+                                .show();
+                                let _ = app_handle
+                                    .emit("keepr://reminder-fired", &rem.id);
+                            }
+                        }
+                        Ok(_) => {}
+                        Err(e) => eprintln!("keepr: reminder sweep failed: {e}"),
+                    }
+                    sleep(Duration::from_secs(30));
+                }
+            });
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -267,6 +300,9 @@ pub fn run() {
             commands::reorder_notes,
             commands::add_image_attachment,
             commands::delete_attachment,
+            commands::set_reminder,
+            commands::clear_reminder,
+            commands::list_reminders,
             commands::delete_note_permanent,
             commands::set_archived,
             commands::set_trashed,

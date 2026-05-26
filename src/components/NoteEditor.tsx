@@ -18,6 +18,7 @@ import {
   Copy,
   GripVertical,
   Image as ImageIcon,
+  Bell,
 } from "lucide-react";
 import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import type { Attachment } from "../types";
@@ -43,6 +44,7 @@ import { ColorPicker } from "./ColorPicker";
 import { IconBtn } from "./IconBtn";
 import { extractHashtagsFromNote } from "../lib/hashtags";
 import { AttachmentGrid } from "./AttachmentGrid";
+import { ReminderPicker } from "./ReminderPicker";
 import type { ChecklistItemInput, ColorKey, Note, NoteKind, NoteInput } from "../types";
 
 interface ChecklistRowProps {
@@ -183,18 +185,24 @@ export function NoteEditor() {
   const patchNote = useStore((s) => s.patchNote);
   const upsertLabel = useStore((s) => s.upsertLabel);
   const moveCheckedToBottom = useStore((s) => s.moveCheckedToBottom);
+  const upsertReminder = useStore((s) => s.upsertReminder);
+  const removeReminder = useStore((s) => s.removeReminder);
+  const reminders = useStore((s) => s.reminders);
   const [checkedCollapsed, setCheckedCollapsed] = useState(false);
   // NF-01 — attachments live alongside draft state but aren't part of the
   // NoteInput payload (add/remove go through their own commands so the
   // file copy + DB write stay transactional). We snapshot existing
   // attachments on open and append optimistically on add.
   const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [reminderPickerOpen, setReminderPickerOpen] = useState(false);
 
   // EI-06 — Snapshot the existing note once on open. We deliberately do NOT
   // depend on the store's `notes` array because a background load() would
   // swap the array reference and clobber in-progress edits. The snapshot
   // is captured imperatively in the open effect below.
   const [existing, setExisting] = useState<Note | null>(null);
+  const noteReminder =
+    existing ? reminders.find((r) => r.noteId === existing.id) ?? null : null;
 
   const [draft, setDraft] = useState<Draft>(emptyDraft());
   const [colorOpen, setColorOpen] = useState(false);
@@ -616,6 +624,34 @@ export function NoteEditor() {
     }
   };
 
+  // NF-02 — reminder hookup. New notes must exist before they can carry
+  // a reminder, so reuse the ensureExistingId helper from NF-01.
+  const setReminderForNote = async (fireAtIso: string) => {
+    setReminderPickerOpen(false);
+    const noteId = await ensureExistingId();
+    if (!noteId) return;
+    try {
+      const r = await api.setReminder(noteId, fireAtIso);
+      upsertReminder(r);
+      showToast(
+        `Reminder set for ${new Date(fireAtIso).toLocaleString()}`,
+      );
+    } catch (e) {
+      showToast("Could not set reminder: " + String(e));
+    }
+  };
+  const clearReminderForNote = async () => {
+    setReminderPickerOpen(false);
+    if (!existing) return;
+    try {
+      await api.clearReminder(existing.id);
+      removeReminder(existing.id);
+      showToast("Reminder cleared");
+    } catch (e) {
+      showToast("Could not clear reminder: " + String(e));
+    }
+  };
+
   // NF-18 — duplicate the open note. Flushes any unsaved edits to the
   // source first, then asks the Rust side to copy.
   const duplicate = async () => {
@@ -634,10 +670,7 @@ export function NoteEditor() {
   };
 
   return (
-    <div
-      className="fixed inset-0 z-50 modal-backdrop grid place-items-center p-4"
-      onClick={close}
-    >
+    <div className="fixed inset-0 z-50 modal-backdrop grid place-items-center p-4" onClick={close}>
       <div
         className="w-full max-w-xl rounded-lg border shadow-keep-hover overflow-hidden"
         style={{ background: bg, borderColor: border }}
@@ -803,6 +836,13 @@ export function NoteEditor() {
         )}
 
         <div className="flex items-center px-1 pb-1 relative">
+          <IconBtn
+            ariaLabel={noteReminder ? "Edit reminder" : "Set reminder"}
+            onClick={() => setReminderPickerOpen(true)}
+            pressed={!!noteReminder}
+          >
+            <Bell size={18} aria-hidden />
+          </IconBtn>
           <IconBtn ariaLabel="Add image" onClick={addImage}>
             <ImageIcon size={18} aria-hidden />
           </IconBtn>
@@ -913,6 +953,14 @@ export function NoteEditor() {
           </button>
         </div>
       </div>
+
+      <ReminderPicker
+        open={reminderPickerOpen}
+        existingFireAt={noteReminder?.fireAt ?? null}
+        onSet={setReminderForNote}
+        onClear={clearReminderForNote}
+        onClose={() => setReminderPickerOpen(false)}
+      />
     </div>
   );
 }

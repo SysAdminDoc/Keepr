@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { Attachment, Note, NoteInput, Label } from "./types";
+import type { Attachment, Note, NoteInput, Label, Reminder } from "./types";
 
 export const api = {
   listNotes: () => invoke<Note[]>("list_notes"),
@@ -13,6 +13,11 @@ export const api = {
     invoke<Attachment>("add_image_attachment", { noteId, srcPath }),
   deleteAttachment: (id: string) =>
     invoke<void>("delete_attachment", { id }),
+  setReminder: (noteId: string, fireAt: string) =>
+    invoke<Reminder>("set_reminder", { noteId, fireAt }),
+  clearReminder: (noteId: string) =>
+    invoke<void>("clear_reminder", { noteId }),
+  listReminders: () => invoke<Reminder[]>("list_reminders"),
   deleteNotePermanent: (id: string) =>
     invoke<void>("delete_note_permanent", { id }),
   setArchived: (id: string, archived: boolean) =>

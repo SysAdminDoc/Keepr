@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { Note, Label, Section, SearchFilters } from "./types";
+import type { Note, Label, Section, SearchFilters, Reminder } from "./types";
 import { EMPTY_FILTERS } from "./types";
 import { api } from "./api";
 
@@ -23,6 +23,7 @@ export type SortMode = "modified" | "created" | "title" | "custom";
 interface UIState {
   notes: Note[];
   labels: Label[];
+  reminders: Reminder[];
   loaded: boolean;
   section: Section;
   search: string;
@@ -94,6 +95,8 @@ interface UIState {
   upsertLabel: (label: Label) => void;
   patchLabel: (id: string, patch: Partial<Label>) => void;
   removeLabel: (id: string) => void;
+  upsertReminder: (reminder: Reminder) => void;
+  removeReminder: (noteId: string) => void;
   /** Drop every note whose predicate matches (used by Empty Trash). */
   removeNotesWhere: (predicate: (n: Note) => boolean) => void;
 
@@ -220,6 +223,7 @@ if (typeof window !== "undefined" && window.matchMedia) {
 export const useStore = create<UIState>((set, get) => ({
   notes: [],
   labels: [],
+  reminders: [],
   loaded: false,
   section: { kind: "notes" },
   search: "",
@@ -241,14 +245,16 @@ export const useStore = create<UIState>((set, get) => ({
   selectedIds: new Set(),
   load: async () => {
     try {
-      const [notes, labels] = await Promise.all([
+      const [notes, labels, reminders] = await Promise.all([
         api.listNotes(),
         api.listLabels(),
+        api.listReminders().catch(() => []),
       ]);
       // Apply the user's preferred sort over the SQL-default order.
       set((s) => ({
         notes: sortNotes(notes, s.sortMode),
         labels,
+        reminders,
         loaded: true,
       }));
     } catch (e) {
@@ -378,6 +384,16 @@ export const useStore = create<UIState>((set, get) => ({
         labels: n.labels.filter((lid) => lid !== id),
       })),
     })),
+  upsertReminder: (reminder) =>
+    set((s) => {
+      const i = s.reminders.findIndex((r) => r.noteId === reminder.noteId);
+      const next = [...s.reminders];
+      if (i >= 0) next[i] = reminder;
+      else next.push(reminder);
+      return { reminders: next };
+    }),
+  removeReminder: (noteId) =>
+    set((s) => ({ reminders: s.reminders.filter((r) => r.noteId !== noteId) })),
 
   toggleSelected: (id) =>
     set((s) => {

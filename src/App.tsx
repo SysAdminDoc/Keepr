@@ -45,24 +45,37 @@ export default function App() {
   useGlobalHotkey({ key: "g", mod: true }, toggleViewMode);
 
   // NF-06 — open a fresh note when the Rust tray icon / Ctrl+Alt+N global
-  // hotkey emits the quick-capture event.
+  // hotkey emits the quick-capture event. NF-02 — re-fetch reminders when
+  // the scheduler fires one, so the bell badge drops.
   useEffect(() => {
-    let unlisten: (() => void) | null = null;
+    const unlisteners: (() => void)[] = [];
     let cancelled = false;
     (async () => {
       try {
-        const u = await listen("keepr://quick-capture", () => {
+        const u1 = await listen("keepr://quick-capture", () => {
           useStore.getState().openEditor(null);
         });
-        if (cancelled) u();
-        else unlisten = u;
+        const u2 = await listen("keepr://reminder-fired", async () => {
+          try {
+            const next = await api.listReminders();
+            useStore.setState({ reminders: next });
+          } catch {
+            /* ignore */
+          }
+        });
+        if (cancelled) {
+          u1();
+          u2();
+        } else {
+          unlisteners.push(u1, u2);
+        }
       } catch {
         // listen() fails outside Tauri (browser preview, vitest).
       }
     })();
     return () => {
       cancelled = true;
-      if (unlisten) unlisten();
+      for (const u of unlisteners) u();
     };
   }, []);
   // NF-03 — bind Keep's canonical shortcuts (c, l, /, ?, j, k, f, e, #).

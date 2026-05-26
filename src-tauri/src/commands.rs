@@ -575,6 +575,164 @@ pub fn duplicate_note(state: State<'_, AppState>, id: String) -> Result<Note, St
     })
 }
 
+// --- NF-02 reminders ---
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct Reminder {
+    pub id: String,
+    pub note_id: String,
+    pub fire_at: String,
+    pub rrule: Option<String>,
+    pub snooze_until: Option<String>,
+    pub fired_at: Option<String>,
+    pub dismissed_at: Option<String>,
+    pub created_at: String,
+}
+
+#[tauri::command]
+pub fn set_reminder(
+    state: State<'_, AppState>,
+    note_id: String,
+    fire_at: String,
+) -> Result<Reminder, String> {
+    if state.importing.load(std::sync::atomic::Ordering::SeqCst) {
+        return Err("a restore is currently in progress".into());
+    }
+    // Basic validation: fire_at must be parseable RFC3339.
+    if chrono::DateTime::parse_from_rfc3339(&fire_at).is_err() {
+        return Err(format!("fire_at not a valid RFC3339 timestamp: {fire_at}"));
+    }
+    let conn = state.db.lock();
+    let id = Uuid::new_v4().to_string();
+    let now = now_iso();
+    // UPSERT keyed on the UNIQUE note_id — replacing an existing
+    // reminder rather than appending.
+    conn.execute(
+        "INSERT INTO reminders (id, note_id, fire_at, created_at)
+         VALUES (?1, ?2, ?3, ?4)
+         ON CONFLICT(note_id) DO UPDATE SET
+            fire_at = excluded.fire_at,
+            fired_at = NULL,
+            dismissed_at = NULL,
+            snooze_until = NULL",
+        params![id, note_id, fire_at, now],
+    )
+    .map_err(err)?;
+    let r = conn
+        .query_row(
+            "SELECT id, note_id, fire_at, rrule, snooze_until, fired_at, dismissed_at, created_at
+             FROM reminders WHERE note_id = ?1",
+            params![note_id],
+            reminder_from_row,
+        )
+        .map_err(err)?;
+    Ok(r)
+}
+
+#[tauri::command]
+pub fn clear_reminder(state: State<'_, AppState>, note_id: String) -> Result<(), String> {
+    if state.importing.load(std::sync::atomic::Ordering::SeqCst) {
+        return Err("a restore is currently in progress".into());
+    }
+    let conn = state.db.lock();
+    conn.execute(
+        "DELETE FROM reminders WHERE note_id = ?1",
+        params![note_id],
+    )
+    .map_err(err)?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn list_reminders(state: State<'_, AppState>) -> Result<Vec<Reminder>, String> {
+    let conn = state.db.lock();
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, note_id, fire_at, rrule, snooze_until, fired_at, dismissed_at, created_at
+             FROM reminders",
+        )
+        .map_err(err)?;
+    let rows = stmt
+        .query_map([], reminder_from_row)
+        .map_err(err)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(err)?;
+    Ok(rows)
+}
+
+/// Internal — returns pending reminders that should fire now (fire_at <=
+/// now AND fired_at IS NULL AND no active snooze). Used by the scheduler
+/// thread in lib.rs.
+pub fn take_due_reminders(
+    state: &AppState,
+    now_rfc3339: &str,
+) -> Result<Vec<(Reminder, String)>, String> {
+    // Returns (reminder, note_title) so the scheduler can compose a
+    // human-readable notification body.
+    let conn = state.db.lock();
+    let mut stmt = conn
+        .prepare(
+            "SELECT r.id, r.note_id, r.fire_at, r.rrule, r.snooze_until,
+                    r.fired_at, r.dismissed_at, r.created_at, n.title, n.body
+             FROM reminders r
+             JOIN notes n ON n.id = r.note_id
+             WHERE r.fired_at IS NULL
+               AND (r.snooze_until IS NULL OR r.snooze_until <= ?1)
+               AND r.fire_at <= ?1
+               AND n.trashed = 0",
+        )
+        .map_err(err)?;
+    let rows = stmt
+        .query_map(params![now_rfc3339], |row| {
+            let r = Reminder {
+                id: row.get(0)?,
+                note_id: row.get(1)?,
+                fire_at: row.get(2)?,
+                rrule: row.get(3)?,
+                snooze_until: row.get(4)?,
+                fired_at: row.get(5)?,
+                dismissed_at: row.get(6)?,
+                created_at: row.get(7)?,
+            };
+            let title: String = row.get(8)?;
+            let body: String = row.get(9)?;
+            let preview = if !title.is_empty() {
+                title
+            } else if !body.is_empty() {
+                body.chars().take(60).collect()
+            } else {
+                "Untitled note".into()
+            };
+            Ok((r, preview))
+        })
+        .map_err(err)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(err)?;
+    // Mark each one fired so it doesn't re-fire next tick.
+    for (r, _) in &rows {
+        conn.execute(
+            "UPDATE reminders SET fired_at = ?1 WHERE id = ?2",
+            params![now_rfc3339, r.id],
+        )
+        .map_err(err)?;
+    }
+    Ok(rows)
+}
+
+fn reminder_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Reminder> {
+    Ok(Reminder {
+        id: row.get(0)?,
+        note_id: row.get(1)?,
+        fire_at: row.get(2)?,
+        rrule: row.get(3)?,
+        snooze_until: row.get(4)?,
+        fired_at: row.get(5)?,
+        dismissed_at: row.get(6)?,
+        created_at: row.get(7)?,
+    })
+}
+
 // --- NF-01 attachments ---
 //
 // File model: bytes live under <data_dir>/resources/<id>.<ext>, served

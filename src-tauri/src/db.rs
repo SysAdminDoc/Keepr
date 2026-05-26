@@ -4,7 +4,7 @@ use std::path::Path;
 
 /// Current schema version. Bump and add a new arm to `apply_migration` for every
 /// schema change. Migrations are forward-only and ordered.
-pub const SCHEMA_VERSION: i32 = 2;
+pub const SCHEMA_VERSION: i32 = 3;
 
 pub fn open(path: &Path) -> Result<Connection> {
     let mut conn = Connection::open(path)?;
@@ -47,6 +47,7 @@ fn apply_migration(tx: &rusqlite::Transaction, version: i32) -> Result<()> {
     match version {
         1 => tx.execute_batch(MIGRATION_V1)?,
         2 => tx.execute_batch(MIGRATION_V2)?,
+        3 => tx.execute_batch(MIGRATION_V3)?,
         v => bail!("no migration defined for schema v{v}"),
     }
     Ok(())
@@ -110,6 +111,24 @@ CREATE TABLE IF NOT EXISTS attachments (
     created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_attachments_note ON attachments(note_id);
+"#;
+
+/// v3 — reminders table (NF-02). One pending reminder per note. RRULE
+/// is reserved for v0.5+ recurring reminders; v0.4 single-shot only.
+const MIGRATION_V3: &str = r#"
+CREATE TABLE IF NOT EXISTS reminders (
+    id TEXT PRIMARY KEY,
+    note_id TEXT NOT NULL UNIQUE REFERENCES notes(id) ON DELETE CASCADE,
+    fire_at TEXT NOT NULL,        -- ISO 8601, UTC
+    rrule TEXT,                    -- RFC 5545 (unused in v0.4)
+    snooze_until TEXT,             -- ISO 8601, UTC
+    fired_at TEXT,                 -- ISO 8601, UTC (NULL = pending)
+    dismissed_at TEXT,             -- ISO 8601, UTC
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_reminders_pending
+    ON reminders(fired_at, fire_at)
+    WHERE fired_at IS NULL;
 "#;
 
 #[cfg(test)]
