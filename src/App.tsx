@@ -308,7 +308,7 @@ export default function App() {
               {filtered.length === 0 ? (
                 <EmptyState section={section.kind} headerLabel={headerLabel} />
               ) : (
-                <div className="max-w-[1600px] mx-auto">
+                <div className="mx-auto">
                   {section.kind === "notes" && pinned.length > 0 && (
                     <>
                       <SectionLabel text="PINNED" />

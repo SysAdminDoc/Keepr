@@ -6,6 +6,12 @@ All notable changes to Keepr are documented here. Format loosely follows [Keep a
 
 (See [ROADMAP.md](ROADMAP.md) for the live task list.)
 
+## [0.16.6] — 2026-05-26 — "Use the full width on wide displays"
+
+### Fixed
+
+- **Notes grid was capped at 1600px on wide monitors.** `App.tsx` wrapped the grid in `<div className="max-w-[1600px] mx-auto">`, so on a 1920px+ display the cards stopped at 1600px and left an empty band on both sides. Removed the `max-w-[1600px]` cap so the grid now fills all available main-content width (sidebar + chrome subtracted). At default `cardWidth = 240px` that means 4+ columns on a typical 1920px display and proportionally more on ultrawides. Use Ctrl+Wheel to widen cards if you'd rather have fewer columns.
+
 ## [0.16.5] — 2026-05-26 — "Ctrl+Wheel zoom for card size"
 
 ### Added
