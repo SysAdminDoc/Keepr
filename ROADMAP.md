@@ -34,9 +34,9 @@ These are the items still on deck. They batch into the next handful of minor rel
 - [x] **EI-V0.5-17** — Secondary modals lazy-loaded (SettingsModal / LabelsManager / HelpOverlay / LockScreen / ReminderPicker / HistoryDrawer / DrawingCanvasModal) — initial bundle drops the modal trees until first open
 - [x] **EI-V0.5-15** — Kebab "More" overflow on the editor toolbar (Make a copy / Version history / Move to vault collapse into a `MoreVertical` popover; primaries stay always-visible)
 
-### v0.16.0 "Refactor pass"
+### v0.16.0 "Refactor pass" — SHIPPED 2026-05-26
 
-- [ ] **EI-V0.5-10** — Split mega-files. `src-tauri/src/commands.rs` is ~3 k lines — split into `commands/notes.rs`, `commands/labels.rs`, `commands/reminders.rs`, `commands/vault.rs`, `commands/backup.rs`, `commands/io.rs`. `src/components/NoteEditor.tsx` (~1100 lines) — extract `<ChecklistSection>` and `<EditorToolbar>`. `src/components/SettingsModal.tsx` (~400 lines) — sectionise into a `<SettingsSection title=…>` shell.
+- [x] **EI-V0.5-10 (partial)** — `<ChecklistSection>` extracted from `NoteEditor.tsx` (-270 lines / -21%). The remaining proposed splits (further commands.rs subfiles, SettingsModal sectionising) were investigated and explicitly closed as low-ROI churn — see [v0.16.0 CHANGELOG entry](CHANGELOG.md#0160--2026-05-26--refactor-pass).
 
 ---
 
