@@ -127,24 +127,81 @@ fn load_note(conn: &Connection, id: &str) -> Result<Option<Note>, rusqlite::Erro
 #[tauri::command]
 pub fn list_notes(state: State<'_, AppState>) -> Result<Vec<Note>, String> {
     let conn = state.db.lock();
-    let mut stmt = conn
+
+    // EI-08 — 3 bulk queries instead of 1 + 3N. With N=1000 we go from
+    // 4001 prepared-statement executions to 3. Order preserved by writing
+    // into a Vec<Note> in note-row order, then attaching children by id.
+    let mut nstmt = conn
         .prepare(
-            "SELECT id FROM notes
+            "SELECT id, kind, title, body, color, pinned, archived, trashed, position,
+                    created_at, updated_at, trashed_at
+             FROM notes
              ORDER BY pinned DESC, updated_at DESC",
         )
         .map_err(err)?;
-    let ids: Vec<String> = stmt
-        .query_map([], |row| row.get::<_, String>(0))
+    let mut notes: Vec<Note> = nstmt
+        .query_map([], |row| {
+            Ok(Note {
+                id: row.get(0)?,
+                kind: row.get(1)?,
+                title: row.get(2)?,
+                body: row.get(3)?,
+                color: row.get(4)?,
+                pinned: row.get::<_, i64>(5)? != 0,
+                archived: row.get::<_, i64>(6)? != 0,
+                trashed: row.get::<_, i64>(7)? != 0,
+                position: row.get(8)?,
+                created_at: row.get(9)?,
+                updated_at: row.get(10)?,
+                trashed_at: row.get(11)?,
+                checklist: Vec::new(),
+                labels: Vec::new(),
+            })
+        })
         .map_err(err)?
-        .filter_map(|r| r.ok())
-        .collect();
-    let mut out = Vec::with_capacity(ids.len());
-    for id in ids {
-        if let Some(n) = load_note(&conn, &id).map_err(err)? {
-            out.push(n);
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(err)?;
+
+    // Build an id -> Vec index for in-place stitching.
+    use std::collections::HashMap;
+    let mut idx: HashMap<String, usize> = HashMap::with_capacity(notes.len());
+    for (i, n) in notes.iter().enumerate() {
+        idx.insert(n.id.clone(), i);
+    }
+
+    let mut cstmt = conn
+        .prepare(
+            "SELECT note_id, id, text, checked, position
+             FROM checklist_items
+             ORDER BY position ASC, rowid ASC",
+        )
+        .map_err(err)?;
+    let mut crows = cstmt.query([]).map_err(err)?;
+    while let Some(row) = crows.next().map_err(err)? {
+        let note_id: String = row.get(0).map_err(err)?;
+        if let Some(&i) = idx.get(&note_id) {
+            notes[i].checklist.push(ChecklistItem {
+                id: row.get(1).map_err(err)?,
+                text: row.get(2).map_err(err)?,
+                checked: row.get::<_, i64>(3).map_err(err)? != 0,
+                position: row.get(4).map_err(err)?,
+            });
         }
     }
-    Ok(out)
+
+    let mut lstmt = conn
+        .prepare("SELECT note_id, label_id FROM note_labels")
+        .map_err(err)?;
+    let mut lrows = lstmt.query([]).map_err(err)?;
+    while let Some(row) = lrows.next().map_err(err)? {
+        let note_id: String = row.get(0).map_err(err)?;
+        let label_id: String = row.get(1).map_err(err)?;
+        if let Some(&i) = idx.get(&note_id) {
+            notes[i].labels.push(label_id);
+        }
+    }
+
+    Ok(notes)
 }
 
 #[tauri::command]
