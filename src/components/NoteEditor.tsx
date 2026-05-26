@@ -20,6 +20,7 @@ import { useStore } from "../store";
 import { api } from "../api";
 import { bgFor, borderFor } from "../colors";
 import { ColorPicker } from "./ColorPicker";
+import { IconBtn } from "./IconBtn";
 import type { ChecklistItemInput, ColorKey, Note, NoteKind, NoteInput } from "../types";
 
 interface Draft {
@@ -440,8 +441,8 @@ export function NoteEditor() {
         )}
 
         <div className="flex items-center px-1 pb-1 relative">
-          <IconBtn title="Background options" onClick={() => setColorOpen((v) => !v)}>
-            <Palette size={18} />
+          <IconBtn ariaLabel="Background options" onClick={() => setColorOpen((v) => !v)}>
+            <Palette size={18} aria-hidden />
           </IconBtn>
           {colorOpen && (
             <div className="absolute z-30 top-12 left-2">
@@ -455,14 +456,18 @@ export function NoteEditor() {
             </div>
           )}
           <IconBtn
-            title={draft.kind === "list" ? "Show as text" : "Show as checklist"}
+            ariaLabel={draft.kind === "list" ? "Show as text" : "Show as checklist"}
             onClick={() => setKind(draft.kind === "list" ? "text" : "list")}
           >
-            {draft.kind === "list" ? <AlignLeft size={18} /> : <ListChecks size={18} />}
+            {draft.kind === "list" ? (
+              <AlignLeft size={18} aria-hidden />
+            ) : (
+              <ListChecks size={18} aria-hidden />
+            )}
           </IconBtn>
           <div className="relative">
-            <IconBtn title="Labels" onClick={() => setLabelMenuOpen((v) => !v)}>
-              <Tag size={18} />
+            <IconBtn ariaLabel="Labels" onClick={() => setLabelMenuOpen((v) => !v)}>
+              <Tag size={18} aria-hidden />
             </IconBtn>
             {labelMenuOpen && (
               <div
@@ -513,13 +518,20 @@ export function NoteEditor() {
             )}
           </div>
           {existing && !existing.trashed && (
-            <IconBtn title={existing.archived ? "Unarchive" : "Archive"} onClick={archive}>
-              {existing.archived ? <ArchiveRestore size={18} /> : <Archive size={18} />}
+            <IconBtn
+              ariaLabel={existing.archived ? "Unarchive" : "Archive"}
+              onClick={archive}
+            >
+              {existing.archived ? (
+                <ArchiveRestore size={18} aria-hidden />
+              ) : (
+                <Archive size={18} aria-hidden />
+              )}
             </IconBtn>
           )}
           {existing && !existing.trashed && (
-            <IconBtn title="Delete" onClick={trash}>
-              <Trash2 size={18} />
+            <IconBtn ariaLabel="Delete" onClick={trash}>
+              <Trash2 size={18} aria-hidden />
             </IconBtn>
           )}
           <div className="flex-1" />
@@ -535,22 +547,3 @@ export function NoteEditor() {
   );
 }
 
-function IconBtn({
-  children,
-  onClick,
-  title,
-}: {
-  children: React.ReactNode;
-  onClick: () => void;
-  title: string;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      title={title}
-      className="p-2 rounded-full hover:bg-black/10 dark:hover:bg-white/10"
-    >
-      {children}
-    </button>
-  );
-}

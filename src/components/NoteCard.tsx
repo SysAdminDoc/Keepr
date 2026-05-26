@@ -15,6 +15,7 @@ import { bgFor, borderFor } from "../colors";
 import { useStore } from "../store";
 import { api } from "../api";
 import { ColorPicker } from "./ColorPicker";
+import { IconBtn } from "./IconBtn";
 import { useClickOutside } from "../hooks/useClickOutside";
 
 interface Props {
@@ -263,28 +264,6 @@ export function NoteCard({ note }: Props) {
         )}
       </div>
     </div>
-  );
-}
-
-function IconBtn({
-  children,
-  onClick,
-  ariaLabel,
-}: {
-  children: React.ReactNode;
-  onClick: (e: React.MouseEvent) => void;
-  ariaLabel: string;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-label={ariaLabel}
-      title={ariaLabel}
-      className="p-2 rounded-full hover:bg-black/10 dark:hover:bg-white/10"
-    >
-      {children}
-    </button>
   );
 }
 
