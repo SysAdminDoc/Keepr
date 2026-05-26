@@ -6,6 +6,24 @@ All notable changes to Keepr are documented here. Format loosely follows [Keep a
 
 (See [ROADMAP.md](ROADMAP.md) for the live task list.)
 
+## [0.16.1] — 2026-05-26 — "First published Windows binary"
+
+Release-only patch. No code changes from v0.16.0 — this is the **first version with attached installer artifacts on the GitHub Releases page**.
+
+### Why a new version
+
+Tags v0.6.0 → v0.16.0 fired the `tauri-action` release workflow on every push, but the runs are all stuck in `queued` at the GitHub Actions runner-allocation step because of a SysAdminDoc account-level billing block (see [SysAdminDoc Actions billing](https://github.com/SysAdminDoc/Keepr/issues) for the wider context). No release page ever got created.
+
+v0.16.1 was built locally and the bundles uploaded manually via `gh release create` so users can actually install the app without a from-source build.
+
+### Artifacts
+
+- `Keepr_0.16.1_x64-setup.exe` — NSIS installer.
+- `Keepr_0.16.1_x64_en-US.msi` — Windows Installer.
+- `Keepr-portable.zip` — extract anywhere, drop `portable.flag` next to `keepr.exe` for USB-stick mode.
+
+Unsigned per the v0.5 code-signing decision (see [SECURITY.md](SECURITY.md)). Windows SmartScreen warning expected on first launch — click "More info" → "Run anyway".
+
 ## [0.16.0] — 2026-05-26 — "Refactor pass"
 
 EI-V0.5-10 partially closed. The high-ROI piece (extract `ChecklistSection` from the 1280-line NoteEditor) shipped; the rest of the proposed mega-file split (further commands.rs subfiles, sectionising SettingsModal) was triaged as low-ROI churn and explicitly closed without action — see "Deferred as low-ROI" below.

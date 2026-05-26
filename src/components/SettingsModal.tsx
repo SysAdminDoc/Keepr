@@ -417,7 +417,7 @@ export function SettingsModal() {
           </div>
 
           <div className="px-5 py-3 border-t border-gray-200 dark:border-[#5f6368] text-xs text-gray-500 dark:text-gray-400">
-            Keepr v0.16.0 — offline-first Google Keep clone. MIT-licensed.
+            Keepr v0.16.1 — offline-first Google Keep clone. MIT-licensed.
           </div>
         </div>
       </div>
