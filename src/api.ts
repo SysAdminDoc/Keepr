@@ -8,6 +8,7 @@ export const api = {
   updateNote: (id: string, input: NoteInput) =>
     invoke<Note>("update_note", { id, input }),
   duplicateNote: (id: string) => invoke<Note>("duplicate_note", { id }),
+  reorderNotes: (ids: string[]) => invoke<void>("reorder_notes", { ids }),
   deleteNotePermanent: (id: string) =>
     invoke<void>("delete_note_permanent", { id }),
   setArchived: (id: string, archived: boolean) =>

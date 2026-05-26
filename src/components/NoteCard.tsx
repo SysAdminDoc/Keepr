@@ -18,6 +18,8 @@ import { ColorPicker } from "./ColorPicker";
 import { IconBtn } from "./IconBtn";
 import { useClickOutside } from "../hooks/useClickOutside";
 import { daysLeftInTrash } from "../lib/trashRetention";
+import { useSortable } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 
 interface Props {
   note: Note;
@@ -26,6 +28,7 @@ interface Props {
 export function NoteCard({ note }: Props) {
   const section = useStore((s) => s.section);
   const dark = useStore((s) => s.dark);
+  const sortMode = useStore((s) => s.sortMode);
   const openEditor = useStore((s) => s.openEditor);
   const showToast = useStore((s) => s.showToast);
   const patchNote = useStore((s) => s.patchNote);
@@ -35,6 +38,23 @@ export function NoteCard({ note }: Props) {
   const toggleSelected = useStore((s) => s.toggleSelected);
   const selectMode = selectedIds.size > 0;
   const isSelected = selectedIds.has(note.id);
+
+  // NF-05 — make the whole card a sortable handle when in Custom sort.
+  // useSortable returns no-op refs when there's no surrounding
+  // SortableContext, so this is safe in non-custom modes too (the
+  // NoteGrid only wraps in DndContext when sortMode === "custom"
+  // anyway).
+  const sortable = useSortable({
+    id: note.id,
+    disabled: sortMode !== "custom",
+  });
+  const sortableStyle: React.CSSProperties =
+    sortMode === "custom"
+      ? {
+          transform: CSS.Transform.toString(sortable.transform),
+          transition: sortable.transition,
+        }
+      : {};
   const [colorOpen, setColorOpen] = useState(false);
   const popoverRef = useRef<HTMLDivElement>(null);
   useClickOutside(popoverRef, colorOpen, () => setColorOpen(false));
@@ -181,12 +201,16 @@ export function NoteCard({ note }: Props) {
 
   return (
     <div
+      ref={sortable.setNodeRef}
+      {...(sortMode === "custom" ? sortable.attributes : {})}
+      {...(sortMode === "custom" ? sortable.listeners : {})}
       className={clsx(
         "note-card group relative rounded-lg border shadow-keep hover:shadow-keep-hover cursor-default",
         "transition-shadow motion-reduce:transition-none",
         isSelected && "ring-2 ring-[#1a73e8] ring-offset-1",
+        sortable.isDragging && "opacity-50",
       )}
-      style={{ background: bg, borderColor: border }}
+      style={{ ...sortableStyle, background: bg, borderColor: border }}
       onClick={cardActivate}
       onKeyDown={onKeyDown}
       role="button"

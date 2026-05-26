@@ -470,6 +470,31 @@ pub fn duplicate_note(state: State<'_, AppState>, id: String) -> Result<Note, St
     })
 }
 
+/// NF-05 — drag-reorder support for Custom sort mode. Writes 0..N-1 into
+/// `notes.position` according to the order of `ids` so a subsequent
+/// `list_notes` sorted by position returns them in this order. Ids not in
+/// the current notes table are ignored (e.g. a stale client view).
+#[tauri::command]
+pub fn reorder_notes(state: State<'_, AppState>, ids: Vec<String>) -> Result<(), String> {
+    if state.importing.load(std::sync::atomic::Ordering::SeqCst) {
+        return Err("a restore is currently in progress".into());
+    }
+    if ids.len() > 100_000 {
+        return Err("too many ids in reorder_notes".into());
+    }
+    let mut conn = state.db.lock();
+    let tx = conn.transaction().map_err(err)?;
+    for (i, id) in ids.iter().enumerate() {
+        tx.execute(
+            "UPDATE notes SET position = ?1 WHERE id = ?2",
+            params![i as i64, id],
+        )
+        .map_err(err)?;
+    }
+    tx.commit().map_err(err)?;
+    Ok(())
+}
+
 #[tauri::command]
 pub fn delete_note_permanent(state: State<'_, AppState>, id: String) -> Result<(), String> {
     let conn = state.db.lock();
