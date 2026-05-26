@@ -315,13 +315,30 @@ export function NoteEditor() {
       !d.title.trim() &&
       !d.body.trim() &&
       !d.checklist.some((c) => c.text.trim());
+    // EI-V0.5-3 — if the user attached a reminder or images to an
+    // otherwise-empty note, don't discard. Otherwise the reminder
+    // cascades away with the note and the user sees their reminder
+    // vanish.
+    const hasReminder =
+      !!ex && useStore.getState().reminders.some((r) => r.noteId === ex.id);
+    const hasAttachments = !!ex && attachments.length > 0;
     try {
       if (ex) {
-        if (isEmptyNow && ex.kind === "text" && ex.title === "" && ex.body === "") {
-          // Was empty when opened, still empty — keep as a permanent empty
-          // note (EI-23). We only delete if the original had content.
+        if (
+          isEmptyNow
+          && ex.kind === "text"
+          && ex.title === ""
+          && ex.body === ""
+          && !hasReminder
+          && !hasAttachments
+        ) {
+          // Was empty when opened, still empty, no reminder, no
+          // attachments — safe to discard. We only delete if the
+          // original had content.
           await api.deleteNotePermanent(ex.id);
           removeNote(ex.id);
+          // Defensive: clear any stray reminder entry too.
+          useStore.getState().removeReminder(ex.id);
           showToast("Empty note discarded");
         } else {
           const updated = await api.updateNote(ex.id, payload);
@@ -336,7 +353,7 @@ export function NoteEditor() {
     } finally {
       closeEditor();
     }
-  }, [closeEditor, removeNote, upsertNote, showToast]);
+  }, [closeEditor, removeNote, upsertNote, showToast, attachments.length]);
 
   // Escape closes (EI-45). One stable handler, only re-binds when editor
   // open/close flips, not on every keystroke.

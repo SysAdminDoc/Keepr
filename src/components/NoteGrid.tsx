@@ -47,10 +47,16 @@ const listBreakpoints = {
 export function NoteGrid({ notes }: Props) {
   const viewMode = useStore((s) => s.viewMode);
   const sortMode = useStore((s) => s.sortMode);
-  const allNotes = useStore((s) => s.notes);
+  const section = useStore((s) => s.section);
   const showToast = useStore((s) => s.showToast);
   const breakpoints =
     viewMode === "list" ? listBreakpoints : gridBreakpoints;
+
+  // EI-V0.5-1 — drag-reorder is only safe in the Notes section. In
+  // Archive/Trash/Label sections, a drop would write `position` for the
+  // dragged ids only, leaving every other note with stale positions and
+  // corrupting Custom-sort ordering on the next full load.
+  const dragEnabled = sortMode === "custom" && section.kind === "notes";
 
   const sensors = useSensors(
     // Require a small pointer drag distance before starting — so click-to-
@@ -117,7 +123,7 @@ export function NoteGrid({ notes }: Props) {
     </Masonry>
   );
 
-  if (sortMode !== "custom") return cards;
+  if (!dragEnabled) return cards;
 
   return (
     <DndContext
@@ -139,7 +145,3 @@ export function NoteGrid({ notes }: Props) {
     </DndContext>
   );
 }
-
-// `allNotes` reads from the store in onDragEnd; the unused-var ref keeps
-// React Fast Refresh from complaining about a stale closure.
-void useStore;

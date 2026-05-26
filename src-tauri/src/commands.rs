@@ -1051,8 +1051,11 @@ pub fn list_reminders(state: State<'_, AppState>) -> Result<Vec<Reminder>, Strin
 
 /// Internal — returns pending reminders that should fire now (fire_at <=
 /// now AND fired_at IS NULL AND no active snooze). Used by the scheduler
-/// thread in lib.rs.
-pub fn take_due_reminders(
+/// thread in lib.rs. PEEK-only: does not write `fired_at`. The scheduler
+/// must call `mark_reminder_fired` after `notification.show()` succeeds
+/// so a failed toast leaves the reminder pending for retry on the next
+/// sweep (EI-V0.5-2 — was the v0.4 "lost-toast" P0).
+pub fn peek_due_reminders(
     state: &AppState,
     now_rfc3339: &str,
 ) -> Result<Vec<(Reminder, String)>, String> {
@@ -1097,15 +1100,25 @@ pub fn take_due_reminders(
         .map_err(err)?
         .collect::<Result<Vec<_>, _>>()
         .map_err(err)?;
-    // Mark each one fired so it doesn't re-fire next tick.
-    for (r, _) in &rows {
-        conn.execute(
-            "UPDATE reminders SET fired_at = ?1 WHERE id = ?2",
-            params![now_rfc3339, r.id],
-        )
-        .map_err(err)?;
-    }
     Ok(rows)
+}
+
+/// Mark a reminder as fired. Called by the scheduler after a successful
+/// `notification.show()`. If the show failed we deliberately do NOT call
+/// this, so the reminder reappears in the next `peek_due_reminders` and
+/// retries (EI-V0.5-2).
+pub fn mark_reminder_fired(
+    state: &AppState,
+    reminder_id: &str,
+    fired_at_rfc3339: &str,
+) -> Result<(), String> {
+    let conn = state.db.lock();
+    conn.execute(
+        "UPDATE reminders SET fired_at = ?1 WHERE id = ?2",
+        params![fired_at_rfc3339, reminder_id],
+    )
+    .map_err(err)?;
+    Ok(())
 }
 
 fn reminder_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Reminder> {

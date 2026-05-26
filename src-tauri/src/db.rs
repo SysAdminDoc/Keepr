@@ -4,7 +4,7 @@ use std::path::Path;
 
 /// Current schema version. Bump and add a new arm to `apply_migration` for every
 /// schema change. Migrations are forward-only and ordered.
-pub const SCHEMA_VERSION: i32 = 3;
+pub const SCHEMA_VERSION: i32 = 4;
 
 pub fn open(path: &Path) -> Result<Connection> {
     let mut conn = Connection::open(path)?;
@@ -48,6 +48,7 @@ fn apply_migration(tx: &rusqlite::Transaction, version: i32) -> Result<()> {
         1 => tx.execute_batch(MIGRATION_V1)?,
         2 => tx.execute_batch(MIGRATION_V2)?,
         3 => tx.execute_batch(MIGRATION_V3)?,
+        4 => tx.execute_batch(MIGRATION_V4)?,
         v => bail!("no migration defined for schema v{v}"),
     }
     Ok(())
@@ -129,6 +130,24 @@ CREATE TABLE IF NOT EXISTS reminders (
 CREATE INDEX IF NOT EXISTS idx_reminders_pending
     ON reminders(fired_at, fire_at)
     WHERE fired_at IS NULL;
+"#;
+
+/// v4 — position backfill (EI-V0.5-1). The `notes.position` column has
+/// existed since v1 but was unused until v0.3's Custom sort. Users
+/// upgrading from v1/v2/v3 have `position = 0` on every note, so
+/// switching into Custom sort shows them in tie-break-by-updated_at
+/// order — feels random. This migration assigns an initial position
+/// reflecting the current sort default (Modified DESC), so Custom-sort
+/// behaves as "start from where you are, then drag from there."
+const MIGRATION_V4: &str = r#"
+WITH ordered AS (
+    SELECT id,
+           ROW_NUMBER() OVER (ORDER BY pinned DESC, updated_at DESC) - 1 AS rn
+    FROM notes
+)
+UPDATE notes
+SET position = (SELECT rn FROM ordered WHERE ordered.id = notes.id)
+WHERE position = 0;
 "#;
 
 #[cfg(test)]

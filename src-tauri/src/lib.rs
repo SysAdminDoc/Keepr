@@ -153,6 +153,17 @@ pub fn run() {
     );
 
     tauri::Builder::default()
+        // EI-V0.5-4 — register single-instance BEFORE any other plugin so
+        // the second-launch callback gets the chance to refocus the
+        // running window and bail before duplicate AppState init.
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            // Show + focus the existing main window. Best-effort.
+            if let Some(win) = app.get_webview_window("main") {
+                let _ = win.show();
+                let _ = win.unminimize();
+                let _ = win.set_focus();
+            }
+        }))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(
@@ -257,10 +268,15 @@ pub fn run() {
                 eprintln!("keepr: failed to register Ctrl+Alt+N: {e}");
             }
 
-            // NF-02 — reminder scheduler thread. Polls take_due_reminders
+            // NF-02 — reminder scheduler thread. Polls peek_due_reminders
             // every 30s, fires a native notification per due reminder via
             // tauri-plugin-notification, and emits keepr://reminder-fired
             // so the renderer can refresh the bell badge.
+            //
+            // EI-V0.5-2 — two-phase fire-then-mark: peek (no write), fire
+            // each toast, mark_reminder_fired only on success. If
+            // notification.show() fails, the reminder stays pending and
+            // the next 30s tick retries.
             let app_handle = app.handle().clone();
             std::thread::spawn(move || {
                 use std::thread::sleep;
@@ -268,18 +284,39 @@ pub fn run() {
                 loop {
                     let now = chrono::Utc::now().to_rfc3339();
                     let state: tauri::State<'_, AppState> = app_handle.state();
-                    match commands::take_due_reminders(&state, &now) {
+                    match commands::peek_due_reminders(&state, &now) {
                         Ok(items) if !items.is_empty() => {
                             for (rem, preview) in &items {
-                                let _ = tauri_plugin_notification::NotificationExt::notification(
+                                let show_result = tauri_plugin_notification::NotificationExt::notification(
                                     &app_handle,
                                 )
                                 .builder()
                                 .title("Keepr reminder")
                                 .body(preview)
                                 .show();
-                                let _ = app_handle
-                                    .emit("keepr://reminder-fired", &rem.id);
+                                match show_result {
+                                    Ok(_) => {
+                                        // Toast surfaced — safe to mark fired.
+                                        if let Err(e) =
+                                            commands::mark_reminder_fired(&state, &rem.id, &now)
+                                        {
+                                            eprintln!(
+                                                "keepr: failed to mark reminder {} fired: {e}",
+                                                rem.id
+                                            );
+                                        }
+                                        let _ = app_handle
+                                            .emit("keepr://reminder-fired", &rem.id);
+                                    }
+                                    Err(e) => {
+                                        // Permission denied / COM error / Focus Assist —
+                                        // leave fired_at NULL so the next sweep retries.
+                                        eprintln!(
+                                            "keepr: notification.show() failed for {}: {e}",
+                                            rem.id
+                                        );
+                                    }
+                                }
                             }
                         }
                         Ok(_) => {}

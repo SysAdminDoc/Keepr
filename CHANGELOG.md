@@ -6,6 +6,18 @@ All notable changes to Keepr are documented here. Format loosely follows [Keep a
 
 (See [ROADMAP.md](ROADMAP.md) for the live task list.)
 
+## [0.4.1] — 2026-05-26 — hotfix
+
+Closes the four P0 issues from the v0.5 audit pass. Schema migrates to v4 (one-shot `notes.position` backfill — no behavioural change for v3 users until they enter Custom sort, then existing notes now sit in their Modified-DESC order instead of randomly).
+
+### Fixed
+
+- **EI-V0.5-2** Reminder lost-toast race. `take_due_reminders` is split into `peek_due_reminders` (read, no write) + `mark_reminder_fired` (only called after `notification.show()` returns `Ok`). A failed toast (permission denied, COM error, Focus Assist) now leaves `fired_at` NULL so the next 30 s sweep retries.
+- **EI-V0.5-3** Empty-note + reminder orphan. `NoteEditor.close()` no longer discards a freshly-saved blank note that carries a reminder or attachments; only truly-empty no-reminder no-attachment notes are deleted on close. Defensive `removeReminder` call as a belt-and-braces measure.
+- **EI-V0.5-1** Drag-reorder cross-section corruption. `NoteGrid` and `NoteCard` now only enable drag when `sortMode === "custom" AND section.kind === "notes"`. Drag in Archive/Trash/Label sections is now a no-op as it should always have been.
+- **EI-V0.5-1 (migration)** v4 backfill of `notes.position` so users entering Custom sort fresh see their notes ordered by Modified-DESC instead of arbitrary tie-break.
+- **EI-V0.5-4** Added `tauri-plugin-single-instance`. Double-launching `keepr.exe` (especially in portable mode) brings the existing window forward instead of spawning a second process fighting over the same SQLite WAL.
+
 ## [0.4.0] — 2026-05-25 — "Multimodal"
 
 The multimodal phase: images, reminders, inline `#hashtag` labels, Markdown-vault export, and Google Takeout import. Schema migrates to v3 (adds `reminders` table; v2's empty `attachments` table is now populated).

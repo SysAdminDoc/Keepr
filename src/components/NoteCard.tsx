@@ -44,22 +44,22 @@ export function NoteCard({ note }: Props) {
   const selectMode = selectedIds.size > 0;
   const isSelected = selectedIds.has(note.id);
 
-  // NF-05 — make the whole card a sortable handle when in Custom sort.
-  // useSortable returns no-op refs when there's no surrounding
-  // SortableContext, so this is safe in non-custom modes too (the
-  // NoteGrid only wraps in DndContext when sortMode === "custom"
-  // anyway).
+  // NF-05 — make the whole card a sortable handle when in Custom sort
+  // AND when we're in the Notes section (EI-V0.5-1 — Archive/Trash/Label
+  // sections must not drag-reorder; reorder_notes would corrupt the
+  // active-Notes ordering). useSortable returns no-op refs when there's
+  // no surrounding SortableContext, so this is safe in any combination.
+  const dragEnabled = sortMode === "custom" && section.kind === "notes";
   const sortable = useSortable({
     id: note.id,
-    disabled: sortMode !== "custom",
+    disabled: !dragEnabled,
   });
-  const sortableStyle: React.CSSProperties =
-    sortMode === "custom"
-      ? {
-          transform: CSS.Transform.toString(sortable.transform),
-          transition: sortable.transition,
-        }
-      : {};
+  const sortableStyle: React.CSSProperties = dragEnabled
+    ? {
+        transform: CSS.Transform.toString(sortable.transform),
+        transition: sortable.transition,
+      }
+    : {};
   const [colorOpen, setColorOpen] = useState(false);
   const popoverRef = useRef<HTMLDivElement>(null);
   useClickOutside(popoverRef, colorOpen, () => setColorOpen(false));
@@ -207,8 +207,8 @@ export function NoteCard({ note }: Props) {
   return (
     <div
       ref={sortable.setNodeRef}
-      {...(sortMode === "custom" ? sortable.attributes : {})}
-      {...(sortMode === "custom" ? sortable.listeners : {})}
+      {...(dragEnabled ? sortable.attributes : {})}
+      {...(dragEnabled ? sortable.listeners : {})}
       className={clsx(
         "note-card group relative rounded-lg border shadow-keep hover:shadow-keep-hover cursor-default",
         "transition-shadow motion-reduce:transition-none",
