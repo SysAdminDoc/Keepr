@@ -464,6 +464,59 @@ pub fn get_note(state: State<'_, AppState>, id: String) -> Result<Option<Note>, 
     load_note_with_vault(&conn, &id, dek_guard.as_ref()).map_err(err)
 }
 
+/// EI-18 — FTS5-backed full-text search. Returns the matching note IDs
+/// ranked by relevance (FTS5's bm25 default). Capped at 500 to bound
+/// the renderer-side narrow step.
+///
+/// Vault rows are not indexed (see schema v9 migration) — searching for
+/// a word inside a vaulted note returns no hit even when unlocked.
+/// That's the desired security property; document it in the search UI
+/// if it surprises users in practice.
+#[tauri::command]
+pub fn search_notes(state: State<'_, AppState>, query: String) -> Result<Vec<String>, String> {
+    let trimmed = query.trim();
+    if trimmed.is_empty() {
+        return Ok(Vec::new());
+    }
+    let fts_query = build_fts5_query(trimmed);
+    if fts_query.is_empty() {
+        return Ok(Vec::new());
+    }
+    let conn = state.db.lock();
+    let mut stmt = conn
+        .prepare(
+            "SELECT note_id FROM notes_fts \
+             WHERE notes_fts MATCH ?1 \
+             ORDER BY rank \
+             LIMIT 500",
+        )
+        .map_err(err)?;
+    let rows = stmt
+        .query_map(params![fts_query], |r| r.get::<_, String>(0))
+        .map_err(err)?
+        .collect::<rusqlite::Result<Vec<String>>>()
+        .map_err(err)?;
+    Ok(rows)
+}
+
+/// Sanitize user input for FTS5's MATCH operator. We split on
+/// whitespace, double-quote each token (which makes it a phrase match
+/// that ignores FTS5-special characters like `(`, `)`, `*`, `:`, AND,
+/// OR, NEAR, etc.), escape any embedded `"` by doubling, and append
+/// `*` so each token is a prefix match (so typing "mil" finds "milk").
+/// Tokens are joined with whitespace which FTS5 reads as implicit AND.
+fn build_fts5_query(input: &str) -> String {
+    input
+        .split_whitespace()
+        .filter(|t| !t.is_empty())
+        .map(|t| {
+            let escaped = t.replace('"', "\"\"");
+            format!("\"{escaped}\"*")
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 #[tauri::command]
 pub fn create_note(state: State<'_, AppState>, input: NoteInput) -> Result<Note, String> {
     if state.importing.load(std::sync::atomic::Ordering::SeqCst) {
@@ -3428,6 +3481,22 @@ mod tests {
     fn format_ics_utc_rounds_offsets_to_zulu() {
         let out = format_ics_utc("2026-05-26T08:00:00-04:00").unwrap();
         assert_eq!(out, "20260526T120000Z");
+    }
+
+    #[test]
+    fn build_fts5_query_quotes_and_prefixes_each_token() {
+        // Plain text → phrase-quote per token, prefix wildcard, joined.
+        assert_eq!(build_fts5_query("milk"), "\"milk\"*");
+        assert_eq!(build_fts5_query("buy milk"), "\"buy\"* \"milk\"*");
+        // Empty / whitespace-only → empty.
+        assert_eq!(build_fts5_query(""), "");
+        assert_eq!(build_fts5_query("   "), "");
+        // FTS5-meaningful chars survive because the whole token is
+        // wrapped in double quotes; embedded quotes are escaped.
+        assert_eq!(build_fts5_query("foo(bar)"), "\"foo(bar)\"*");
+        assert_eq!(build_fts5_query("ab\"cd"), "\"ab\"\"cd\"*");
+        // AND / OR / NEAR — FTS5 keywords. Quoting neutralizes them.
+        assert_eq!(build_fts5_query("milk OR eggs"), "\"milk\"* \"OR\"* \"eggs\"*");
     }
 
     #[test]

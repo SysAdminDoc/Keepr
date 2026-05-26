@@ -25,6 +25,13 @@ export function filterNotes(
   search: string,
   filters?: SearchFilters,
   reminders?: Reminder[],
+  /** EI-18 — when set, narrow the post-section/filter pool to these IDs.
+   *  Populated by the TopBar's debounced `api.searchNotes(query)` call.
+   *  When `null`/`undefined`, falls back to the in-memory substring scan
+   *  (used in tests and in the browser-preview build that has no Tauri
+   *  backend). The substring scan is also a defensive fallback if the
+   *  FTS5 call errors. */
+  searchMatchIds?: Set<string> | null,
 ): Note[] {
   let pool = notes;
   if (section.kind === "notes") {
@@ -68,6 +75,11 @@ export function filterNotes(
 
   const q = search.trim().toLowerCase();
   if (!q) return pool;
+  // EI-18 — prefer the FTS5-backed Set when available. Substring scan
+  // is the fallback for tests / browser preview / Rust-side errors.
+  if (searchMatchIds) {
+    return pool.filter((n) => searchMatchIds.has(n.id));
+  }
   return pool.filter((n) => {
     if (n.title.toLowerCase().includes(q)) return true;
     if (n.body.toLowerCase().includes(q)) return true;

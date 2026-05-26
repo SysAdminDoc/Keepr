@@ -97,4 +97,32 @@ describe("filterNotes", () => {
     const out = filterNotes(all, section({ kind: "notes" }), "   ");
     expect(out).toHaveLength(2); // active + labeled
   });
+
+  it("EI-18 — when searchMatchIds is provided, narrows to those IDs (ignores substring scan)", () => {
+    // The substring "ctive" would normally match `active`, but the
+    // FTS5-supplied Set is the source of truth when present.
+    const out = filterNotes(
+      all,
+      section({ kind: "notes" }),
+      "ctive",
+      undefined,
+      undefined,
+      new Set(["lbl"]),
+    );
+    expect(out.map((n) => n.id)).toEqual(["lbl"]);
+  });
+
+  it("EI-18 — searchMatchIds intersects with section + filters (cross-facet AND)", () => {
+    // FTS5 might return matches in any section; the section filter
+    // (Trash here) still narrows the pool first.
+    const out = filterNotes(
+      all,
+      section({ kind: "trash" }),
+      "foo",
+      undefined,
+      undefined,
+      new Set(["tra", "active"]),
+    );
+    expect(out.map((n) => n.id)).toEqual(["tra"]);
+  });
 });

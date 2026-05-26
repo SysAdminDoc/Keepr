@@ -203,9 +203,10 @@ export default function App() {
 
   const filters = useStore((s) => s.filters);
   const reminders = useStore((s) => s.reminders);
+  const searchMatchIds = useStore((s) => s.searchMatchIds);
   const filtered = useMemo(
-    () => filterNotes(notes, section, search, filters, reminders),
-    [notes, section, search, filters, reminders],
+    () => filterNotes(notes, section, search, filters, reminders, searchMatchIds),
+    [notes, section, search, filters, reminders, searchMatchIds],
   );
   // NF-04 — Ctrl+A handler reaches the latest filtered list via this ref
   // so we don't need to register a new hotkey on every keystroke.

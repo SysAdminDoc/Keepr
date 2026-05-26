@@ -4,7 +4,7 @@ use std::path::Path;
 
 /// Current schema version. Bump and add a new arm to `apply_migration` for every
 /// schema change. Migrations are forward-only and ordered.
-pub const SCHEMA_VERSION: i32 = 8;
+pub const SCHEMA_VERSION: i32 = 9;
 
 pub fn open(path: &Path) -> Result<Connection> {
     let mut conn = Connection::open(path)?;
@@ -53,6 +53,7 @@ fn apply_migration(tx: &rusqlite::Transaction, version: i32) -> Result<()> {
         6 => tx.execute_batch(MIGRATION_V6)?,
         7 => tx.execute_batch(MIGRATION_V7)?,
         8 => tx.execute_batch(MIGRATION_V8)?,
+        9 => tx.execute_batch(MIGRATION_V9)?,
         v => bail!("no migration defined for schema v{v}"),
     }
     Ok(())
@@ -255,6 +256,91 @@ CREATE INDEX IF NOT EXISTS idx_reminders_pending
     WHERE fired_at IS NULL;
 "#;
 
+/// v9 — FTS5 search backend (EI-18).
+///
+/// Replaces the renderer-side `title.toLowerCase().includes(q)` loop
+/// with a SQLite FTS5 virtual table indexed on title + body + the
+/// concatenated checklist text. Vault rows are intentionally NOT
+/// indexed — the row's title/body columns are empty for vault notes
+/// (the real payload is encrypted in `vault_ciphertext`), so search
+/// only finds vault notes via the section/filter sidebar. That's the
+/// desired security property: a locked vault can't be searched.
+///
+/// Triggers keep notes_fts in sync. Backfill at the bottom indexes
+/// every existing plain note.
+const MIGRATION_V9: &str = r#"
+CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(
+    note_id UNINDEXED,
+    title,
+    body,
+    checklist_text,
+    tokenize = 'unicode61 remove_diacritics 2'
+);
+
+-- Backfill: index every existing plain note. Vault rows skipped.
+INSERT INTO notes_fts(note_id, title, body, checklist_text)
+SELECT n.id, n.title, n.body,
+       COALESCE((SELECT GROUP_CONCAT(text, ' ')
+                 FROM checklist_items WHERE note_id = n.id), '')
+FROM notes n
+WHERE n.vault = 'plain';
+
+-- notes triggers: vault rows are excluded from indexing in INSERT/UPDATE,
+-- and any pre-existing FTS row is deleted on UPDATE so a plain→vault
+-- transition removes the index entry.
+CREATE TRIGGER IF NOT EXISTS notes_ai_fts AFTER INSERT ON notes
+WHEN NEW.vault = 'plain'
+BEGIN
+    INSERT INTO notes_fts(note_id, title, body, checklist_text)
+    VALUES (NEW.id, NEW.title, NEW.body, '');
+END;
+
+CREATE TRIGGER IF NOT EXISTS notes_au_fts AFTER UPDATE ON notes
+BEGIN
+    DELETE FROM notes_fts WHERE note_id = OLD.id;
+    INSERT INTO notes_fts(note_id, title, body, checklist_text)
+    SELECT NEW.id, NEW.title, NEW.body,
+           COALESCE((SELECT GROUP_CONCAT(text, ' ')
+                     FROM checklist_items WHERE note_id = NEW.id), '')
+    WHERE NEW.vault = 'plain';
+END;
+
+CREATE TRIGGER IF NOT EXISTS notes_ad_fts AFTER DELETE ON notes
+BEGIN
+    DELETE FROM notes_fts WHERE note_id = OLD.id;
+END;
+
+-- checklist_items triggers: rebuild the parent note's checklist_text
+-- whenever any item changes. UPDATE may target a different parent so
+-- both OLD and NEW note_id need a refresh; we just refresh both.
+CREATE TRIGGER IF NOT EXISTS ci_ai_fts AFTER INSERT ON checklist_items
+BEGIN
+    UPDATE notes_fts
+       SET checklist_text = COALESCE((SELECT GROUP_CONCAT(text, ' ')
+                                       FROM checklist_items
+                                       WHERE note_id = NEW.note_id), '')
+     WHERE note_id = NEW.note_id;
+END;
+
+CREATE TRIGGER IF NOT EXISTS ci_au_fts AFTER UPDATE ON checklist_items
+BEGIN
+    UPDATE notes_fts
+       SET checklist_text = COALESCE((SELECT GROUP_CONCAT(text, ' ')
+                                       FROM checklist_items
+                                       WHERE note_id = NEW.note_id), '')
+     WHERE note_id = NEW.note_id;
+END;
+
+CREATE TRIGGER IF NOT EXISTS ci_ad_fts AFTER DELETE ON checklist_items
+BEGIN
+    UPDATE notes_fts
+       SET checklist_text = COALESCE((SELECT GROUP_CONCAT(text, ' ')
+                                       FROM checklist_items
+                                       WHERE note_id = OLD.note_id), '')
+     WHERE note_id = OLD.note_id;
+END;
+"#;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -334,6 +420,102 @@ mod tests {
             .unwrap();
         let err = migrate(&mut conn).unwrap_err();
         assert!(err.to_string().contains("upgrade Keepr"));
+    }
+
+    #[test]
+    fn migration_v9_creates_notes_fts_and_indexes_on_insert() {
+        let conn = fresh_conn();
+        // Virtual table exists.
+        let n: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master \
+                 WHERE name = 'notes_fts' AND type = 'table'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(n, 1);
+        // Insert a plain note; trigger should index it.
+        conn.execute(
+            "INSERT INTO notes (id, kind, title, body, color, pinned, archived, trashed, \
+                                position, created_at, updated_at) \
+             VALUES ('n1', 'text', 'Grocery list', 'milk and eggs', 'default', \
+                     0, 0, 0, 0, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+        let hits: Vec<String> = conn
+            .prepare("SELECT note_id FROM notes_fts WHERE notes_fts MATCH 'milk'")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        assert_eq!(hits, vec!["n1"]);
+        // Update title; trigger should refresh.
+        conn.execute(
+            "UPDATE notes SET title = 'Shopping' WHERE id = 'n1'",
+            [],
+        )
+        .unwrap();
+        let hits: Vec<String> = conn
+            .prepare("SELECT note_id FROM notes_fts WHERE notes_fts MATCH 'shopping'")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        assert_eq!(hits, vec!["n1"]);
+    }
+
+    #[test]
+    fn migration_v9_vault_notes_are_not_indexed() {
+        let conn = fresh_conn();
+        // Insert a vault note (title/body empty, real content in ciphertext).
+        conn.execute(
+            "INSERT INTO notes (id, kind, title, body, color, pinned, archived, trashed, \
+                                position, created_at, updated_at, vault, vault_ciphertext) \
+             VALUES ('v1', 'text', '', '', 'default', 0, 0, 0, 0, \
+                     '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', \
+                     'vault', 'deadbeef')",
+            [],
+        )
+        .unwrap();
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM notes_fts WHERE note_id = 'v1'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 0, "vault rows must not appear in notes_fts");
+    }
+
+    #[test]
+    fn migration_v9_checklist_changes_propagate_to_fts() {
+        let conn = fresh_conn();
+        conn.execute(
+            "INSERT INTO notes (id, kind, title, body, color, pinned, archived, trashed, \
+                                position, created_at, updated_at) \
+             VALUES ('n1', 'list', 'Shopping', '', 'default', 0, 0, 0, 0, \
+                     '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO checklist_items (id, note_id, text, checked, position) \
+             VALUES ('c1', 'n1', 'bananas', 0, 0)",
+            [],
+        )
+        .unwrap();
+        let hits: Vec<String> = conn
+            .prepare("SELECT note_id FROM notes_fts WHERE notes_fts MATCH 'bananas'")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        assert_eq!(hits, vec!["n1"]);
     }
 
     #[test]

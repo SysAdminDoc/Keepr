@@ -389,6 +389,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::list_notes,
             commands::get_note,
+            commands::search_notes,
             commands::create_note,
             commands::update_note,
             commands::duplicate_note,

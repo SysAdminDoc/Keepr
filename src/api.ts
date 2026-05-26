@@ -4,6 +4,7 @@ import type { Attachment, Note, NoteInput, NoteSnapshot, Label, Reminder } from 
 export const api = {
   listNotes: () => invoke<Note[]>("list_notes"),
   getNote: (id: string) => invoke<Note | null>("get_note", { id }),
+  searchNotes: (query: string) => invoke<string[]>("search_notes", { query }),
   createNote: (input: NoteInput) => invoke<Note>("create_note", { input }),
   updateNote: (id: string, input: NoteInput) =>
     invoke<Note>("update_note", { id, input }),

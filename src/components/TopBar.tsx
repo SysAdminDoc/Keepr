@@ -15,6 +15,7 @@ import { useClickOutside } from "../hooks/useClickOutside";
 import type { SortMode } from "../store";
 import clsx from "clsx";
 import { useStore } from "../store";
+import { api } from "../api";
 
 interface Props {
   onMenu: () => void;
@@ -25,6 +26,7 @@ const SEARCH_DEBOUNCE_MS = 150;
 export function TopBar({ onMenu }: Props) {
   const search = useStore((s) => s.search);
   const setSearch = useStore((s) => s.setSearch);
+  const setSearchMatchIds = useStore((s) => s.setSearchMatchIds);
   const dark = useStore((s) => s.dark);
   const toggleDark = useStore((s) => s.toggleDark);
   const viewMode = useStore((s) => s.viewMode);
@@ -49,9 +51,32 @@ export function TopBar({ onMenu }: Props) {
   useEffect(() => {
     const t = setTimeout(() => {
       if (localSearch !== search) setSearch(localSearch);
+      // EI-18 — also fire the FTS5 query so filterNotes can narrow by
+      // backend-ranked match IDs instead of scanning every note's
+      // title/body/checklist in JS. Empty query → clear the narrow.
+      const trimmed = localSearch.trim();
+      if (trimmed.length === 0) {
+        setSearchMatchIds(null);
+        return;
+      }
+      let cancelled = false;
+      api
+        .searchNotes(trimmed)
+        .then((ids) => {
+          if (!cancelled) setSearchMatchIds(new Set(ids));
+        })
+        .catch(() => {
+          // Tauri unavailable (browser preview) or FTS5 errored — fall
+          // back to the in-memory substring scan by leaving the narrow
+          // unset.
+          if (!cancelled) setSearchMatchIds(null);
+        });
+      return () => {
+        cancelled = true;
+      };
     }, SEARCH_DEBOUNCE_MS);
     return () => clearTimeout(t);
-  }, [localSearch, search, setSearch]);
+  }, [localSearch, search, setSearch, setSearchMatchIds]);
 
   // EI-16 — visible refresh feedback so the user knows the click did
   // something.

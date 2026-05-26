@@ -65,6 +65,12 @@ interface UIState {
   appLockEnabled: boolean;
   /** Idle minutes before the UI auto-locks. */
   lockAfterMinutes: number;
+  /** EI-18 — note IDs the FTS5 backend matched for the current search.
+   *  `null` means "no FTS5 result available" (empty query, or running
+   *  outside Tauri); in that case `filterNotes` falls back to the
+   *  in-memory substring scan. A `Set` means "narrow to these IDs". */
+  searchMatchIds: Set<string> | null;
+  setSearchMatchIds: (ids: Set<string> | null) => void;
   /** NF-V0.5-C — Private Vault state. `initialized` = a vault DEK is
    *  wrapped on disk; `unlocked` = the renderer has unlocked it via
    *  unlock_vault. When unlocked = false, every vault note arrives with
@@ -271,6 +277,8 @@ export const useStore = create<UIState>((set, get) => ({
   locked: false,
   appLockEnabled: false,
   lockAfterMinutes: 5,
+  searchMatchIds: null,
+  setSearchMatchIds: (ids) => set({ searchMatchIds: ids }),
   vaultInitialized: false,
   vaultUnlocked: false,
   load: async () => {
