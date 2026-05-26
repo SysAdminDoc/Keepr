@@ -8,15 +8,12 @@ import {
   Archive,
   ArchiveRestore,
   Trash2,
-  CheckSquare,
-  Square,
   Plus,
   X,
   Tag,
   ListChecks,
   AlignLeft,
   Copy,
-  GripVertical,
   Image as ImageIcon,
   Bell,
   Lock,
@@ -26,21 +23,6 @@ import {
 } from "lucide-react";
 import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import type { Attachment } from "../types";
-import {
-  DndContext,
-  PointerSensor,
-  closestCenter,
-  useSensor,
-  useSensors,
-  type DragEndEvent,
-} from "@dnd-kit/core";
-import {
-  SortableContext,
-  arrayMove,
-  useSortable,
-  verticalListSortingStrategy,
-} from "@dnd-kit/sortable";
-import { CSS } from "@dnd-kit/utilities";
 import { useStore } from "../store";
 import { api } from "../api";
 import { bgFor, borderFor } from "../colors";
@@ -48,8 +30,8 @@ import { ColorPicker } from "./ColorPicker";
 import { IconBtn } from "./IconBtn";
 import { extractHashtagsFromNote } from "../lib/hashtags";
 import { recurrenceLabel } from "../lib/reminders";
-import { useFlip } from "../hooks/useFlip";
 import { useClickOutside } from "../hooks/useClickOutside";
+import { ChecklistSection } from "./ChecklistSection";
 import { AttachmentGrid } from "./AttachmentGrid";
 // EI-V0.5-17 — both modals mount conditionally behind an open flag, so
 // React.lazy keeps them out of the initial editor payload. ColorPicker
@@ -93,140 +75,6 @@ function MoreMenuItem({
   );
 }
 
-interface ChecklistRowProps {
-  /** Sortable id — unique per row (we use the row's stable key). */
-  sortId: string;
-  /** Whether this row participates in the drag sortable (false for
-   *  rows inside the "Checked items" group — moving them around does
-   *  nothing the user cares about). */
-  draggable: boolean;
-  item: ChecklistItemInput;
-  /** NF-21 — true when this row is currently indented (parentId set).
-   *  Drives the left-padding + Shift+Tab dedent enablement. */
-  indented: boolean;
-  onToggle: () => void;
-  onText: (t: string) => void;
-  onEnter: () => void;
-  onBackspaceEmpty?: () => void;
-  onRemove: () => void;
-  /** NF-21 — Tab: try to indent under the previous root sibling. */
-  onIndent: () => void;
-  /** NF-21 — Shift+Tab: drop the parentId. No-op when already at root. */
-  onDedent: () => void;
-  /** NF-20 polish — FLIP animator's per-row ref callback. */
-  flipRef?: (el: HTMLElement | null) => void;
-}
-
-function ChecklistRow({
-  sortId,
-  draggable,
-  item,
-  indented,
-  onToggle,
-  onText,
-  onEnter,
-  onBackspaceEmpty,
-  onRemove,
-  onIndent,
-  onDedent,
-  flipRef,
-}: ChecklistRowProps) {
-  // NF-05 — useSortable on every row. Listeners are attached only to
-  // the GripVertical handle so dragging from the input field doesn't
-  // hijack text selection.
-  const sortable = useSortable({ id: sortId, disabled: !draggable });
-  const style: React.CSSProperties = draggable
-    ? {
-        transform: CSS.Transform.toString(sortable.transform),
-        transition: sortable.transition,
-      }
-    : {};
-  // NF-20 polish + NF-05 — combine the FLIP ref with dnd-kit's
-  // sortable.setNodeRef. dnd-kit's ref callback signature is the same
-  // (el | null) so chaining is just a forwarding call.
-  const mergedRef = (el: HTMLDivElement | null) => {
-    sortable.setNodeRef(el);
-    flipRef?.(el);
-  };
-  return (
-    <div
-      ref={mergedRef}
-      style={style}
-      className={clsx(
-        "group/item flex items-center gap-1 px-2 py-1",
-        sortable.isDragging && "opacity-50",
-        indented && "pl-8", // NF-21 — visual indent for sub-items
-      )}
-    >
-      {draggable ? (
-        <button
-          type="button"
-          aria-label="Reorder item"
-          title="Drag to reorder"
-          {...sortable.attributes}
-          {...sortable.listeners}
-          className="p-0.5 rounded opacity-0 group-hover/item:opacity-100 focus:opacity-100 cursor-grab active:cursor-grabbing"
-        >
-          <GripVertical size={14} aria-hidden />
-        </button>
-      ) : (
-        <span className="w-[18px]" aria-hidden />
-      )}
-      <button
-        type="button"
-        onClick={onToggle}
-        aria-pressed={item.checked}
-        aria-label={item.checked ? "Uncheck item" : "Check item"}
-        className="p-1 rounded hover:bg-black/10 dark:hover:bg-white/10"
-      >
-        {item.checked ? (
-          <CheckSquare size={18} aria-hidden />
-        ) : (
-          <Square size={18} aria-hidden />
-        )}
-      </button>
-      <input
-        value={item.text}
-        onChange={(e) => onText(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") {
-            e.preventDefault();
-            onEnter();
-          } else if (
-            e.key === "Backspace" &&
-            item.text === "" &&
-            onBackspaceEmpty
-          ) {
-            e.preventDefault();
-            onBackspaceEmpty();
-          } else if (e.key === "Tab") {
-            // NF-21 — Tab indents, Shift+Tab dedents. Keep parity:
-            // single level of nesting only (the indent handler is a
-            // no-op when no eligible parent exists).
-            e.preventDefault();
-            if (e.shiftKey) onDedent();
-            else onIndent();
-          }
-        }}
-        placeholder="List item"
-        aria-label="List item"
-        className={clsx(
-          "flex-1 bg-transparent outline-none text-[14px]",
-          item.checked && "line-through opacity-60",
-        )}
-      />
-      <button
-        type="button"
-        onClick={onRemove}
-        aria-label="Remove item"
-        className="opacity-0 group-hover/item:opacity-100 focus:opacity-100 p-1 rounded hover:bg-black/10 dark:hover:bg-white/10"
-      >
-        <X size={16} aria-hidden />
-      </button>
-    </div>
-  );
-}
-
 interface Draft {
   kind: NoteKind;
   title: string;
@@ -267,7 +115,6 @@ export function NoteEditor() {
   const reminders = useStore((s) => s.reminders);
   const vaultInitialized = useStore((s) => s.vaultInitialized);
   const vaultUnlocked = useStore((s) => s.vaultUnlocked);
-  const [checkedCollapsed, setCheckedCollapsed] = useState(false);
   // NF-01 — attachments live alongside draft state but aren't part of the
   // NoteInput payload (add/remove go through their own commands so the
   // file copy + DB write stay transactional). We snapshot existing
@@ -544,94 +391,12 @@ export function NoteEditor() {
     }
   };
 
-  const addItem = () =>
-    setDraft({
-      ...draft,
-      checklist: [
-        ...draft.checklist,
-        { text: "", checked: false, position: draft.checklist.length },
-      ],
-    });
-
-  const setItem = (idx: number, patch: Partial<ChecklistItemInput>) => {
-    const next = [...draft.checklist];
-    next[idx] = { ...next[idx], ...patch };
-    setDraft({ ...draft, checklist: next });
-  };
-
-  const removeItem = (idx: number) => {
-    const next = draft.checklist.filter((_, i) => i !== idx);
-    setDraft({ ...draft, checklist: next });
-  };
-
-  // NF-21 — Tab indents the row under the most recent top-level item
-  // above it that has an id (we need a stable parent reference). When
-  // no such candidate exists the indent is a no-op.
-  const indentItem = (idx: number) => {
-    if (idx <= 0) return; // first row can't be indented
-    let parent: ChecklistItemInput | null = null;
-    for (let i = idx - 1; i >= 0; i--) {
-      const candidate = draft.checklist[i];
-      if (!candidate.parentId && candidate.id) {
-        parent = candidate;
-        break;
-      }
-    }
-    if (!parent) return;
-    const next = [...draft.checklist];
-    next[idx] = { ...next[idx], parentId: parent.id };
-    setDraft({ ...draft, checklist: next });
-  };
-  // NF-21 — Shift+Tab drops the parentId. Idempotent at root.
-  const dedentItem = (idx: number) => {
-    const it = draft.checklist[idx];
-    if (!it.parentId) return;
-    const next = [...draft.checklist];
-    next[idx] = { ...next[idx], parentId: null };
-    setDraft({ ...draft, checklist: next });
-  };
-
-  // NF-05 — sortable id per row. We mint a stable sort-id by using the
-  // item's underlying id if present, falling back to its original index
-  // (new items added during this editing session won't yet have an id).
-  const sortIdFor = (idx: number): string => {
-    const it = draft.checklist[idx];
-    return it?.id ?? `__new:${idx}`;
-  };
-
-  // NF-20 polish — FLIP animator for checklist rows. Keyed on the
-  // checked-state bitmap so the animator only runs when an item flips
-  // between checked/unchecked (not on every keystroke, which would
-  // be wasted work and could fight ongoing text input).
-  const flipKey = draft.checklist.map((c) => (c.checked ? "1" : "0")).join("");
-  const { register: flipRegister } = useFlip<string>(flipKey);
+  // EI-V0.5-10 (v0.16) — the per-row helpers (addItem / setItem /
+  // removeItem / indentItem / dedentItem / sortable bookkeeping / FLIP
+  // animator) all moved into ChecklistSection. The editor just hands
+  // it `draft.checklist` and an onChange that splats back into draft.
 
   useClickOutside(moreMenuRef, moreMenuOpen, () => setMoreMenuOpen(false));
-  // Map sort id -> original draft.checklist index, so drag-end can
-  // resolve the array slot reliably even after group splitting.
-  const indexOfSortId = (id: string): number => {
-    for (let i = 0; i < draft.checklist.length; i++) {
-      if (sortIdFor(i) === id) return i;
-    }
-    return -1;
-  };
-
-  const checklistSensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
-  );
-
-  const onChecklistDragEnd = (e: DragEndEvent) => {
-    const { active, over } = e;
-    if (!over || active.id === over.id) return;
-    const oldIdx = indexOfSortId(String(active.id));
-    const newIdx = indexOfSortId(String(over.id));
-    if (oldIdx < 0 || newIdx < 0) return;
-    const next = arrayMove(draft.checklist, oldIdx, newIdx).map((it, i) => ({
-      ...it,
-      position: i,
-    }));
-    setDraft({ ...draft, checklist: next });
-  };
 
   const toggleLabel = (id: string) => {
     setDraft({
@@ -988,115 +753,15 @@ export function NoteEditor() {
             className="w-full resize-none bg-transparent outline-none px-4 pb-3 text-[14px] placeholder-gray-500 dark:placeholder-gray-400 min-h-[6rem]"
           />
         ) : (
-          (() => {
-            // NF-20 — when moveCheckedToBottom is on, split into two groups:
-            // unchecked items render in their stored order at the top, then a
-            // collapsible "Checked items (N)" header, then the checked items.
-            // We preserve each item's original index so setItem/removeItem
-            // (which key off `draft.checklist`) still work.
-            const indexed = draft.checklist.map((item, originalIndex) => ({
-              item,
-              originalIndex,
-            }));
-            const uncheckedRows = moveCheckedToBottom
-              ? indexed.filter(({ item }) => !item.checked)
-              : indexed;
-            const checkedRows = moveCheckedToBottom
-              ? indexed.filter(({ item }) => item.checked)
-              : [];
-            const uncheckedSortIds = uncheckedRows.map(({ originalIndex }) =>
-              sortIdFor(originalIndex),
-            );
-            return (
-              <div className="px-2 py-1">
-                <DndContext
-                  sensors={checklistSensors}
-                  collisionDetection={closestCenter}
-                  onDragEnd={onChecklistDragEnd}
-                >
-                  <SortableContext
-                    items={uncheckedSortIds}
-                    strategy={verticalListSortingStrategy}
-                  >
-                    {uncheckedRows.map(({ item: it, originalIndex: i }) => (
-                      <ChecklistRow
-                        key={sortIdFor(i)}
-                        sortId={sortIdFor(i)}
-                        draggable
-                        item={it}
-                        indented={!!it.parentId}
-                        onToggle={() => setItem(i, { checked: !it.checked })}
-                        onText={(t) => setItem(i, { text: t })}
-                        onEnter={addItem}
-                        onBackspaceEmpty={
-                          draft.checklist.length > 1
-                            ? () => removeItem(i)
-                            : undefined
-                        }
-                        onRemove={() => removeItem(i)}
-                        onIndent={() => indentItem(i)}
-                        onDedent={() => dedentItem(i)}
-                        flipRef={flipRegister(sortIdFor(i))}
-                      />
-                    ))}
-                  </SortableContext>
-                </DndContext>
-                <button
-                  type="button"
-                  onClick={addItem}
-                  className="flex items-center gap-2 px-3 py-2 text-sm opacity-70 hover:opacity-100"
-                >
-                  <Plus size={18} aria-hidden /> List item
-                </button>
-                {checkedRows.length > 0 && (
-                  <div className="mt-2 pt-2 border-t border-current/10">
-                    <button
-                      type="button"
-                      onClick={() => setCheckedCollapsed((v) => !v)}
-                      aria-expanded={!checkedCollapsed}
-                      className="flex items-center gap-2 px-3 py-1 text-xs uppercase tracking-wide opacity-70 hover:opacity-100"
-                    >
-                      <span
-                        className="inline-block transition-transform motion-reduce:transition-none"
-                        style={{
-                          transform: checkedCollapsed
-                            ? "rotate(-90deg)"
-                            : "rotate(0deg)",
-                        }}
-                        aria-hidden
-                      >
-                        ▾
-                      </span>
-                      {checkedRows.length} Checked item
-                      {checkedRows.length === 1 ? "" : "s"}
-                    </button>
-                    {!checkedCollapsed &&
-                      checkedRows.map(({ item: it, originalIndex: i }) => (
-                        <ChecklistRow
-                          key={sortIdFor(i)}
-                          sortId={sortIdFor(i)}
-                          draggable={false}
-                          item={it}
-                          indented={!!it.parentId}
-                          onToggle={() => setItem(i, { checked: !it.checked })}
-                          onText={(t) => setItem(i, { text: t })}
-                          onEnter={addItem}
-                          onBackspaceEmpty={
-                            draft.checklist.length > 1
-                              ? () => removeItem(i)
-                              : undefined
-                          }
-                          onRemove={() => removeItem(i)}
-                          onIndent={() => indentItem(i)}
-                          onDedent={() => dedentItem(i)}
-                          flipRef={flipRegister(sortIdFor(i))}
-                        />
-                      ))}
-                  </div>
-                )}
-              </div>
-            );
-          })()
+          // EI-V0.5-10 (v0.16) — checklist editor extracted to its own
+          // component. ChecklistSection owns the dnd-kit context, FLIP
+          // animator, and the indent/dedent helpers; here we just hand
+          // it the current items + onChange that splats into draft.
+          <ChecklistSection
+            items={draft.checklist}
+            onChange={(next) => setDraft({ ...draft, checklist: next })}
+            moveCheckedToBottom={moveCheckedToBottom}
+          />
         )}
 
         {draft.labels.length > 0 && (
