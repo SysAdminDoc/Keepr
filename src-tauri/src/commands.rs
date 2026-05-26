@@ -575,6 +575,394 @@ pub fn duplicate_note(state: State<'_, AppState>, id: String) -> Result<Note, St
     })
 }
 
+// --- NF-08 Markdown vault export + Google Takeout import ---
+
+const VAULT_RESOURCES_DIR: &str = "_resources";
+
+fn sanitize_vault_filename(stem: &str, id: &str) -> String {
+    // Filename-safe: keep letters/digits/space/dash/underscore/dot, replace
+    // everything else with `-`. Cap at 80 chars. Fall back to the note id
+    // when the result is empty.
+    let mut out = String::with_capacity(stem.len());
+    for c in stem.chars() {
+        if c.is_alphanumeric() || c == ' ' || c == '-' || c == '_' || c == '.' {
+            out.push(c);
+        } else {
+            out.push('-');
+        }
+    }
+    let trimmed: String = out.trim_matches(|c: char| c == ' ' || c == '.').to_string();
+    let capped: String = trimmed.chars().take(80).collect();
+    if capped.is_empty() {
+        format!("note-{}", id.chars().take(8).collect::<String>())
+    } else {
+        capped
+    }
+}
+
+#[tauri::command]
+pub fn export_vault(
+    state: State<'_, AppState>,
+    dest_dir: String,
+) -> Result<u32, String> {
+    if state.importing.load(std::sync::atomic::Ordering::SeqCst) {
+        return Err("a restore is currently in progress".into());
+    }
+    let dest = PathBuf::from(&dest_dir);
+    if !dest.is_dir() {
+        return Err(format!("not a directory: {dest_dir}"));
+    }
+    let resources_out = dest.join(VAULT_RESOURCES_DIR);
+    std::fs::create_dir_all(&resources_out).map_err(err)?;
+
+    let labels_by_id: std::collections::HashMap<String, String> = {
+        let conn = state.db.lock();
+        let mut stmt = conn.prepare("SELECT id, name FROM labels").map_err(err)?;
+        let rows = stmt
+            .query_map([], |r| {
+                let id: String = r.get(0)?;
+                let name: String = r.get(1)?;
+                Ok((id, name))
+            })
+            .map_err(err)?;
+        let mut map = std::collections::HashMap::new();
+        for row in rows {
+            let (id, name) = row.map_err(err)?;
+            map.insert(id, name);
+        }
+        map
+    };
+
+    let notes = list_notes(state.clone())?;
+    let mut written: u32 = 0;
+    let mut used_names: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    for n in &notes {
+        if n.trashed {
+            continue; // never export deleted notes
+        }
+        let mut name = sanitize_vault_filename(&n.title, &n.id);
+        let mut base = name.clone();
+        let mut counter = 2;
+        while used_names.contains(&name) {
+            name = format!("{base}-{counter}");
+            counter += 1;
+            if counter > 999 {
+                base = n.id.chars().take(8).collect();
+                name = base.clone();
+                break;
+            }
+        }
+        used_names.insert(name.clone());
+
+        let frontmatter = build_frontmatter(n, &labels_by_id);
+        let body = if n.kind == "list" {
+            n.checklist
+                .iter()
+                .map(|it| {
+                    let mark = if it.checked { "x" } else { " " };
+                    format!("- [{mark}] {}", it.text)
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        } else {
+            n.body.clone()
+        };
+        let mut content = String::new();
+        content.push_str(&frontmatter);
+        content.push('\n');
+        if !n.title.is_empty() {
+            content.push_str(&format!("# {}\n\n", n.title));
+        }
+        content.push_str(&body);
+        if !content.ends_with('\n') {
+            content.push('\n');
+        }
+        // Attachment links at the bottom.
+        if !n.attachments.is_empty() {
+            content.push_str("\n");
+            for att in &n.attachments {
+                let ext = mime_to_ext(&att.mime);
+                let stored_name = format!("{}.{ext}", att.id);
+                content.push_str(&format!(
+                    "![{}]({}/{})\n",
+                    att.filename.replace(']', " ").replace('[', " "),
+                    VAULT_RESOURCES_DIR,
+                    stored_name
+                ));
+                // Copy the file alongside.
+                let src = state.data_dir.join("resources").join(&stored_name);
+                let dst = resources_out.join(&stored_name);
+                if src.exists() {
+                    let _ = std::fs::copy(&src, &dst);
+                }
+            }
+        }
+        let md_path = dest.join(format!("{name}.md"));
+        std::fs::write(&md_path, content).map_err(err)?;
+        written += 1;
+    }
+    Ok(written)
+}
+
+fn build_frontmatter(
+    n: &Note,
+    labels_by_id: &std::collections::HashMap<String, String>,
+) -> String {
+    let label_names: Vec<String> = n
+        .labels
+        .iter()
+        .filter_map(|id| labels_by_id.get(id).cloned())
+        .collect();
+    let mut s = String::from("---\n");
+    s.push_str(&format!("id: {}\n", n.id));
+    s.push_str(&format!("type: {}\n", n.kind));
+    s.push_str(&format!("color: {}\n", n.color));
+    s.push_str(&format!("pinned: {}\n", n.pinned));
+    s.push_str(&format!("archived: {}\n", n.archived));
+    s.push_str(&format!("created: {}\n", n.created_at));
+    s.push_str(&format!("updated: {}\n", n.updated_at));
+    if !label_names.is_empty() {
+        s.push_str("labels:\n");
+        for name in &label_names {
+            s.push_str(&format!("  - {}\n", yaml_quote_if_needed(name)));
+        }
+    }
+    s.push_str("---\n");
+    s
+}
+
+fn yaml_quote_if_needed(s: &str) -> String {
+    // If the value contains : # & * { } [ ] , | > ' " % @ ` or starts with
+    // - we double-quote it. Conservative — over-quotes some safe values
+    // but never under-quotes.
+    let needs = s
+        .chars()
+        .any(|c| matches!(c, ':' | '#' | '&' | '*' | '{' | '}' | '[' | ']' | ',' | '|' | '>' | '\'' | '"' | '%' | '@' | '`'))
+        || s.starts_with('-')
+        || s.is_empty();
+    if needs {
+        format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""))
+    } else {
+        s.to_string()
+    }
+}
+
+fn mime_to_ext(mime: &str) -> &'static str {
+    match mime {
+        "image/png" => "png",
+        "image/jpeg" => "jpg",
+        "image/gif" => "gif",
+        "image/webp" => "webp",
+        "image/svg+xml" => "svg",
+        _ => "bin",
+    }
+}
+
+/// NF-08 — Google Keep Takeout importer. The Takeout export is a ZIP
+/// where each note lives at `Takeout/Keep/<title>.json` (+ a sibling
+/// HTML rendering we ignore + binary attachments alongside the JSON).
+/// We iterate every `.json` entry, parse with serde_json's untyped
+/// `Value` to be forgiving of schema drift, and call the existing
+/// `create_note` path to insert.
+///
+/// Returns the number of notes successfully imported.
+#[tauri::command]
+pub fn import_takeout(
+    state: State<'_, AppState>,
+    src: String,
+) -> Result<u32, String> {
+    if state.importing.load(std::sync::atomic::Ordering::SeqCst) {
+        return Err("a restore is currently in progress".into());
+    }
+    let file = File::open(&src).map_err(err)?;
+    let mut archive = zip::ZipArchive::new(file).map_err(err)?;
+
+    // Two-pass: first collect attachment bytes keyed by their archive
+    // path so we can resolve note-relative references.
+    let mut blobs: std::collections::HashMap<String, Vec<u8>> =
+        std::collections::HashMap::new();
+    let mut note_entries: Vec<(String, String)> = Vec::new(); // (folder, json text)
+
+    for i in 0..archive.len() {
+        let mut entry = archive.by_index(i).map_err(err)?;
+        let name = match entry.enclosed_name() {
+            Some(p) => p.to_string_lossy().replace('\\', "/"),
+            None => continue,
+        };
+        if entry.is_dir() {
+            continue;
+        }
+        if name.ends_with(".json") && name.contains("/Keep/") {
+            let mut text = String::new();
+            entry
+                .read_to_string(&mut text)
+                .map_err(err)?;
+            // Folder for resolving sibling attachments.
+            let folder = name.rsplit_once('/').map(|(d, _)| d.to_string()).unwrap_or_default();
+            note_entries.push((folder, text));
+        } else if entry.size() > 0 && entry.size() <= MAX_ATTACHMENT_BYTES {
+            let mut buf = Vec::with_capacity(entry.size() as usize);
+            entry.read_to_end(&mut buf).map_err(err)?;
+            blobs.insert(name, buf);
+        }
+    }
+
+    // Resolve the label set in one pass so we don't re-query for every
+    // note. Insert any missing labels first.
+    let mut imported: u32 = 0;
+    for (folder, text) in note_entries {
+        let v: serde_json::Value = match serde_json::from_str(&text) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        let title = v.get("title").and_then(|x| x.as_str()).unwrap_or("").to_string();
+        let text_body = v
+            .get("textContent")
+            .and_then(|x| x.as_str())
+            .unwrap_or("")
+            .to_string();
+        let pinned = v.get("isPinned").and_then(|x| x.as_bool()).unwrap_or(false);
+        let archived = v.get("isArchived").and_then(|x| x.as_bool()).unwrap_or(false);
+        let trashed = v.get("isTrashed").and_then(|x| x.as_bool()).unwrap_or(false);
+        if trashed {
+            continue; // Takeout-trashed notes get skipped on import.
+        }
+        let color = map_keep_color(v.get("color").and_then(|x| x.as_str()).unwrap_or("DEFAULT"));
+        let label_names: Vec<String> = v
+            .get("labels")
+            .and_then(|x| x.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|l| l.get("name").and_then(|n| n.as_str()).map(|s| s.to_string()))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        // List content (checklist) — when present overrides textContent.
+        let (kind, checklist_input) = if let Some(arr) = v.get("listContent").and_then(|x| x.as_array()) {
+            let items: Vec<ChecklistItemInput> = arr
+                .iter()
+                .enumerate()
+                .map(|(i, e)| ChecklistItemInput {
+                    id: None,
+                    text: e
+                        .get("text")
+                        .and_then(|t| t.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                    checked: e
+                        .get("isChecked")
+                        .and_then(|t| t.as_bool())
+                        .unwrap_or(false),
+                    position: i as i64,
+                })
+                .collect();
+            ("list".to_string(), items)
+        } else {
+            ("text".to_string(), Vec::new())
+        };
+
+        // Resolve label ids (creating missing ones).
+        let mut label_ids: Vec<String> = Vec::new();
+        for name in &label_names {
+            match create_label(state.clone(), name.clone()) {
+                Ok(lbl) => label_ids.push(lbl.id),
+                Err(_) => {}
+            }
+        }
+
+        // Create the note.
+        let input = NoteInput {
+            kind,
+            title,
+            body: text_body,
+            color,
+            pinned,
+            checklist: checklist_input,
+            labels: label_ids,
+        };
+        let created = match create_note(state.clone(), input) {
+            Ok(n) => n,
+            Err(_) => continue,
+        };
+
+        // Set archived after creation (NoteInput has no archived field).
+        if archived {
+            let _ = set_archived(state.clone(), created.id.clone(), true);
+        }
+
+        // Attachments — Takeout stores them as siblings of the json,
+        // referenced by "attachments": [{"filePath": "...", "mimetype": "..."}].
+        if let Some(attachments) = v.get("attachments").and_then(|x| x.as_array()) {
+            for a in attachments {
+                let rel = a
+                    .get("filePath")
+                    .and_then(|x| x.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                if rel.is_empty() {
+                    continue;
+                }
+                let mime = a
+                    .get("mimetype")
+                    .and_then(|x| x.as_str())
+                    .unwrap_or("application/octet-stream")
+                    .to_string();
+                if !mime.starts_with("image/") {
+                    continue;
+                }
+                let archive_path = if folder.is_empty() {
+                    rel.clone()
+                } else {
+                    format!("{folder}/{rel}")
+                };
+                if let Some(bytes) = blobs.get(&archive_path) {
+                    let ext = mime_to_ext(&mime);
+                    let new_id = Uuid::new_v4().to_string();
+                    let stored_name = format!("{new_id}.{ext}");
+                    let resources_dir = state.data_dir.join("resources");
+                    if std::fs::create_dir_all(&resources_dir).is_err() {
+                        continue;
+                    }
+                    let dest = resources_dir.join(&stored_name);
+                    if std::fs::write(&dest, bytes).is_err() {
+                        continue;
+                    }
+                    let now = now_iso();
+                    let conn = state.db.lock();
+                    let _ = conn.execute(
+                        "INSERT INTO attachments (id, note_id, kind, mime, filename, byte_size, position, created_at)
+                         VALUES (?1, ?2, 'image', ?3, ?4, ?5, 0, ?6)",
+                        params![new_id, created.id, mime, rel, bytes.len() as i64, now],
+                    );
+                }
+            }
+        }
+
+        imported += 1;
+    }
+    Ok(imported)
+}
+
+fn map_keep_color(c: &str) -> String {
+    // Keep's color enum -> our color keys.
+    match c {
+        "RED" => "red".into(),
+        "ORANGE" => "orange".into(),
+        "YELLOW" => "yellow".into(),
+        "GREEN" => "green".into(),
+        "TEAL" => "teal".into(),
+        "BLUE" => "blue".into(),
+        "DARK_BLUE" => "darkblue".into(),
+        "PURPLE" => "purple".into(),
+        "PINK" => "pink".into(),
+        "BROWN" => "brown".into(),
+        "GRAY" => "gray".into(),
+        _ => "default".into(),
+    }
+}
+
 // --- NF-02 reminders ---
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

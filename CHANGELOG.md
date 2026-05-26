@@ -6,6 +6,28 @@ All notable changes to Keepr are documented here. Format loosely follows [Keep a
 
 (See [ROADMAP.md](ROADMAP.md) for the live task list.)
 
+## [0.4.0] — 2026-05-25 — "Multimodal"
+
+The multimodal phase: images, reminders, inline `#hashtag` labels, Markdown-vault export, and Google Takeout import. Schema migrates to v3 (adds `reminders` table; v2's empty `attachments` table is now populated).
+
+### Multimodal
+
+- **NF-01** Image attachments (multi-image per note). Editor toolbar gains a new Image button; files copy into `<data_dir>/resources/<id>.<ext>` and stream to the renderer via the `keepr-resource://` protocol scaffolded in v0.2. Cards render Keep's mosaic grid (1 / 2 / 3-split / 2×2 with `+N` overflow). 32 MiB per-file cap. Rust commands: `add_image_attachment(note_id, src_path)`, `delete_attachment(id)`. `list_notes` returns attachments inline as a 3rd bulk query.
+- **NF-02** Reminders v1 (time-based, single-shot). New `reminders` table, scheduler thread polling every 30s, native Windows toast via `tauri-plugin-notification`. Editor bell button opens a quick-pick modal (Later today 6 PM / Tomorrow morning 8 AM / Next Monday 8 AM / custom datetime-local input). Cards show a bell badge with a Keep-shaped relative date. RRULE recurrence + dedicated Reminders sidebar section deferred to v0.5+.
+
+### Tags & migration
+
+- **NF-07** Inline `#hashtag` labeling (Memos pattern). Typing `#anything` in a note's title, body, or any checklist item auto-creates a Keepr label (case-insensitive merge) and adds it to the saved note. NoteCard text body highlights the tokens in Keep's blue accent. Parser rules cover Unicode letters, hyphen/underscore, URL-fragment exclusion, pure-numeric exclusion (9 vitest cases).
+- **NF-08** Markdown vault export + Google Takeout import.
+  - **Vault export:** writes one `.md` per note with YAML frontmatter (id, type, color, pinned, archived, created, updated, labels) and a `_resources/` subfolder for attachments. Lists serialize as `- [x]`/`- [ ]` markers. Drop the folder into Obsidian / Joplin / any text editor — your notes survive Keepr.
+  - **Takeout import:** reads a Google Takeout ZIP (`Takeout/Keep/<title>.json` schema), maps Keep colors to Keepr's palette, preserves labels (auto-creating missing ones), checklists, archive/pin state, and copies image attachments. Trashed Takeout notes are skipped. Settings gets two new buttons under "Markdown vault export & Takeout import".
+
+### Deferred from v0.4
+
+- **EI-10** Replace `react-masonry-css` — still works fine with `@dnd-kit` on top; moved to v0.5+.
+- **EI-18** FTS5 backend — `filterNotes` runs in <1ms at 1k notes; still no perf trigger.
+- **NF-20 FLIP animation** — defer to a focused a11y/polish pass.
+
 ## [0.3.0] — 2026-05-25 — "Power & Parity"
 
 Every P1 Keep-parity feature plus the v0.2 deferred items that didn't need new infrastructure. Schema unchanged (still v2); no migration needed when upgrading from v0.2.

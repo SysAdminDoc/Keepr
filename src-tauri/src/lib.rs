@@ -303,6 +303,8 @@ pub fn run() {
             commands::set_reminder,
             commands::clear_reminder,
             commands::list_reminders,
+            commands::export_vault,
+            commands::import_takeout,
             commands::delete_note_permanent,
             commands::set_archived,
             commands::set_trashed,

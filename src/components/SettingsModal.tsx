@@ -295,10 +295,70 @@ export function SettingsModal() {
                 </button>
               </div>
             </div>
+
+            <div>
+              <div className="font-medium">Markdown vault export &amp; Takeout import</div>
+              <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                Export every note as a separate <code>.md</code> file with
+                YAML frontmatter, ready to open in Obsidian, Joplin, or any
+                text editor. Or drop your Google Takeout ZIP to migrate
+                straight from Keep — labels, colors, lists, and images
+                are preserved.
+              </p>
+              <div className="flex gap-2 mt-3 flex-wrap">
+                <button
+                  disabled={busy}
+                  onClick={async () => {
+                    try {
+                      const picked = await open({
+                        title: "Pick vault destination folder",
+                        directory: true,
+                        multiple: false,
+                      });
+                      if (!picked) return;
+                      setBusy(true);
+                      const count = await api.exportVault(picked as string);
+                      showToast(`Exported ${count} notes as Markdown`);
+                    } catch (e) {
+                      showToast("Vault export failed: " + String(e));
+                    } finally {
+                      setBusy(false);
+                    }
+                  }}
+                  className="flex items-center gap-2 px-3 py-2 text-sm rounded border border-gray-300 dark:border-[#5f6368] hover:bg-black/5 dark:hover:bg-white/10 disabled:opacity-50"
+                >
+                  <Download size={16} aria-hidden /> Export as Markdown vault…
+                </button>
+                <button
+                  disabled={busy}
+                  onClick={async () => {
+                    try {
+                      const picked = await open({
+                        title: "Import Google Takeout",
+                        multiple: false,
+                        filters: [{ name: "Takeout ZIP", extensions: ["zip"] }],
+                      });
+                      if (!picked) return;
+                      setBusy(true);
+                      const count = await api.importTakeout(picked as string);
+                      await load();
+                      showToast(`Imported ${count} notes from Takeout`);
+                    } catch (e) {
+                      showToast("Takeout import failed: " + String(e));
+                    } finally {
+                      setBusy(false);
+                    }
+                  }}
+                  className="flex items-center gap-2 px-3 py-2 text-sm rounded border border-gray-300 dark:border-[#5f6368] hover:bg-black/5 dark:hover:bg-white/10 disabled:opacity-50"
+                >
+                  <Upload size={16} aria-hidden /> Import Google Takeout…
+                </button>
+              </div>
+            </div>
           </div>
 
           <div className="px-5 py-3 border-t border-gray-200 dark:border-[#5f6368] text-xs text-gray-500 dark:text-gray-400">
-            Keepr v0.3.0 — offline-first Google Keep clone. MIT-licensed.
+            Keepr v0.4.0 — offline-first Google Keep clone. MIT-licensed.
           </div>
         </div>
       </div>
