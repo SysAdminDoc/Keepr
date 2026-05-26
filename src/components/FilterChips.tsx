@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Pin, Tag, X, ChevronDown } from "lucide-react";
+import { Pin, Tag, ChevronDown } from "lucide-react";
 import clsx from "clsx";
 import { useStore } from "../store";
 import { COLOR_KEYS, COLOR_LABELS, LIGHT_HEX } from "../colors";
@@ -20,6 +20,11 @@ export function FilterChips() {
   const setFilters = useStore((s) => s.setFilters);
   const clearFilters = useStore((s) => s.clearFilters);
   const labels = useStore((s) => s.labels);
+  const section = useStore((s) => s.section);
+  // EI-V0.5-5 — Pinned filter is always empty in Trash (set_trashed
+  // clears pinned). Hide the chip there to avoid a "click does nothing"
+  // experience.
+  const showPinnedChip = section.kind !== "trash";
 
   const totalFacets =
     filters.kinds.length +
@@ -72,17 +77,19 @@ export function FilterChips() {
           onToggle={toggleLabel}
         />
       )}
-      <button
-        type="button"
-        onClick={togglePinned}
-        aria-pressed={filters.pinnedOnly}
-        className={clsx(
-          chipBase,
-          filters.pinnedOnly ? chipActive : chipInactive,
-        )}
-      >
-        <Pin size={14} aria-hidden /> Pinned
-      </button>
+      {showPinnedChip && (
+        <button
+          type="button"
+          onClick={togglePinned}
+          aria-pressed={filters.pinnedOnly}
+          className={clsx(
+            chipBase,
+            filters.pinnedOnly ? chipActive : chipInactive,
+          )}
+        >
+          <Pin size={14} aria-hidden /> Pinned
+        </button>
+      )}
       {hasAny && (
         <button
           type="button"
@@ -282,5 +289,3 @@ function LabelMenu({
   );
 }
 
-// Re-export the close-icon so existing imports of FilterChips chunk-share it.
-export const _UnusedX = X;

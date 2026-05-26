@@ -54,7 +54,7 @@ export function ReminderPicker({
     d.setHours(8, 0, 0, 0);
     setAt(d);
   };
-  const nextWeek = () => {
+  const nextMonday = () => {
     const d = new Date();
     const days = ((1 - d.getDay() + 7) % 7) || 7; // next Monday
     d.setDate(d.getDate() + days);
@@ -103,7 +103,7 @@ export function ReminderPicker({
             subtitle="8:00 AM"
             onClick={tomorrowMorning}
           />
-          <PresetRow label="Next Monday" subtitle="8:00 AM" onClick={nextWeek} />
+          <PresetRow label="Next Monday" subtitle="8:00 AM" onClick={nextMonday} />
           <div className="pt-2 border-t border-gray-200 dark:border-[#5f6368]">
             <label className="flex items-center gap-2 px-2 py-2 text-sm">
               <Clock size={14} aria-hidden />

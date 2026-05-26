@@ -85,8 +85,15 @@ export default function App() {
     setSelected(currentFilteredRef.current.map((n) => n.id));
   });
   // NF-04 — Escape clears the selection (in addition to closing modals).
+  // EI-V0.5-5 — gate behind no-modal-open so we don't double-fire when
+  // the editor / settings / labels / help / confirm modals are already
+  // handling Escape themselves. Otherwise Escape inside the editor
+  // would close the editor AND clear an unrelated selection.
   useGlobalHotkey({ key: "Escape" }, () => {
-    if (useStore.getState().selectedIds.size > 0) clearSelection();
+    const s = useStore.getState();
+    const aModalIsOpen =
+      s.editorOpen || s.settingsOpen || s.labelsManagerOpen || helpOpen;
+    if (!aModalIsOpen && s.selectedIds.size > 0) clearSelection();
   });
 
   // NF-17 — sweep expired trashed notes once after the initial load() and
@@ -192,7 +199,7 @@ export default function App() {
   return (
     <div className="h-full flex flex-col bg-white dark:bg-[#202124] text-gray-800 dark:text-gray-100">
       {selectedIds.size > 0 ? (
-        <BulkActionBar />
+        <BulkActionBar visibleIds={filtered.map((n) => n.id)} />
       ) : (
         <TopBar onMenu={() => setSidebarExpanded((v) => !v)} />
       )}

@@ -8,6 +8,7 @@ import {
   ArchiveRestore,
   Trash2,
   Tag,
+  RotateCcw,
 } from "lucide-react";
 import { useStore } from "../store";
 import { api } from "../api";
@@ -25,7 +26,16 @@ import type { ColorKey } from "../types";
  * note commands. The optimistic store patches (EI-24) keep the UI live
  * without a reload; failures surface per-batch as a single toast.
  */
-export function BulkActionBar() {
+interface Props {
+  /** The currently-visible filtered note IDs. Used to compute the
+   *  "N selected" badge as visible-and-selected intersection rather
+   *  than the raw store selection — otherwise switching sections or
+   *  toggling filter chips leaves the badge claiming more selected
+   *  than the user can see (EI-V0.5-5). */
+  visibleIds: string[];
+}
+
+export function BulkActionBar({ visibleIds }: Props) {
   const selectedIds = useStore((s) => s.selectedIds);
   const notes = useStore((s) => s.notes);
   const labels = useStore((s) => s.labels);
@@ -34,6 +44,10 @@ export function BulkActionBar() {
   const patchNote = useStore((s) => s.patchNote);
   const removeNote = useStore((s) => s.removeNote);
   const showToast = useStore((s) => s.showToast);
+
+  const visibleSet = new Set(visibleIds);
+  const visibleSelectedCount =
+    [...selectedIds].filter((id) => visibleSet.has(id)).length;
 
   const [colorOpen, setColorOpen] = useState(false);
   const [labelOpen, setLabelOpen] = useState(false);
@@ -149,7 +163,9 @@ export function BulkActionBar() {
         <X size={20} aria-hidden />
       </IconBtn>
       <span className="ml-2 mr-4 font-medium text-[#202124] dark:text-[#fdd663]">
-        {selectedIds.size} selected
+        {visibleSelectedCount === selectedIds.size
+          ? `${selectedIds.size} selected`
+          : `${visibleSelectedCount} of ${selectedIds.size} selected here`}
       </span>
       <div className="flex-1" />
 
@@ -243,7 +259,7 @@ export function BulkActionBar() {
       {inTrash && (
         <>
           <IconBtn ariaLabel="Restore from Trash" onClick={bulkRestore}>
-            <ArchiveRestore size={20} aria-hidden />
+            <RotateCcw size={20} aria-hidden />
           </IconBtn>
           <IconBtn ariaLabel="Delete forever" onClick={bulkDeleteForever}>
             <Trash2 size={20} aria-hidden />

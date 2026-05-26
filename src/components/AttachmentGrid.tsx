@@ -1,4 +1,5 @@
 import { X } from "lucide-react";
+import { useMemo } from "react";
 import clsx from "clsx";
 import type { Attachment } from "../types";
 import { convertFileSrc } from "@tauri-apps/api/core";
@@ -50,47 +51,85 @@ export function AttachmentGrid({
         // For 3-image layout the first image spans both columns.
         const spanFull = n === 3 && i === 0;
         return (
-          <figure
+          <AttachmentTile
             key={a.id}
-            className={clsx(
-              "relative group/att overflow-hidden",
-              spanFull && "col-span-2",
-              n === 1 && "max-h-[28rem]",
-              n >= 2 && "aspect-square",
-            )}
-          >
-            <img
-              src={convertFileSrc(srcForAttachment(a), "keepr-resource")}
-              alt={a.filename || "Attachment"}
-              loading="lazy"
-              draggable={false}
-              className="w-full h-full object-cover"
-            />
-            {/* Overflow indicator overlays the last visible image when there
-                are more than `maxVisible`. */}
-            {overflow > 0 && i === visible.length - 1 && (
-              <div className="absolute inset-0 bg-black/50 text-white grid place-items-center text-2xl font-medium pointer-events-none">
-                +{overflow}
-              </div>
-            )}
-            {editable && onRemove && (
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onRemove(a);
-                }}
-                aria-label={`Remove ${a.filename}`}
-                title="Remove image"
-                className="absolute top-1 right-1 opacity-0 group-hover/att:opacity-100 focus:opacity-100 p-1 rounded-full bg-black/60 text-white hover:bg-black/80"
-              >
-                <X size={14} aria-hidden />
-              </button>
-            )}
-          </figure>
+            attachment={a}
+            spanFull={spanFull}
+            singleton={n === 1}
+            inMosaic={n >= 2}
+            editable={editable}
+            overflow={overflow > 0 && i === visible.length - 1 ? overflow : 0}
+            onRemove={onRemove}
+          />
         );
       })}
     </div>
+  );
+}
+
+interface TileProps {
+  attachment: Attachment;
+  spanFull: boolean;
+  singleton: boolean;
+  inMosaic: boolean;
+  editable?: boolean;
+  overflow: number;
+  onRemove?: (a: Attachment) => void;
+}
+
+function AttachmentTile({
+  attachment,
+  spanFull,
+  singleton,
+  inMosaic,
+  editable,
+  overflow,
+  onRemove,
+}: TileProps) {
+  // Memoise src — convertFileSrc returns a stable string per (id, ext)
+  // but React would still re-evaluate the call every render otherwise.
+  const src = useMemo(
+    () => convertFileSrc(srcForAttachment(attachment), "keepr-resource"),
+    [attachment.id, attachment.mime],
+  );
+  return (
+    <figure
+      className={clsx(
+        "relative group/att overflow-hidden",
+        spanFull && "col-span-2",
+        singleton && "max-h-[28rem]",
+        inMosaic && "aspect-square",
+      )}
+    >
+      <img
+        src={src}
+        alt={attachment.filename || "Attachment"}
+        loading="lazy"
+        draggable={false}
+        className="w-full h-full object-cover"
+      />
+      {/* Overflow indicator overlays the last visible image when there
+          are more than `maxVisible`. */}
+      {overflow > 0 && (
+        <div className="absolute inset-0 bg-black/50 text-white grid place-items-center text-2xl font-medium pointer-events-none">
+          +{overflow}
+        </div>
+      )}
+      {editable && onRemove && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onRemove(attachment);
+          }}
+          aria-label={`Remove ${attachment.filename}`}
+          title="Remove image"
+          className="absolute top-1 right-1 opacity-0 group-hover/att:opacity-100 focus:opacity-100 p-1 rounded-full bg-black/60 text-white hover:bg-black/80"
+        >
+          <X size={14} aria-hidden />
+        </button>
+      )}
+    </figure>
   );
 }
 
