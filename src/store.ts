@@ -33,6 +33,9 @@ interface UIState {
   viewMode: ViewMode;
   /** Days a note stays in Trash before being auto-purged. 0 = never (NF-17). */
   trashRetentionDays: number;
+  /** When true, ticking a checklist item moves it into the "Checked items"
+   *  group at the bottom of the editor (NF-20). Default ON, matches Keep. */
+  moveCheckedToBottom: boolean;
   editorOpen: boolean;
   editorNoteId: string | null;
   settingsOpen: boolean;
@@ -51,6 +54,7 @@ interface UIState {
   setViewMode: (mode: ViewMode) => void;
   toggleViewMode: () => void;
   setTrashRetentionDays: (days: number) => void;
+  setMoveCheckedToBottom: (enabled: boolean) => void;
   openEditor: (id: string | null) => void;
   closeEditor: () => void;
   openSettings: () => void;
@@ -91,8 +95,10 @@ function nextToastId(): number {
 const THEME_KEY = "keepr:theme"; // values: "light" | "dark" | "system" | (legacy: undefined)
 const VIEW_MODE_KEY = "keepr:view-mode"; // values: "grid" | "list"
 const TRASH_RETENTION_KEY = "keepr:trash-retention-days"; // integer
+const MOVE_CHECKED_KEY = "keepr:move-checked-to-bottom"; // "true" | "false"
 
 const DEFAULT_TRASH_RETENTION_DAYS = 7;
+const DEFAULT_MOVE_CHECKED_TO_BOTTOM = true;
 
 // EI-37 — the inline boot script in `index.html` toggles the `.dark` class on
 // <html> BEFORE the first React paint, so there's no flash of wrong theme.
@@ -123,6 +129,14 @@ function readInitialTrashRetentionDays(): number {
   const n = parseInt(raw, 10);
   if (Number.isNaN(n) || n < 0 || n > 3650) return DEFAULT_TRASH_RETENTION_DAYS;
   return n;
+}
+
+function readInitialMoveCheckedToBottom(): boolean {
+  if (typeof localStorage === "undefined") return DEFAULT_MOVE_CHECKED_TO_BOTTOM;
+  const raw = localStorage.getItem(MOVE_CHECKED_KEY);
+  if (raw === "true") return true;
+  if (raw === "false") return false;
+  return DEFAULT_MOVE_CHECKED_TO_BOTTOM;
 }
 
 function effectiveDark(mode: ThemeMode): boolean {
@@ -171,6 +185,7 @@ export const useStore = create<UIState>((set, get) => ({
   themeMode: readInitialThemeMode(),
   viewMode: readInitialViewMode(),
   trashRetentionDays: readInitialTrashRetentionDays(),
+  moveCheckedToBottom: readInitialMoveCheckedToBottom(),
   toasts: [],
   selectedIds: new Set(),
   load: async () => {
@@ -217,6 +232,10 @@ export const useStore = create<UIState>((set, get) => ({
     const clamped = Math.max(0, Math.min(3650, Math.round(days)));
     localStorage.setItem(TRASH_RETENTION_KEY, String(clamped));
     set({ trashRetentionDays: clamped });
+  },
+  setMoveCheckedToBottom: (enabled) => {
+    localStorage.setItem(MOVE_CHECKED_KEY, enabled ? "true" : "false");
+    set({ moveCheckedToBottom: enabled });
   },
   _setDarkFromSystem: (dark) => set({ dark }),
   openEditor: (id) => set({ editorOpen: true, editorNoteId: id }),

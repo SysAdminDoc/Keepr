@@ -14,6 +14,8 @@ export function SettingsModal() {
   const setThemeMode = useStore((s) => s.setThemeMode);
   const trashRetentionDays = useStore((s) => s.trashRetentionDays);
   const setTrashRetentionDays = useStore((s) => s.setTrashRetentionDays);
+  const moveCheckedToBottom = useStore((s) => s.moveCheckedToBottom);
+  const setMoveCheckedToBottom = useStore((s) => s.setMoveCheckedToBottom);
   const load = useStore((s) => s.load);
   const showToast = useStore((s) => s.showToast);
 
@@ -157,6 +159,24 @@ export function SettingsModal() {
                 <span className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1">
                   <Folder size={14} aria-hidden /> local
                 </span>
+              }
+            />
+
+            <Row
+              title="Move checked items to bottom"
+              subtitle={
+                moveCheckedToBottom
+                  ? "Ticked items collapse into a group below the list"
+                  : "Items stay in the order you added them"
+              }
+              action={
+                <input
+                  type="checkbox"
+                  checked={moveCheckedToBottom}
+                  onChange={(e) => setMoveCheckedToBottom(e.target.checked)}
+                  aria-label="Move checked items to bottom"
+                  className="w-5 h-5 accent-[#1a73e8]"
+                />
               }
             />
 

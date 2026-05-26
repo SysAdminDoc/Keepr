@@ -24,6 +24,73 @@ import { ColorPicker } from "./ColorPicker";
 import { IconBtn } from "./IconBtn";
 import type { ChecklistItemInput, ColorKey, Note, NoteKind, NoteInput } from "../types";
 
+interface ChecklistRowProps {
+  item: ChecklistItemInput;
+  onToggle: () => void;
+  onText: (t: string) => void;
+  onEnter: () => void;
+  onBackspaceEmpty?: () => void;
+  onRemove: () => void;
+}
+
+function ChecklistRow({
+  item,
+  onToggle,
+  onText,
+  onEnter,
+  onBackspaceEmpty,
+  onRemove,
+}: ChecklistRowProps) {
+  return (
+    <div className="group/item flex items-center gap-2 px-2 py-1">
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-pressed={item.checked}
+        aria-label={item.checked ? "Uncheck item" : "Check item"}
+        className="p-1 rounded hover:bg-black/10 dark:hover:bg-white/10"
+      >
+        {item.checked ? (
+          <CheckSquare size={18} aria-hidden />
+        ) : (
+          <Square size={18} aria-hidden />
+        )}
+      </button>
+      <input
+        value={item.text}
+        onChange={(e) => onText(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            onEnter();
+          } else if (
+            e.key === "Backspace" &&
+            item.text === "" &&
+            onBackspaceEmpty
+          ) {
+            e.preventDefault();
+            onBackspaceEmpty();
+          }
+        }}
+        placeholder="List item"
+        aria-label="List item"
+        className={clsx(
+          "flex-1 bg-transparent outline-none text-[14px]",
+          item.checked && "line-through opacity-60",
+        )}
+      />
+      <button
+        type="button"
+        onClick={onRemove}
+        aria-label="Remove item"
+        className="opacity-0 group-hover/item:opacity-100 focus:opacity-100 p-1 rounded hover:bg-black/10 dark:hover:bg-white/10"
+      >
+        <X size={16} aria-hidden />
+      </button>
+    </div>
+  );
+}
+
 interface Draft {
   kind: NoteKind;
   title: string;
@@ -55,6 +122,8 @@ export function NoteEditor() {
   const removeNote = useStore((s) => s.removeNote);
   const patchNote = useStore((s) => s.patchNote);
   const upsertLabel = useStore((s) => s.upsertLabel);
+  const moveCheckedToBottom = useStore((s) => s.moveCheckedToBottom);
+  const [checkedCollapsed, setCheckedCollapsed] = useState(false);
 
   // EI-06 — Snapshot the existing note once on open. We deliberately do NOT
   // depend on the store's `notes` array because a background load() would
@@ -403,59 +472,87 @@ export function NoteEditor() {
             className="w-full resize-none bg-transparent outline-none px-4 pb-3 text-[14px] placeholder-gray-500 dark:placeholder-gray-400 min-h-[6rem]"
           />
         ) : (
-          <div className="px-2 py-1">
-            {draft.checklist.map((it, i) => (
-              <div
-                key={i}
-                className="group/item flex items-center gap-2 px-2 py-1"
-              >
-                <button
-                  onClick={() => setItem(i, { checked: !it.checked })}
-                  className="p-1 rounded hover:bg-black/10 dark:hover:bg-white/10"
-                >
-                  {it.checked ? (
-                    <CheckSquare size={18} />
-                  ) : (
-                    <Square size={18} />
-                  )}
-                </button>
-                <input
-                  value={it.text}
-                  onChange={(e) => setItem(i, { text: e.target.value })}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      e.preventDefault();
-                      addItem();
-                    } else if (
-                      e.key === "Backspace" &&
-                      it.text === "" &&
-                      draft.checklist.length > 1
-                    ) {
-                      e.preventDefault();
-                      removeItem(i);
+          (() => {
+            // NF-20 — when moveCheckedToBottom is on, split into two groups:
+            // unchecked items render in their stored order at the top, then a
+            // collapsible "Checked items (N)" header, then the checked items.
+            // We preserve each item's original index so setItem/removeItem
+            // (which key off `draft.checklist`) still work.
+            const indexed = draft.checklist.map((item, originalIndex) => ({
+              item,
+              originalIndex,
+            }));
+            const uncheckedRows = moveCheckedToBottom
+              ? indexed.filter(({ item }) => !item.checked)
+              : indexed;
+            const checkedRows = moveCheckedToBottom
+              ? indexed.filter(({ item }) => item.checked)
+              : [];
+            return (
+              <div className="px-2 py-1">
+                {uncheckedRows.map(({ item: it, originalIndex: i }) => (
+                  <ChecklistRow
+                    key={i}
+                    item={it}
+                    onToggle={() => setItem(i, { checked: !it.checked })}
+                    onText={(t) => setItem(i, { text: t })}
+                    onEnter={addItem}
+                    onBackspaceEmpty={
+                      draft.checklist.length > 1 ? () => removeItem(i) : undefined
                     }
-                  }}
-                  placeholder="List item"
-                  className={clsx(
-                    "flex-1 bg-transparent outline-none text-[14px]",
-                    it.checked && "line-through opacity-60",
-                  )}
-                />
+                    onRemove={() => removeItem(i)}
+                  />
+                ))}
                 <button
-                  onClick={() => removeItem(i)}
-                  className="opacity-0 group-hover/item:opacity-100 p-1 rounded hover:bg-black/10 dark:hover:bg-white/10"
+                  type="button"
+                  onClick={addItem}
+                  className="flex items-center gap-2 px-3 py-2 text-sm opacity-70 hover:opacity-100"
                 >
-                  <X size={16} />
+                  <Plus size={18} aria-hidden /> List item
                 </button>
+                {checkedRows.length > 0 && (
+                  <div className="mt-2 pt-2 border-t border-current/10">
+                    <button
+                      type="button"
+                      onClick={() => setCheckedCollapsed((v) => !v)}
+                      aria-expanded={!checkedCollapsed}
+                      className="flex items-center gap-2 px-3 py-1 text-xs uppercase tracking-wide opacity-70 hover:opacity-100"
+                    >
+                      <span
+                        className="inline-block transition-transform motion-reduce:transition-none"
+                        style={{
+                          transform: checkedCollapsed
+                            ? "rotate(-90deg)"
+                            : "rotate(0deg)",
+                        }}
+                        aria-hidden
+                      >
+                        ▾
+                      </span>
+                      {checkedRows.length} Checked item
+                      {checkedRows.length === 1 ? "" : "s"}
+                    </button>
+                    {!checkedCollapsed &&
+                      checkedRows.map(({ item: it, originalIndex: i }) => (
+                        <ChecklistRow
+                          key={i}
+                          item={it}
+                          onToggle={() => setItem(i, { checked: !it.checked })}
+                          onText={(t) => setItem(i, { text: t })}
+                          onEnter={addItem}
+                          onBackspaceEmpty={
+                            draft.checklist.length > 1
+                              ? () => removeItem(i)
+                              : undefined
+                          }
+                          onRemove={() => removeItem(i)}
+                        />
+                      ))}
+                  </div>
+                )}
               </div>
-            ))}
-            <button
-              onClick={addItem}
-              className="flex items-center gap-2 px-3 py-2 text-sm opacity-70 hover:opacity-100"
-            >
-              <Plus size={18} /> List item
-            </button>
-          </div>
+            );
+          })()
         )}
 
         {draft.labels.length > 0 && (
