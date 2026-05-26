@@ -1,5 +1,7 @@
 # Project Research and Feature Plan
 
+> ⚠ **Mostly superseded.** This file captured the v0.1 → v0.2 transition; every P0 + most of the P1 items below have shipped through v0.4. See **[`RESEARCH_FEATURE_PLAN_v0.5.md`](RESEARCH_FEATURE_PLAN_v0.5.md)** for the current v0.5+ research and prioritised roadmap. The [`CHANGELOG.md`](CHANGELOG.md) tracks what shipped from this plan; this file is kept for historical reference.
+
 > Research date: 2026-05-25 · Target HEAD: `d67484e` (initial v0.1.0 release) · Repo: https://github.com/SysAdminDoc/Keepr
 
 ## Executive Summary
