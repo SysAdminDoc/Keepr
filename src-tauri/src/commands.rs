@@ -401,6 +401,75 @@ pub fn update_note(
     })
 }
 
+/// NF-18 — "Make a copy". Server-side duplicate so timestamps and ID
+/// generation match every other create path. Pinning is intentionally
+/// reset to false (matches Keep's behavior); archive/trash are also
+/// reset so the copy lands in the active Notes section regardless of
+/// where the source lives.
+#[tauri::command]
+pub fn duplicate_note(state: State<'_, AppState>, id: String) -> Result<Note, String> {
+    if state.importing.load(std::sync::atomic::Ordering::SeqCst) {
+        return Err("a restore is currently in progress".into());
+    }
+    let mut conn = state.db.lock();
+    let source = load_note(&conn, &id).map_err(err)?.ok_or_else(|| format!("note {id} not found"))?;
+    let tx = conn.transaction().map_err(err)?;
+    let new_id = Uuid::new_v4().to_string();
+    let now = now_iso();
+    let copy_title = if source.title.is_empty() {
+        String::new()
+    } else {
+        format!("{} (copy)", source.title)
+    };
+    tx.execute(
+        "INSERT INTO notes (id, kind, title, body, color, pinned, archived, trashed, position, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, 0, 0, 0, 0, ?6, ?6)",
+        params![new_id, source.kind, copy_title, source.body, source.color, now],
+    )
+    .map_err(err)?;
+    let mut checklist_out: Vec<ChecklistItem> = Vec::with_capacity(source.checklist.len());
+    for item in &source.checklist {
+        let item_id = Uuid::new_v4().to_string();
+        tx.execute(
+            "INSERT INTO checklist_items (id, note_id, text, checked, position)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![item_id, new_id, item.text, item.checked as i64, item.position],
+        )
+        .map_err(err)?;
+        checklist_out.push(ChecklistItem {
+            id: item_id,
+            text: item.text.clone(),
+            checked: item.checked,
+            position: item.position,
+        });
+    }
+    for label_id in &source.labels {
+        tx.execute(
+            "INSERT OR IGNORE INTO note_labels (note_id, label_id) VALUES (?1, ?2)",
+            params![new_id, label_id],
+        )
+        .map_err(err)?;
+    }
+    tx.commit().map_err(err)?;
+    drop(conn);
+    Ok(Note {
+        id: new_id,
+        kind: source.kind,
+        title: copy_title,
+        body: source.body,
+        color: source.color,
+        pinned: false,
+        archived: false,
+        trashed: false,
+        position: 0,
+        created_at: now.clone(),
+        updated_at: now,
+        trashed_at: None,
+        checklist: checklist_out,
+        labels: source.labels,
+    })
+}
+
 #[tauri::command]
 pub fn delete_note_permanent(state: State<'_, AppState>, id: String) -> Result<(), String> {
     let conn = state.db.lock();

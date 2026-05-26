@@ -15,6 +15,7 @@ import {
   Tag,
   ListChecks,
   AlignLeft,
+  Copy,
 } from "lucide-react";
 import { useStore } from "../store";
 import { api } from "../api";
@@ -347,6 +348,23 @@ export function NoteEditor() {
     }
   };
 
+  // NF-18 — duplicate the open note. Flushes any unsaved edits to the
+  // source first, then asks the Rust side to copy.
+  const duplicate = async () => {
+    if (!existing) return;
+    try {
+      const updated = await flushDraft();
+      if (updated) upsertNote(updated);
+      const copy = await api.duplicateNote(existing.id);
+      upsertNote(copy);
+      showToast("Copy made");
+    } catch (e) {
+      showToast("Could not duplicate: " + String(e));
+    } finally {
+      closeEditor();
+    }
+  };
+
   return (
     <div
       className="fixed inset-0 z-50 modal-backdrop grid place-items-center p-4"
@@ -476,7 +494,7 @@ export function NoteEditor() {
             </div>
           )}
           <IconBtn
-            ariaLabel={draft.kind === "list" ? "Show as text" : "Show as checklist"}
+            ariaLabel={draft.kind === "list" ? "Hide checkboxes" : "Show checkboxes"}
             onClick={() => setKind(draft.kind === "list" ? "text" : "list")}
           >
             {draft.kind === "list" ? (
@@ -537,6 +555,11 @@ export function NoteEditor() {
               </div>
             )}
           </div>
+          {existing && !existing.trashed && (
+            <IconBtn ariaLabel="Make a copy" onClick={duplicate}>
+              <Copy size={18} aria-hidden />
+            </IconBtn>
+          )}
           {existing && !existing.trashed && (
             <IconBtn
               ariaLabel={existing.archived ? "Unarchive" : "Archive"}
