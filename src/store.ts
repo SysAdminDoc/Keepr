@@ -17,6 +17,7 @@ export interface Toast {
 
 export type ThemeMode = "light" | "dark" | "system";
 export type ViewMode = "grid" | "list";
+export type AutoBackupCadence = "off" | "daily" | "weekly";
 
 interface UIState {
   notes: Note[];
@@ -36,6 +37,15 @@ interface UIState {
   /** When true, ticking a checklist item moves it into the "Checked items"
    *  group at the bottom of the editor (NF-20). Default ON, matches Keep. */
   moveCheckedToBottom: boolean;
+  /** Auto-backup cadence (NF-15). "off" = no schedule; the manual
+   *  Export button in Settings still works regardless. */
+  autoBackupCadence: AutoBackupCadence;
+  /** Folder Keepr writes auto-backups into. Picked once via Settings;
+   *  point it at your Google Drive / OneDrive sync folder for cloud
+   *  backups with no built-in sync code. */
+  autoBackupFolder: string | null;
+  /** ISO timestamp of the last auto-backup we wrote. */
+  autoBackupLastAt: string | null;
   editorOpen: boolean;
   editorNoteId: string | null;
   settingsOpen: boolean;
@@ -55,6 +65,9 @@ interface UIState {
   toggleViewMode: () => void;
   setTrashRetentionDays: (days: number) => void;
   setMoveCheckedToBottom: (enabled: boolean) => void;
+  setAutoBackupCadence: (c: AutoBackupCadence) => void;
+  setAutoBackupFolder: (folder: string | null) => void;
+  setAutoBackupLastAt: (iso: string | null) => void;
   openEditor: (id: string | null) => void;
   closeEditor: () => void;
   openSettings: () => void;
@@ -96,6 +109,9 @@ const THEME_KEY = "keepr:theme"; // values: "light" | "dark" | "system" | (legac
 const VIEW_MODE_KEY = "keepr:view-mode"; // values: "grid" | "list"
 const TRASH_RETENTION_KEY = "keepr:trash-retention-days"; // integer
 const MOVE_CHECKED_KEY = "keepr:move-checked-to-bottom"; // "true" | "false"
+const AUTOBACKUP_CADENCE_KEY = "keepr:autobackup-cadence"; // "off"|"daily"|"weekly"
+const AUTOBACKUP_FOLDER_KEY = "keepr:autobackup-folder"; // absolute path
+const AUTOBACKUP_LAST_KEY = "keepr:autobackup-last-at"; // ISO
 
 const DEFAULT_TRASH_RETENTION_DAYS = 7;
 const DEFAULT_MOVE_CHECKED_TO_BOTTOM = true;
@@ -137,6 +153,23 @@ function readInitialMoveCheckedToBottom(): boolean {
   if (raw === "true") return true;
   if (raw === "false") return false;
   return DEFAULT_MOVE_CHECKED_TO_BOTTOM;
+}
+
+function readInitialAutoBackupCadence(): AutoBackupCadence {
+  if (typeof localStorage === "undefined") return "off";
+  const raw = localStorage.getItem(AUTOBACKUP_CADENCE_KEY);
+  return raw === "daily" || raw === "weekly" ? raw : "off";
+}
+
+function readInitialAutoBackupFolder(): string | null {
+  if (typeof localStorage === "undefined") return null;
+  const raw = localStorage.getItem(AUTOBACKUP_FOLDER_KEY);
+  return raw && raw.length > 0 ? raw : null;
+}
+
+function readInitialAutoBackupLastAt(): string | null {
+  if (typeof localStorage === "undefined") return null;
+  return localStorage.getItem(AUTOBACKUP_LAST_KEY);
 }
 
 function effectiveDark(mode: ThemeMode): boolean {
@@ -186,6 +219,9 @@ export const useStore = create<UIState>((set, get) => ({
   viewMode: readInitialViewMode(),
   trashRetentionDays: readInitialTrashRetentionDays(),
   moveCheckedToBottom: readInitialMoveCheckedToBottom(),
+  autoBackupCadence: readInitialAutoBackupCadence(),
+  autoBackupFolder: readInitialAutoBackupFolder(),
+  autoBackupLastAt: readInitialAutoBackupLastAt(),
   toasts: [],
   selectedIds: new Set(),
   load: async () => {
@@ -236,6 +272,20 @@ export const useStore = create<UIState>((set, get) => ({
   setMoveCheckedToBottom: (enabled) => {
     localStorage.setItem(MOVE_CHECKED_KEY, enabled ? "true" : "false");
     set({ moveCheckedToBottom: enabled });
+  },
+  setAutoBackupCadence: (cadence) => {
+    localStorage.setItem(AUTOBACKUP_CADENCE_KEY, cadence);
+    set({ autoBackupCadence: cadence });
+  },
+  setAutoBackupFolder: (folder) => {
+    if (folder) localStorage.setItem(AUTOBACKUP_FOLDER_KEY, folder);
+    else localStorage.removeItem(AUTOBACKUP_FOLDER_KEY);
+    set({ autoBackupFolder: folder });
+  },
+  setAutoBackupLastAt: (iso) => {
+    if (iso) localStorage.setItem(AUTOBACKUP_LAST_KEY, iso);
+    else localStorage.removeItem(AUTOBACKUP_LAST_KEY);
+    set({ autoBackupLastAt: iso });
   },
   _setDarkFromSystem: (dark) => set({ dark }),
   openEditor: (id) => set({ editorOpen: true, editorNoteId: id }),

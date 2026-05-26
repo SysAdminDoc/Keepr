@@ -11,6 +11,7 @@ import { useStore } from "./store";
 import { api } from "./api";
 import { filterNotes } from "./lib/filterNotes";
 import { findExpiredTrashed } from "./lib/trashRetention";
+import { backupFilename, backupPath, isBackupDue } from "./lib/autoBackup";
 import { useGlobalHotkey } from "./hooks/useGlobalHotkey";
 import { useKeepShortcuts } from "./hooks/useKeepShortcuts";
 import { HelpOverlay } from "./components/HelpOverlay";
@@ -75,6 +76,30 @@ export default function App() {
     const t = window.setInterval(sweep, 60 * 60 * 1000); // hourly
     return () => window.clearInterval(t);
   }, [loaded, trashRetentionDays]);
+
+  // NF-15 — auto-backup cadence. On startup and every 30 min, check if a
+  // backup is due (cadence + folder + elapsed time) and run export_zip
+  // into the configured folder. A single failure surfaces a toast; the
+  // next tick retries.
+  useEffect(() => {
+    if (!loaded) return;
+    const tick = async () => {
+      const s = useStore.getState();
+      if (!isBackupDue(s.autoBackupCadence, s.autoBackupFolder, s.autoBackupLastAt)) {
+        return;
+      }
+      try {
+        const dest = backupPath(s.autoBackupFolder!, backupFilename());
+        await api.exportZip(dest);
+        s.setAutoBackupLastAt(new Date().toISOString());
+      } catch (e) {
+        s.showToast("Auto-backup failed: " + String(e));
+      }
+    };
+    void tick();
+    const t = window.setInterval(tick, 30 * 60 * 1000); // every 30 min
+    return () => window.clearInterval(t);
+  }, [loaded]);
 
   const performEmptyTrash = async () => {
     setEmptyTrashOpen(false);

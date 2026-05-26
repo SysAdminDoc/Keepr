@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { X, Download, Upload, Folder } from "lucide-react";
+import { X, Download, Upload, Folder, FolderOpen } from "lucide-react";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { useStore } from "../store";
 import { api } from "../api";
@@ -16,6 +16,11 @@ export function SettingsModal() {
   const setTrashRetentionDays = useStore((s) => s.setTrashRetentionDays);
   const moveCheckedToBottom = useStore((s) => s.moveCheckedToBottom);
   const setMoveCheckedToBottom = useStore((s) => s.setMoveCheckedToBottom);
+  const autoBackupCadence = useStore((s) => s.autoBackupCadence);
+  const setAutoBackupCadence = useStore((s) => s.setAutoBackupCadence);
+  const autoBackupFolder = useStore((s) => s.autoBackupFolder);
+  const setAutoBackupFolder = useStore((s) => s.setAutoBackupFolder);
+  const autoBackupLastAt = useStore((s) => s.autoBackupLastAt);
   const load = useStore((s) => s.load);
   const showToast = useStore((s) => s.showToast);
 
@@ -204,6 +209,67 @@ export function SettingsModal() {
                 />
               }
             />
+
+            <div>
+              <div className="font-medium">Auto-backup</div>
+              <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                Keepr writes a timestamped <code>.zip</code> into the folder
+                you pick on the cadence you choose. Point the folder at your
+                Google Drive / OneDrive / Dropbox sync folder for a cloud
+                copy with no plumbing. Backups run while Keepr is open;
+                missed windows catch up on the next launch.
+              </p>
+              <div className="flex items-center gap-2 mt-3 flex-wrap">
+                <select
+                  aria-label="Auto-backup cadence"
+                  value={autoBackupCadence}
+                  onChange={(e) =>
+                    setAutoBackupCadence(
+                      e.target.value as typeof autoBackupCadence,
+                    )
+                  }
+                  className="px-3 py-1.5 text-sm rounded border border-gray-300 dark:border-[#5f6368] bg-transparent"
+                >
+                  <option value="off">Off</option>
+                  <option value="daily">Daily</option>
+                  <option value="weekly">Weekly</option>
+                </select>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const picked = await open({
+                      title: "Pick auto-backup folder",
+                      directory: true,
+                      multiple: false,
+                    });
+                    if (picked) setAutoBackupFolder(picked as string);
+                  }}
+                  className="flex items-center gap-2 px-3 py-1.5 text-sm rounded border border-gray-300 dark:border-[#5f6368] hover:bg-black/5 dark:hover:bg-white/10"
+                >
+                  <FolderOpen size={14} aria-hidden />
+                  {autoBackupFolder ? "Change folder…" : "Pick folder…"}
+                </button>
+                {autoBackupFolder && (
+                  <button
+                    type="button"
+                    onClick={() => setAutoBackupFolder(null)}
+                    className="text-xs text-gray-500 dark:text-gray-400 underline"
+                  >
+                    Forget folder
+                  </button>
+                )}
+              </div>
+              {autoBackupFolder && (
+                <div className="mt-2 text-xs text-gray-500 dark:text-gray-400 truncate">
+                  Folder: <code>{autoBackupFolder}</code>
+                </div>
+              )}
+              {autoBackupLastAt && (
+                <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  Last backup: {new Date(autoBackupLastAt).toLocaleString()}
+                </div>
+              )}
+            </div>
 
             <div>
               <div className="font-medium">Backup / Restore</div>
