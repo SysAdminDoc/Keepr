@@ -6,6 +6,32 @@ All notable changes to Keepr are documented here. Format loosely follows [Keep a
 
 (See [ROADMAP.md](ROADMAP.md) for the live task list.)
 
+## [0.14.0] — 2026-05-26 — "Checklist & textures"
+
+Three Keep-parity items at once: sub-item indent in checklists (NF-21), the nine background patterns (NF-22), and the FLIP animation on the existing "Move checked to bottom" behaviour (NF-20 polish). Two schema bumps (v10 + v11), one new lib, one new hook, and a colour-picker that grows a pattern row when a host wants to expose patterns.
+
+### Added
+
+- **NF-21** Sub-item indent in checklists (1 level only, Keep parity).
+  - Schema v10 adds `checklist_items.parent_id TEXT REFERENCES checklist_items(id) ON DELETE CASCADE` + `idx_checklist_parent`. Deleting a parent cascades to its children.
+  - `ChecklistItem` + `ChecklistItemInput` gain `parentId`. `validate_note_input` enforces "one level only" — any item whose `parent_id` is set must reference a top-level item in the same batch.
+  - `duplicate_note` two-pass copy remaps old → new ids so sub-items keep pointing at the right new parent.
+  - `ChecklistRow` editor gains Tab (indent under the most recent root sibling with a stable id) and Shift+Tab (drop parent_id). Indented rows render with `pl-8`.
+- **NF-22** Background image patterns.
+  - Schema v11 adds `notes.background_pattern TEXT NOT NULL DEFAULT ''`.
+  - New `src/lib/backgroundPatterns.ts` ships 9 inline-SVG data-URI patterns (Groceries / Food / Music / Recipes / Notes / Places / Travel / Video / Celebration) at low-contrast opacity so card text stays legible without an overlay.
+  - `ColorPicker` grows an optional pattern row (with the "no pattern" Ban icon first) — opt-in per call-site via the new `patternValue` + `onPatternChange` props. The editor wires both; the card's quick-palette stays color-only for now.
+  - `NoteCard` + editor body render the pattern via inline `backgroundImage: url(data:image/svg+xml…)` so there's nothing to ship as a file.
+  - Rust validator + frontend `normalizePattern` both whitelist the same 10 keys; unknown values coerce to `""` instead of erroring.
+- **NF-20 polish** FLIP animation.
+  - New `useFlip<K>(orderKey)` hook captures pre-/post-layout rects per registered element and animates the delta with `requestAnimationFrame` + `transform: translate(-dx, -dy)` → cleared with a 200 ms transition. Honours `prefers-reduced-motion: reduce` (skips the animation).
+  - `ChecklistRow` accepts a `flipRef` prop chained with dnd-kit's `setNodeRef`. The editor keys the FLIP animator on a checked-state bitmap so the animation only runs when an item flips checked/unchecked (not on every keystroke).
+
+### Tests
+
+- **50 cargo tests** (up from 48): 1 schema v10 test (parent_id column + ON DELETE CASCADE) + 1 schema v11 test (background_pattern column + default value).
+- **85 vitest cases** (up from 82): 3 new `backgroundPatterns.test.ts` tests (order matches map; data URLs render; `normalizePattern` accepts whitelist and coerces unknowns).
+
 ## [0.13.0] — 2026-05-26 — "FTS5 search"
 
 Replaces the renderer-side `title.toLowerCase().includes(q)` loop with a real SQLite FTS5 backend. Search now ranks by relevance (FTS5's bm25 default) instead of "first match wins", and the per-keystroke work moves off the main thread and out of the JS-iterates-every-note path.

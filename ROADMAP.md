@@ -22,11 +22,11 @@ These are the items still on deck. They batch into the next handful of minor rel
 
 - [x] **EI-18** — SQLite FTS5 backend. Schema v9 adds `notes_fts` virtual table + 6 sync triggers; new `search_notes(query)` Tauri command; vault rows intentionally not indexed (locked vault stays unsearchable); 150 ms debounce already in place; renderer falls back to substring scan when FTS5 unavailable
 
-### v0.14.0 "Checklist & textures"
+### v0.14.0 "Checklist & textures" — SHIPPED 2026-05-26
 
-- [ ] **NF-21** — Indent sub-items in checklists (1 level only, Keep parity). Tab/Shift+Tab. Adds `parent_id` to `checklist_items`.
-- [ ] **NF-22** — Background image patterns (Keep's 9 textures, syncs everywhere). New `background_pattern` column; 9 SVG patterns.
-- [ ] **NF-20 polish** — FLIP animation on Move-checked-to-bottom (the data behavior shipped in v0.3; only the animation is left).
+- [x] **NF-21** — Sub-checklist indent. Schema v10 adds `parent_id` (self-ref FK + ON DELETE CASCADE); validator enforces one-level-only; ChecklistRow Tab/Shift+Tab handlers; duplicate_note remaps old→new ids
+- [x] **NF-22** — Background patterns. Schema v11 adds `background_pattern`; `src/lib/backgroundPatterns.ts` ships 9 inline-SVG data URIs; ColorPicker grows an opt-in pattern row; NoteCard + editor render via inline `backgroundImage`
+- [x] **NF-20 polish** — FLIP animation. New `useFlip<K>` hook captures pre/post rects and animates the delta via `transform: translate(…)` → 200 ms transition; honours `prefers-reduced-motion`; keyed on the checklist's checked-state bitmap
 
 ### v0.15.0 "Frontend polish"
 
