@@ -18,9 +18,9 @@ These are the items still on deck. They batch into the next handful of minor rel
 - [x] **EI-V0.5-14** — Reminder schema cleanup (schema v8 drops `reminders.id`, makes `note_id` the PK, adds CHECK on `fire_at`)
 - [x] **EI-V0.5-12** — Scheduler shutdown via `AtomicBool` checked between 1-second sleep slices; wired to `RunEvent::ExitRequested`
 
-### v0.13.0 "Search depth"
+### v0.13.0 "Search depth" — SHIPPED 2026-05-26
 
-- [ ] **EI-18** — SQLite FTS5 backend for search (currently every keystroke runs `filterNotes` over the full note set with `toLowerCase().includes(…)`). Adds `notes_fts` virtual table + triggers; moves search to a Rust command. 150 ms debounce on the input.
+- [x] **EI-18** — SQLite FTS5 backend. Schema v9 adds `notes_fts` virtual table + 6 sync triggers; new `search_notes(query)` Tauri command; vault rows intentionally not indexed (locked vault stays unsearchable); 150 ms debounce already in place; renderer falls back to substring scan when FTS5 unavailable
 
 ### v0.14.0 "Checklist & textures"
 

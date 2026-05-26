@@ -6,6 +6,26 @@ All notable changes to Keepr are documented here. Format loosely follows [Keep a
 
 (See [ROADMAP.md](ROADMAP.md) for the live task list.)
 
+## [0.13.0] — 2026-05-26 — "FTS5 search"
+
+Replaces the renderer-side `title.toLowerCase().includes(q)` loop with a real SQLite FTS5 backend. Search now ranks by relevance (FTS5's bm25 default) instead of "first match wins", and the per-keystroke work moves off the main thread and out of the JS-iterates-every-note path.
+
+### Added
+
+- **EI-18** SQLite FTS5 search backend.
+  - Schema v9 adds a `notes_fts` virtual table (FTS5, `unicode61 remove_diacritics 2` tokenizer) indexed on `title` + `body` + `checklist_text` (GROUP_CONCAT of the note's checklist items, kept in sync by triggers).
+  - Triggers maintain the index automatically: `notes_ai_fts` / `notes_au_fts` / `notes_ad_fts` on the notes table; `ci_ai_fts` / `ci_au_fts` / `ci_ad_fts` on checklist_items rebuild the parent's `checklist_text` on any item change.
+  - Migration backfills the FTS table for every existing plain note in one statement.
+  - **Vault rows are intentionally NOT indexed.** The plain-text columns of a vault note are empty (the payload lives encrypted in `vault_ciphertext`), so FTS5 can't find them via title/body anyway; the migration WHERE clause makes this explicit and the trigger gates indexing on `NEW.vault = 'plain'`. The result: a locked vault can't be searched. Documented in the SECURITY threat-model section.
+  - New `search_notes(query)` Tauri command returns up-to-500 matching note IDs ranked by FTS5's `rank`. Input is tokenized + double-quoted per token + suffixed with `*` (prefix match), so the query is safe against FTS5-meaningful characters (`(`, `)`, `*`, `:`, `AND`, `OR`, `NEAR`) without needing per-character escaping.
+  - Frontend `filterNotes(…, searchMatchIds?)` takes an optional Set<string>. When set, narrows the section/filter pool to those IDs. When absent (browser preview / FTS5 errored / empty query), falls back to the in-memory substring scan — preserves test-suite behaviour with no Tauri runtime.
+  - `TopBar`'s existing 150 ms debounce now also fires `api.searchNotes(query)` and stashes the result in `store.searchMatchIds`. Empty input clears the narrow.
+
+### Tests
+
+- **48 cargo tests** (up from 44): 3 new schema v9 tests (creation + insert/update propagation, vault rows not indexed, checklist change propagation) and 1 `build_fts5_query` test (quoting + prefix + FTS5 keyword neutralization).
+- **82 vitest cases** (up from 80): 2 new `filterNotes` tests for the `searchMatchIds` path (Set wins over substring; section + filter still narrow first).
+
 ## [0.12.0] — 2026-05-26 — "Plumbing pass"
 
 Infrastructure-level cleanup that doesn't change UX but tightens the operational story. Three Phase C deferrals close in one shot: structured logging via `tauri-plugin-log`, reminder schema cleanup, and clean scheduler shutdown on app exit.
