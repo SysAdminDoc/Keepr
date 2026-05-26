@@ -1,15 +1,12 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Default capabilities for Keepr",
+  "description": "Default capabilities for Keepr. Backup/restore paths come from native dialogs in the renderer; the actual file I/O happens inside Rust commands, so the frontend itself needs no fs permission.",
   "windows": ["main"],
   "permissions": [
     "core:default",
     "dialog:default",
     "dialog:allow-open",
-    "dialog:allow-save",
-    "fs:default",
-    "fs:allow-read-file",
-    "fs:allow-write-file"
+    "dialog:allow-save"
   ]
 }
