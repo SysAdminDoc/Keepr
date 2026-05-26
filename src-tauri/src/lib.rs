@@ -5,8 +5,11 @@ use parking_lot::Mutex;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
-use tauri::{Manager, UriSchemeContext, UriSchemeResponder};
+use tauri::{Emitter, Manager, UriSchemeContext, UriSchemeResponder};
 use tauri::http::{Request, Response, StatusCode};
+use tauri::menu::{Menu, MenuItem};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
 /// Sentinel filename that, when present next to the running EXE, switches
 /// Keepr into portable mode — the DB is written next to the EXE instead of
@@ -115,15 +118,68 @@ fn guess_content_type(path: &Path) -> &'static str {
     }
 }
 
+// NF-06 — show / hide the main window. Tray click + tray menu both go
+// through this so the visibility state stays consistent.
+fn toggle_main_window(app: &tauri::AppHandle) {
+    if let Some(win) = app.get_webview_window("main") {
+        let visible = win.is_visible().unwrap_or(false);
+        let focused = win.is_focused().unwrap_or(false);
+        if visible && focused {
+            let _ = win.hide();
+        } else {
+            let _ = win.show();
+            let _ = win.unminimize();
+            let _ = win.set_focus();
+        }
+    }
+}
+
+fn show_main_window(app: &tauri::AppHandle) {
+    if let Some(win) = app.get_webview_window("main") {
+        let _ = win.show();
+        let _ = win.unminimize();
+        let _ = win.set_focus();
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // NF-06 — register the global "new quick note" shortcut. The handler
+    // shows the main window and emits a `keepr://quick-capture` event the
+    // renderer subscribes to (App.tsx) to open a blank editor.
+    let quick_shortcut = Shortcut::new(
+        Some(Modifiers::CONTROL | Modifiers::ALT),
+        Code::KeyN,
+    );
+
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(move |app, shortcut, event| {
+                    if shortcut == &quick_shortcut && event.state() == ShortcutState::Pressed {
+                        show_main_window(app);
+                        let _ = app.emit("keepr://quick-capture", ());
+                    }
+                })
+                .build(),
+        )
         .register_asynchronous_uri_scheme_protocol(
             "keepr-resource",
             handle_resource_request,
         )
-        .setup(|app| {
+        .on_window_event(|window, event| {
+            // NF-06 — closing the window minimizes to tray instead of
+            // killing the process so the app continues to receive global
+            // hotkey events and run the auto-backup tick.
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if window.label() == "main" {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+            }
+        })
+        .setup(move |app| {
             let handle = app.handle().clone();
             let data_dir = match resolve_data_dir(&handle) {
                 Ok(d) => d,
@@ -146,6 +202,60 @@ pub fn run() {
                 importing: Arc::new(AtomicBool::new(false)),
                 data_dir,
             });
+
+            // NF-06 — tray icon + menu. "Show / Hide Keepr" toggles the
+            // main window; "New note" focuses the window and emits the
+            // quick-capture event; "Quit" actually exits the process
+            // (this is the only path that bypasses the "minimize to tray"
+            // on close behavior above).
+            let show_item = MenuItem::with_id(app, "show", "Show / hide Keepr", true, None::<&str>)?;
+            let new_item = MenuItem::with_id(app, "new", "New note", true, None::<&str>)?;
+            let quit_item = MenuItem::with_id(app, "quit", "Quit Keepr", true, None::<&str>)?;
+            let menu = Menu::with_items(app, &[&show_item, &new_item, &quit_item])?;
+
+            let _tray = TrayIconBuilder::with_id("main-tray")
+                .icon(app.default_window_icon().cloned().unwrap_or_else(|| {
+                    // Fallback to a 1x1 transparent icon if the bundled
+                    // default isn't available (shouldn't happen in
+                    // release builds, but keeps tests / dev happy).
+                    tauri::image::Image::new_owned(vec![0, 0, 0, 0], 1, 1)
+                }))
+                .tooltip("Keepr")
+                .menu(&menu)
+                .show_menu_on_left_click(false)
+                .on_menu_event(|app, event| match event.id().as_ref() {
+                    "show" => toggle_main_window(app),
+                    "new" => {
+                        show_main_window(app);
+                        let _ = app.emit("keepr://quick-capture", ());
+                    }
+                    "quit" => {
+                        app.exit(0);
+                    }
+                    _ => {}
+                })
+                .on_tray_icon_event(|tray, event| {
+                    // Left click on the tray icon toggles the window (so
+                    // users don't have to right-click for the menu every
+                    // time).
+                    if let TrayIconEvent::Click {
+                        button: MouseButton::Left,
+                        button_state: MouseButtonState::Up,
+                        ..
+                    } = event
+                    {
+                        toggle_main_window(tray.app_handle());
+                    }
+                })
+                .build(app)?;
+
+            // NF-06 — register the Ctrl+Alt+N global hotkey now that the
+            // window is up. Failure is logged but not fatal — the rest of
+            // the app still works without the shortcut.
+            if let Err(e) = app.global_shortcut().register(quick_shortcut) {
+                eprintln!("keepr: failed to register Ctrl+Alt+N: {e}");
+            }
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

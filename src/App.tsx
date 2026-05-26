@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { listen } from "@tauri-apps/api/event";
 import { TopBar } from "./components/TopBar";
 import { Sidebar } from "./components/Sidebar";
 import { NoteGrid } from "./components/NoteGrid";
@@ -42,6 +43,28 @@ export default function App() {
 
   // NF-23 — Ctrl+G toggles between grid and list view.
   useGlobalHotkey({ key: "g", mod: true }, toggleViewMode);
+
+  // NF-06 — open a fresh note when the Rust tray icon / Ctrl+Alt+N global
+  // hotkey emits the quick-capture event.
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    let cancelled = false;
+    (async () => {
+      try {
+        const u = await listen("keepr://quick-capture", () => {
+          useStore.getState().openEditor(null);
+        });
+        if (cancelled) u();
+        else unlisten = u;
+      } catch {
+        // listen() fails outside Tauri (browser preview, vitest).
+      }
+    })();
+    return () => {
+      cancelled = true;
+      if (unlisten) unlisten();
+    };
+  }, []);
   // NF-03 — bind Keep's canonical shortcuts (c, l, /, ?, j, k, f, e, #).
   useKeepShortcuts(() => setHelpOpen(true));
   // NF-04 — Ctrl+A selects every note visible in the current section/search.
