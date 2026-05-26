@@ -87,7 +87,6 @@ export function NoteGrid({ notes }: Props) {
     },
     // We deliberately don't depend on allNotes — its identity changes on
     // every store update and would re-create this callback unnecessarily.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [notes, showToast],
   );
 

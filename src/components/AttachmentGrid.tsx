@@ -107,6 +107,9 @@ function AttachmentTile({
         useThumb ? thumbFilename(attachment) : srcForAttachment(attachment),
         "keepr-resource",
       ),
+    // Keyed on the attachment fields that actually change the URL, not the
+    // wrapper object itself (which gets a new identity on every store patch).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [attachment.id, attachment.mime, useThumb],
   );
   return (

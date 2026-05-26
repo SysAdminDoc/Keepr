@@ -19,6 +19,7 @@ P0 — the editor failed to open at all on a fresh v0.16.1 install. Clicking "Ta
 ### Added
 
 - **`<ErrorBoundary>` around the app root in `src/main.tsx`.** Future render-time exceptions render a recoverable "Something went wrong — Reload" panel with the error message instead of silently blanking the window. The full error + componentStack are logged to the console so `tauri-plugin-log` captures them too.
+- **ESLint + `react-hooks/rules-of-hooks`.** No linter existed before this release — that's how the hook-ordering bug landed in v0.15.0 and stayed broken through v0.16.1. New flat config at `eslint.config.js` enables `react-hooks/rules-of-hooks` as an error (which catches the exact bug class fixed above) plus `@typescript-eslint/recommended`. New `npm run lint` script. The CI workflow's existing "Frontend lint + test + build" job now actually runs lint between `npm ci` and `npm test`. Pre-existing inconsistencies in `AttachmentGrid` / `NoteGrid` / `ReminderPicker` / `NoteEditor` cleaned up in the same pass so the suite starts at zero warnings.
 
 ## [0.16.1] — 2026-05-26 — "First published Windows binary"
 

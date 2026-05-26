@@ -367,11 +367,6 @@ export function NoteEditor() {
   const bg = bgFor(draft.color, dark);
   const border = borderFor(draft.color, dark);
 
-  const isEmpty =
-    !draft.title.trim() &&
-    !draft.body.trim() &&
-    !draft.checklist.some((c) => c.text.trim());
-
   // EI-22 — `setKind` round-trip is now lossless. text -> list parses
   // GFM-style `- [x] item` / `- [ ] item` markers; list -> text writes
   // the same markers so subsequent text -> list recovers `checked`.

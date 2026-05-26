@@ -39,6 +39,10 @@ export function ReminderPicker({
 
   const oneHourFromNow = useMemo(
     () => new Date(Date.now() + 60 * 60 * 1000),
+    // Recompute on every open transition so a long-lived picker tab picks
+    // up the new "now" reference. The closure doesn't read `open` directly,
+    // but the dep is load-bearing for that refresh.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [open],
   );
   const defaultCustom = toLocalDatetimeInput(oneHourFromNow);
