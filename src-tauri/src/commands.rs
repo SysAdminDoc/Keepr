@@ -1363,6 +1363,37 @@ pub fn add_image_attachment(
         return Err(format!("could not copy attachment: {copy_err}"));
     }
 
+    // NF-V0.5-B — generate a 480-px thumbnail next to the original.
+    // Best-effort: a failure here doesn't roll back; the AttachmentTile
+    // falls back to the original via onError. Width/height of the source
+    // are recorded too so future card layouts can avoid layout shifts.
+    let mut width_recorded: Option<i64> = None;
+    let mut height_recorded: Option<i64> = None;
+    if mime.starts_with("image/") && mime != "image/svg+xml" {
+        if let Ok(img) = image::ImageReader::open(&dest).and_then(|r| Ok(r.with_guessed_format()?)) {
+            if let Ok(decoded) = img.decode() {
+                width_recorded = Some(decoded.width() as i64);
+                height_recorded = Some(decoded.height() as i64);
+                let thumb = decoded.thumbnail(480, 480);
+                let thumb_path = resources_dir.join(format!("{new_id}.thumb.jpg"));
+                if let Err(e) = thumb.to_rgb8().save_with_format(
+                    &thumb_path,
+                    image::ImageFormat::Jpeg,
+                ) {
+                    eprintln!("keepr: thumbnail generation failed for {new_id}: {e}");
+                }
+            }
+        }
+        // Persist measured dimensions back to the attachments row.
+        if let (Some(w), Some(h)) = (width_recorded, height_recorded) {
+            let conn = state.db.lock();
+            let _ = conn.execute(
+                "UPDATE attachments SET width = ?1, height = ?2 WHERE id = ?3",
+                params![w, h, new_id],
+            );
+        }
+    }
+
     Ok(Attachment {
         id: new_id,
         note_id,
@@ -1370,8 +1401,8 @@ pub fn add_image_attachment(
         mime: mime.into(),
         filename: original_name,
         byte_size: metadata.len() as i64,
-        width: None,
-        height: None,
+        width: width_recorded,
+        height: height_recorded,
         position,
         created_at: now,
     })
@@ -1412,8 +1443,11 @@ pub fn delete_attachment(state: State<'_, AppState>, id: String) -> Result<(), S
         params![now, note_id],
     );
     drop(conn);
-    let path = state.data_dir.join(RESOURCES_DIR).join(format!("{id}.{ext}"));
-    let _ = std::fs::remove_file(path);
+    let resources = state.data_dir.join(RESOURCES_DIR);
+    let _ = std::fs::remove_file(resources.join(format!("{id}.{ext}")));
+    // NF-V0.5-B — also remove the sibling thumbnail if present. Always
+    // .jpg regardless of source extension (see add_image_attachment).
+    let _ = std::fs::remove_file(resources.join(format!("{id}.thumb.jpg")));
     Ok(())
 }
 

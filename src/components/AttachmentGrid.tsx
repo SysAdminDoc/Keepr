@@ -1,5 +1,5 @@
 import { X } from "lucide-react";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import clsx from "clsx";
 import type { Attachment } from "../types";
 import { convertFileSrc } from "@tauri-apps/api/core";
@@ -12,6 +12,10 @@ interface Props {
   /** Cap rendering to N images and show "+M" overflow tile. Cards use
    *  4; the editor passes Infinity to show them all. */
   maxVisible?: number;
+  /** When true, prefer the 480-px thumbnail (NF-V0.5-B) for each image
+   *  instead of the original. Cards pass true; the editor passes false
+   *  so users see full quality. */
+  preferThumb?: boolean;
 }
 
 /**
@@ -30,6 +34,7 @@ export function AttachmentGrid({
   editable,
   onRemove,
   maxVisible = Infinity,
+  preferThumb = false,
 }: Props) {
   if (attachments.length === 0) return null;
   const visible = attachments.slice(0, maxVisible);
@@ -60,6 +65,7 @@ export function AttachmentGrid({
             editable={editable}
             overflow={overflow > 0 && i === visible.length - 1 ? overflow : 0}
             onRemove={onRemove}
+            preferThumb={preferThumb}
           />
         );
       })}
@@ -75,6 +81,7 @@ interface TileProps {
   editable?: boolean;
   overflow: number;
   onRemove?: (a: Attachment) => void;
+  preferThumb: boolean;
 }
 
 function AttachmentTile({
@@ -85,12 +92,22 @@ function AttachmentTile({
   editable,
   overflow,
   onRemove,
+  preferThumb,
 }: TileProps) {
+  // NF-V0.5-B — try the 480px thumbnail first when preferThumb is true.
+  // If the file doesn't exist (older attachments from before the thumb
+  // pipeline landed), the `<img>` onError swaps to the original.
+  const [thumbFailed, setThumbFailed] = useState(false);
+  const useThumb = preferThumb && !thumbFailed;
   // Memoise src — convertFileSrc returns a stable string per (id, ext)
   // but React would still re-evaluate the call every render otherwise.
   const src = useMemo(
-    () => convertFileSrc(srcForAttachment(attachment), "keepr-resource"),
-    [attachment.id, attachment.mime],
+    () =>
+      convertFileSrc(
+        useThumb ? thumbFilename(attachment) : srcForAttachment(attachment),
+        "keepr-resource",
+      ),
+    [attachment.id, attachment.mime, useThumb],
   );
   return (
     <figure
@@ -106,6 +123,10 @@ function AttachmentTile({
         alt={attachment.filename || "Attachment"}
         loading="lazy"
         draggable={false}
+        onError={() => {
+          // Thumbnail missing (pre-v0.5 upload) — fall back to original.
+          if (useThumb) setThumbFailed(true);
+        }}
         className="w-full h-full object-cover"
       />
       {/* Overflow indicator overlays the last visible image when there
@@ -138,6 +159,13 @@ function AttachmentTile({
 function srcForAttachment(a: Attachment): string {
   const ext = mimeToExt(a.mime);
   return `${a.id}.${ext}`;
+}
+
+/** NF-V0.5-B — companion thumbnail path. Always `.thumb.jpg` regardless
+ *  of source format; the Rust add_image_attachment writes JPEG for the
+ *  smallest size. */
+function thumbFilename(a: Attachment): string {
+  return `${a.id}.thumb.jpg`;
 }
 
 function mimeToExt(mime: string): string {

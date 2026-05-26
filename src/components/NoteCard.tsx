@@ -261,7 +261,11 @@ export function NoteCard({ note }: Props) {
       )}
 
       {note.attachments.length > 0 && (
-        <AttachmentGrid attachments={note.attachments} maxVisible={4} />
+        <AttachmentGrid
+          attachments={note.attachments}
+          maxVisible={4}
+          preferThumb
+        />
       )}
 
       <div className="px-4 pt-3 pb-2 pr-10">
