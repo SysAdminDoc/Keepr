@@ -89,9 +89,15 @@ NF-V0.5-C split in half: App Lock (UI-gating PIN with Argon2id) shipped first; P
 
 - [x] **NF-V0.5-K** — GitHub Actions release matrix expanded to macOS (aarch64+x86_64) and Linux x86_64; tauri.conf.json bundle.targets covers dmg/deb/appimage; README documents per-OS install quirks
 
-## Phase E — v0.11+ "Long-running bets remaining"
+## Phase E — v0.11.0 "Drawing notes" — SHIPPED 2026-05-26
 
-- [ ] **NF-V0.5-E** — Drawing notes (vector canvas) [P3, L]
+- [x] **NF-V0.5-E** — Drawing notes (PointerEvents canvas, 8-color palette, three stroke sizes, eraser, undo, clear; PNG attachment on save via existing add_image_attachment_bytes path; vector replay + SVG storage deferred to a future release)
+
+---
+
+## Roadmap status (2026-05-26)
+
+Every NF-V0.5-* item from [RESEARCH_FEATURE_PLAN_v0.5.md](RESEARCH_FEATURE_PLAN_v0.5.md) has shipped. The v0.5+ Phase C deferrals (mega-file refactor EI-V0.5-10, tokio scheduler EI-V0.5-12, schema cleanup EI-V0.5-14, kebab overflow EI-V0.5-15, code-split EI-V0.5-17, tauri-plugin-log NF-V0.5-J) remain as polish work for future minor releases. Long-tail P3 items (NF-12 OCR, NF-13 URL previews, NF-21 sub-checklist indent, NF-22 background patterns) are open as future work but not actively scheduled.
 - [ ] **NF-V0.5-K** — macOS + Linux CI matrix (no platform support promise) [P3, S]
 - [ ] **NF-12** Image OCR via Windows OCR API [P3, M]
 - [ ] **NF-13** Rich URL preview cards [P3, M]

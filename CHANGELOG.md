@@ -6,6 +6,24 @@ All notable changes to Keepr are documented here. Format loosely follows [Keep a
 
 (See [ROADMAP.md](ROADMAP.md) for the live task list.)
 
+## [0.11.0] — 2026-05-26 — "Drawing notes"
+
+Final roadmap item from the v0.5 research pass. The Paintbrush button on NewNoteBar — disabled since v0.2 with the "coming v0.5" tooltip — now opens a real drawing canvas. Strokes are tracked vector-side for proper hi-DPR rendering + undo, then flattened to a PNG attachment on save (matching the same attachment pipeline image-paste uses).
+
+### Added
+
+- **NF-V0.5-E** Drawing notes.
+  - New `<DrawingCanvasModal />` (~280 lines) with HTML5 canvas + PointerEvents. Pen pressure read off `PointerEvent.pressure` so Surface/Wacom strokes vary in width while a mouse renders uniform. `touch-none` on the canvas prevents the browser from panning the page on tablets.
+  - Toolbar: 8-color palette (Keep-shaped: ink/red/orange/yellow/green/blue/purple/white), three stroke sizes (2/5/12 px), a dedicated Eraser tool (paints the canvas background colour so the PNG flattens cleanly), Undo (stroke-level), Clear, Save, Cancel.
+  - Strokes are kept as `{color, size, erase, points[]}` arrays in a ref; the canvas repaints on every pointer event by replaying the stroke buffer. The backing-store resolution is matched to `devicePixelRatio` so strokes stay crisp on retina displays.
+  - Save: `canvas.toBlob("image/png")` → `Uint8Array` → existing `add_image_attachment_bytes` Rust command. The new note is created blank, the PNG is attached as an `image/png` attachment named `drawing.png`, and the editor opens on the new note so the user can immediately add a title / labels / reminder.
+  - NewNoteBar's Paintbrush button is now enabled (and the "coming v0.5" tooltip is gone). Re-editing an existing drawing is intentionally out of scope for this cut — vector replay can land alongside SVG storage in a later release.
+
+### Tests
+
+- **43 cargo tests** unchanged — no Rust-side changes for this item; reuses the existing image attachment pipeline (NF-V0.5-I bytes path).
+- **80 vitest cases** unchanged — the new surface is pure DOM/canvas, covered by tsc + manual smoke. Headless canvas testing would require jsdom + canvas polyfill that aren't worth pulling in for a single component.
+
 ## [0.10.0] — 2026-05-26 — "Cross-platform CI"
 
 Extends the GitHub Actions release pipeline to also produce macOS and Linux artifacts on every `v*.*.*` tag push. Windows stays the **supported** channel; macOS and Linux are **best-effort** so the codebase stays buildable on those platforms and so users can self-build without setting up the Tauri toolchain locally.
