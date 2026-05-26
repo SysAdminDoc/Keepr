@@ -31,6 +31,10 @@ export function NoteCard({ note }: Props) {
   const patchNote = useStore((s) => s.patchNote);
   const removeNote = useStore((s) => s.removeNote);
   const trashRetentionDays = useStore((s) => s.trashRetentionDays);
+  const selectedIds = useStore((s) => s.selectedIds);
+  const toggleSelected = useStore((s) => s.toggleSelected);
+  const selectMode = selectedIds.size > 0;
+  const isSelected = selectedIds.has(note.id);
   const [colorOpen, setColorOpen] = useState(false);
   const popoverRef = useRef<HTMLDivElement>(null);
   useClickOutside(popoverRef, colorOpen, () => setColorOpen(false));
@@ -143,7 +147,11 @@ export function NoteCard({ note }: Props) {
     });
   };
 
-  const openIfNotTrash = () => {
+  const cardActivate = () => {
+    if (selectMode) {
+      toggleSelected(note.id);
+      return;
+    }
     if (inTrash) return;
     openEditor(note.id);
   };
@@ -151,7 +159,10 @@ export function NoteCard({ note }: Props) {
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" || e.key === " ") {
       e.preventDefault();
-      openIfNotTrash();
+      cardActivate();
+    } else if (e.key.toLowerCase() === "x") {
+      e.preventDefault();
+      toggleSelected(note.id);
     }
   };
 
@@ -173,15 +184,38 @@ export function NoteCard({ note }: Props) {
       className={clsx(
         "note-card group relative rounded-lg border shadow-keep hover:shadow-keep-hover cursor-default",
         "transition-shadow motion-reduce:transition-none",
+        isSelected && "ring-2 ring-[#1a73e8] ring-offset-1",
       )}
       style={{ background: bg, borderColor: border }}
-      onClick={openIfNotTrash}
+      onClick={cardActivate}
       onKeyDown={onKeyDown}
       role="button"
       tabIndex={0}
       aria-label={cardLabel}
+      aria-pressed={selectMode ? isSelected : undefined}
       data-note-id={note.id}
     >
+      {/* NF-04 — select checkmark in the top-left corner. Visible on hover
+          or whenever any other card is selected. Click toggles selection. */}
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          toggleSelected(note.id);
+        }}
+        aria-label={isSelected ? "Deselect note" : "Select note"}
+        aria-pressed={isSelected}
+        title={isSelected ? "Deselect" : "Select"}
+        className={clsx(
+          "absolute top-2 left-2 w-6 h-6 rounded-full grid place-items-center text-white transition-opacity motion-reduce:transition-none",
+          isSelected
+            ? "opacity-100 bg-[#1a73e8]"
+            : "opacity-0 group-hover:opacity-100 focus:opacity-100 bg-black/40 hover:bg-black/60",
+          selectMode && "opacity-100",
+        )}
+      >
+        <Check size={14} aria-hidden />
+      </button>
       {!inTrash && (
         <button
           onClick={togglePin}

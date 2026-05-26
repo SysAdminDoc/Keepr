@@ -35,6 +35,8 @@ interface UIState {
   settingsOpen: boolean;
   labelsManagerOpen: boolean;
   toasts: Toast[];
+  /** Set of note IDs the user has currently multi-selected (NF-04). */
+  selectedIds: Set<string>;
   load: () => Promise<void>;
   setSection: (s: Section) => void;
   setSearch: (q: string) => void;
@@ -68,6 +70,10 @@ interface UIState {
   removeLabel: (id: string) => void;
   /** Drop every note whose predicate matches (used by Empty Trash). */
   removeNotesWhere: (predicate: (n: Note) => boolean) => void;
+
+  toggleSelected: (id: string) => void;
+  setSelected: (ids: string[]) => void;
+  clearSelection: () => void;
   /** @internal — used by the system-theme matchMedia listener. */
   _setDarkFromSystem: (dark: boolean) => void;
 }
@@ -160,6 +166,7 @@ export const useStore = create<UIState>((set, get) => ({
   viewMode: readInitialViewMode(),
   trashRetentionDays: readInitialTrashRetentionDays(),
   toasts: [],
+  selectedIds: new Set(),
   load: async () => {
     try {
       const [notes, labels] = await Promise.all([
@@ -267,6 +274,16 @@ export const useStore = create<UIState>((set, get) => ({
         labels: n.labels.filter((lid) => lid !== id),
       })),
     })),
+
+  toggleSelected: (id) =>
+    set((s) => {
+      const next = new Set(s.selectedIds);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return { selectedIds: next };
+    }),
+  setSelected: (ids) => set({ selectedIds: new Set(ids) }),
+  clearSelection: () => set({ selectedIds: new Set() }),
 }));
 
 // Wire the forward-declared ref now that useStore exists. The

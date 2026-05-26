@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { TopBar } from "./components/TopBar";
 import { Sidebar } from "./components/Sidebar";
 import { NoteGrid } from "./components/NoteGrid";
@@ -14,6 +14,7 @@ import { findExpiredTrashed } from "./lib/trashRetention";
 import { useGlobalHotkey } from "./hooks/useGlobalHotkey";
 import { useKeepShortcuts } from "./hooks/useKeepShortcuts";
 import { HelpOverlay } from "./components/HelpOverlay";
+import { BulkActionBar } from "./components/BulkActionBar";
 import { Lightbulb, Archive, Trash2, Tag, Loader2 } from "lucide-react";
 
 export default function App() {
@@ -30,6 +31,9 @@ export default function App() {
 
   const toggleViewMode = useStore((s) => s.toggleViewMode);
   const trashRetentionDays = useStore((s) => s.trashRetentionDays);
+  const selectedIds = useStore((s) => s.selectedIds);
+  const setSelected = useStore((s) => s.setSelected);
+  const clearSelection = useStore((s) => s.clearSelection);
   const [sidebarExpanded, setSidebarExpanded] = useState(true);
   const [emptyTrashOpen, setEmptyTrashOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
@@ -38,6 +42,14 @@ export default function App() {
   useGlobalHotkey({ key: "g", mod: true }, toggleViewMode);
   // NF-03 — bind Keep's canonical shortcuts (c, l, /, ?, j, k, f, e, #).
   useKeepShortcuts(() => setHelpOpen(true));
+  // NF-04 — Ctrl+A selects every note visible in the current section/search.
+  useGlobalHotkey({ key: "a", mod: true }, () => {
+    setSelected(currentFilteredRef.current.map((n) => n.id));
+  });
+  // NF-04 — Escape clears the selection (in addition to closing modals).
+  useGlobalHotkey({ key: "Escape" }, () => {
+    if (useStore.getState().selectedIds.size > 0) clearSelection();
+  });
 
   // NF-17 — sweep expired trashed notes once after the initial load() and
   // again every hour while the app is open. Errors are swallowed; the
@@ -82,6 +94,22 @@ export default function App() {
     () => filterNotes(notes, section, search),
     [notes, section, search],
   );
+  // NF-04 — Ctrl+A handler reaches the latest filtered list via this ref
+  // so we don't need to register a new hotkey on every keystroke.
+  const currentFilteredRef = useRef(filtered);
+  useEffect(() => {
+    currentFilteredRef.current = filtered;
+  }, [filtered]);
+  // Clear stale selections when notes are removed (e.g. trash sweep).
+  useEffect(() => {
+    if (selectedIds.size === 0) return;
+    const ids = new Set(notes.map((n) => n.id));
+    const stale = [...selectedIds].filter((id) => !ids.has(id));
+    if (stale.length > 0) {
+      const next = [...selectedIds].filter((id) => ids.has(id));
+      setSelected(next);
+    }
+  }, [notes, selectedIds, setSelected]);
 
   const pinned = filtered.filter((n) => n.pinned && section.kind === "notes");
   const others = section.kind === "notes" ? filtered.filter((n) => !n.pinned) : filtered;
@@ -100,7 +128,11 @@ export default function App() {
 
   return (
     <div className="h-full flex flex-col bg-white dark:bg-[#202124] text-gray-800 dark:text-gray-100">
-      <TopBar onMenu={() => setSidebarExpanded((v) => !v)} />
+      {selectedIds.size > 0 ? (
+        <BulkActionBar />
+      ) : (
+        <TopBar onMenu={() => setSidebarExpanded((v) => !v)} />
+      )}
       <div className="flex-1 min-h-0 flex">
         <Sidebar expanded={sidebarExpanded} />
         <main className="flex-1 min-w-0 overflow-y-auto px-4 sm:px-8 py-6">
