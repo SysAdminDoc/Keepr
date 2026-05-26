@@ -61,7 +61,16 @@ export function NoteCard({ note }: Props) {
       const becomingArchived = !note.archived;
       await api.setArchived(note.id, becomingArchived);
       await load();
-      showToast(becomingArchived ? "Note archived" : "Note unarchived");
+      // EI-15 — Undo for archive (Keep parity).
+      showToast(becomingArchived ? "Note archived" : "Note unarchived", {
+        action: {
+          label: "Undo",
+          onClick: async () => {
+            await api.setArchived(note.id, !becomingArchived);
+            await load();
+          },
+        },
+      });
     });
   };
 
@@ -70,7 +79,16 @@ export function NoteCard({ note }: Props) {
     return withToast("trash note", async () => {
       await api.setTrashed(note.id, true);
       await load();
-      showToast("Note moved to Trash");
+      // EI-15 — Undo for trash (Keep parity, 5s window).
+      showToast("Note moved to Trash", {
+        action: {
+          label: "Undo",
+          onClick: async () => {
+            await api.setTrashed(note.id, false);
+            await load();
+          },
+        },
+      });
     });
   };
 

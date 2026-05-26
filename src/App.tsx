@@ -18,7 +18,8 @@ export default function App() {
   const section = useStore((s) => s.section);
   const search = useStore((s) => s.search);
   const load = useStore((s) => s.load);
-  const toast = useStore((s) => s.toast);
+  const toasts = useStore((s) => s.toasts);
+  const dismissToast = useStore((s) => s.dismissToast);
   const showToast = useStore((s) => s.showToast);
   const loaded = useStore((s) => s.loaded);
 
@@ -125,14 +126,29 @@ export default function App() {
       <div
         role="status"
         aria-live="polite"
-        aria-atomic="true"
-        className="fixed left-1/2 -translate-x-1/2 bottom-6 z-50 pointer-events-none"
+        aria-atomic="false"
+        className="fixed left-1/2 -translate-x-1/2 bottom-6 z-50 flex flex-col-reverse items-center gap-2 pointer-events-none"
       >
-        {toast && (
-          <div className="px-4 py-2 rounded bg-[#3c4043] text-white text-sm shadow-lg pointer-events-auto">
-            {toast}
+        {toasts.map((t) => (
+          <div
+            key={t.id}
+            className="px-4 py-2 rounded bg-[#3c4043] text-white text-sm shadow-lg pointer-events-auto flex items-center gap-3 max-w-md"
+          >
+            <span className="truncate">{t.text}</span>
+            {t.action && (
+              <button
+                type="button"
+                className="text-[#8ab4f8] font-medium hover:text-white px-1"
+                onClick={async () => {
+                  await t.action!.onClick();
+                  dismissToast(t.id);
+                }}
+              >
+                {t.action.label}
+              </button>
+            )}
           </div>
-        )}
+        ))}
       </div>
     </div>
   );
