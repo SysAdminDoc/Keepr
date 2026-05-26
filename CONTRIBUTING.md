@@ -9,13 +9,22 @@ Keepr is intentionally narrow. Before proposing a feature, sanity-check it again
 ## Project layout
 
 - `src/` — React + TypeScript renderer (the UI)
+- `src/components/` — every UI component (NoteCard, NoteEditor, BulkActionBar, ReminderPicker, FilterChips, AttachmentGrid, ConfirmDialog, HelpOverlay, IconBtn, etc.)
+- `src/hooks/` — shared hooks (`useEscape`, `useFocusTrap`, `useClickOutside`, `useGlobalHotkey`, `useKeepShortcuts`)
+- `src/lib/` — pure helpers (`filterNotes`, `hashtags`, `autoBackup`, `trashRetention`)
+- `src/keep-palette.js` — single source of truth for the 12 Keep colors, imported by both `src/colors.ts` and `tailwind.config.js`
+- `src/__tests__/` — vitest unit tests
 - `src-tauri/` — Rust backend, SQLite schema, Tauri commands
 - `src-tauri/src/db.rs` — schema + migration framework (bump `SCHEMA_VERSION` + add a `MIGRATION_V<n>` block + an arm in `apply_migration` for every schema change)
-- `src-tauri/src/commands.rs` — every Tauri command lives here today; split when it grows
-- `src/__tests__/` — vitest unit tests
-- `RESEARCH_FEATURE_PLAN.md` — the long-form research and rationale for every EI-/NF- item on the roadmap
+- `src-tauri/src/commands.rs` — every Tauri command lives here today; split when it grows (refactor planned for v0.6+)
+- `src-tauri/src/lib.rs` — Tauri runtime: plugins (dialog, notification, global-shortcut, single-instance), tray icon + menu, `keepr-resource://` custom protocol, reminder scheduler thread, portable-mode resolution
+- `src-tauri/capabilities/default.json` — Tauri permission allow-list (keep minimal)
+- `.github/workflows/ci.yml` — runs `cargo check`, `cargo test`, `npm test`, `npm run build` on every PR (Windows)
+- `.github/workflows/release.yml` — builds unsigned MSI + NSIS + portable zip on every `v*.*.*` tag
 - `ROADMAP.md` — the live task list
 - `CHANGELOG.md` — what shipped in each release
+- `RESEARCH_FEATURE_PLAN_v0.5.md` — current research-and-roadmap for v0.5+
+- `RESEARCH_FEATURE_PLAN.md` — original v0.1 → v0.2 research (kept for historical reference)
 
 ## Commit style
 

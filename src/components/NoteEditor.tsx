@@ -959,7 +959,11 @@ export function NoteEditor() {
           <IconBtn ariaLabel="Add image" onClick={addImage}>
             <ImageIcon size={18} aria-hidden />
           </IconBtn>
-          <IconBtn ariaLabel="Background options" onClick={() => setColorOpen((v) => !v)}>
+          <IconBtn
+            ariaLabel="Background options"
+            onClick={() => setColorOpen((v) => !v)}
+            pressed={colorOpen}
+          >
             <Palette size={18} aria-hidden />
           </IconBtn>
           {colorOpen && (
@@ -984,7 +988,11 @@ export function NoteEditor() {
             )}
           </IconBtn>
           <div className="relative">
-            <IconBtn ariaLabel="Labels" onClick={() => setLabelMenuOpen((v) => !v)}>
+            <IconBtn
+              ariaLabel="Labels"
+              onClick={() => setLabelMenuOpen((v) => !v)}
+              pressed={labelMenuOpen}
+            >
               <Tag size={18} aria-hidden />
             </IconBtn>
             {labelMenuOpen && (

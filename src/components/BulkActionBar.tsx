@@ -170,14 +170,22 @@ export function BulkActionBar({ visibleIds }: Props) {
       <div className="flex-1" />
 
       {!inTrash && (
-        <IconBtn ariaLabel={allPinned ? "Unpin" : "Pin"} onClick={bulkPin}>
+        <IconBtn
+          ariaLabel={allPinned ? "Unpin" : "Pin"}
+          onClick={bulkPin}
+          pressed={allPinned}
+        >
           {allPinned ? <PinOff size={20} aria-hidden /> : <Pin size={20} aria-hidden />}
         </IconBtn>
       )}
 
       {!inTrash && (
         <div className="relative" ref={colorRef}>
-          <IconBtn ariaLabel="Change color" onClick={() => setColorOpen((v) => !v)}>
+          <IconBtn
+            ariaLabel="Change color"
+            onClick={() => setColorOpen((v) => !v)}
+            pressed={colorOpen}
+          >
             <Palette size={20} aria-hidden />
           </IconBtn>
           {colorOpen && (
@@ -196,7 +204,11 @@ export function BulkActionBar({ visibleIds }: Props) {
 
       {!inTrash && (
         <div className="relative" ref={labelRef}>
-          <IconBtn ariaLabel="Add or remove labels" onClick={() => setLabelOpen((v) => !v)}>
+          <IconBtn
+            ariaLabel="Add or remove labels"
+            onClick={() => setLabelOpen((v) => !v)}
+            pressed={labelOpen}
+          >
             <Tag size={20} aria-hidden />
           </IconBtn>
           {labelOpen && (

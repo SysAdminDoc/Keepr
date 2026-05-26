@@ -3,7 +3,7 @@ use chrono::Utc;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use std::fs::File;
-use std::io::{Read, Write};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tauri::State;
@@ -978,17 +978,34 @@ pub fn import_takeout(
                     if std::fs::create_dir_all(&resources_dir).is_err() {
                         continue;
                     }
+                    // EI-V0.5-13 — insert row first, then write file; on
+                    // write failure DELETE the row so we never reference
+                    // a missing blob (mirrors add_image_attachment's
+                    // rollback pattern).
+                    let now = now_iso();
                     let dest = resources_dir.join(&stored_name);
+                    {
+                        let conn = state.db.lock();
+                        if conn
+                            .execute(
+                                "INSERT INTO attachments (id, note_id, kind, mime, filename, byte_size, position, created_at)
+                                 VALUES (?1, ?2, 'image', ?3, ?4, ?5, 0, ?6)",
+                                params![new_id, created.id, mime, rel, bytes.len() as i64, now],
+                            )
+                            .is_err()
+                        {
+                            continue;
+                        }
+                    }
                     if std::fs::write(&dest, bytes).is_err() {
+                        // Roll back the row so the DB stays consistent.
+                        let conn = state.db.lock();
+                        let _ = conn.execute(
+                            "DELETE FROM attachments WHERE id = ?1",
+                            params![new_id],
+                        );
                         continue;
                     }
-                    let now = now_iso();
-                    let conn = state.db.lock();
-                    let _ = conn.execute(
-                        "INSERT INTO attachments (id, note_id, kind, mime, filename, byte_size, position, created_at)
-                         VALUES (?1, ?2, 'image', ?3, ?4, ?5, 0, ?6)",
-                        params![new_id, created.id, mime, rel, bytes.len() as i64, now],
-                    );
                 }
             }
         }
@@ -1788,6 +1805,11 @@ pub fn export_zip(
     let opts: SimpleFileOptions =
         SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
 
+    // EI-V0.5-13 — mirror the import-side caps on the export so a user
+    // with > 2 GiB of data doesn't write a backup they can never restore.
+    let mut total_uncompressed: u64 = 0;
+    let mut entry_count: usize = 0;
+
     for entry in walkdir::WalkDir::new(&data_dir)
         .into_iter()
         .filter_map(|e| e.ok())
@@ -1811,11 +1833,33 @@ pub fn export_zip(
         {
             continue;
         }
+        let size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+        if size > MAX_PER_FILE_BYTES {
+            return Err(format!(
+                "backup entry '{name}' would exceed {} bytes — delete the attachment first",
+                MAX_PER_FILE_BYTES
+            ));
+        }
+        total_uncompressed = total_uncompressed.saturating_add(size);
+        if total_uncompressed > MAX_UNCOMPRESSED_BYTES {
+            return Err(format!(
+                "backup would exceed {} uncompressed bytes — delete some attachments first",
+                MAX_UNCOMPRESSED_BYTES
+            ));
+        }
+        entry_count += 1;
+        if entry_count > MAX_ENTRY_COUNT {
+            return Err(format!(
+                "backup would contain more than {} entries",
+                MAX_ENTRY_COUNT
+            ));
+        }
         zip.start_file(name, opts).map_err(err)?;
+        // EI-V0.5-13 — stream the file into the zip instead of loading
+        // it into a Vec<u8> first. Saves the per-file RAM spike on
+        // multi-MiB attachments.
         let mut f = File::open(path).map_err(err)?;
-        let mut buf = Vec::new();
-        f.read_to_end(&mut buf).map_err(err)?;
-        zip.write_all(&buf).map_err(err)?;
+        std::io::copy(&mut f, &mut zip).map_err(err)?;
     }
 
     // EI-02: fsync the zip so a crash within milliseconds of the success

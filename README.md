@@ -8,15 +8,21 @@ Google Keep is great until the internet goes out. Keepr gives you the same look,
 
 ## Features
 
-- Card masonry grid (pinned + others sections)
-- Text notes and checklists (text ↔ checklist round-trips losslessly via GFM-style `- [x]` markers)
-- 12 Keep colors (light + dark variants)
-- Labels with chip filtering
-- Search across title, body, and checklist items
-- Archive and Trash with restore
-- Manual ZIP export / import with zip-slip + zip-bomb defenses and a `.prev` snapshot the restore can roll back to
-- Light / dark theme
-- Native Windows installer (`.msi` + `.nsis`); see Roadmap for the upcoming portable-EXE bundle
+**Capture & edit** — Text notes and checklists, lossless `setKind` round-trip via GFM `- [x]` markers, multi-image attachments (paste / drop / file pick), inline `#hashtag` labels (auto-create + auto-detach on text removal), time-based reminders with native Windows toast, "Make a copy" duplicate.
+
+**Organize** — 12 Keep colors (light + dark paired variants), labels with chip filtering + per-label note counts in sidebar, pin/archive/trash with configurable retention + days-left badge.
+
+**Find & view** — Debounced search across title/body/checklist, filter chips (type / color / label / pinned), grid + list view modes, sort by Modified / Created / Title / Custom (drag-reorder in Custom mode).
+
+**Power user** — Keep's canonical keyboard shortcuts (`c` / `l` / `/` / `?` / `j` / `k` / `f` / `e` / `#` / `Ctrl+G` / `Ctrl+A`) with a `?` help overlay, multi-select + bulk actions (pin / color / labels tri-state / archive / trash / restore / delete forever).
+
+**System integration** — System-tray icon with show-hide + new-note + quit menu, `Ctrl+Alt+N` global hotkey quick-capture, single-instance guard.
+
+**Backup & migration** — Manual ZIP export / import with zip-slip + zip-bomb defenses and `.prev` rollback, auto-backup schedule (daily / weekly to your Drive folder), Markdown vault export (one `.md` per note + YAML frontmatter + `_resources/`), Google Takeout import (preserves chronology + reminders + labels + attachments).
+
+**Theme** — Light / Dark / System (follows OS), masonry grid, full keyboard accessibility, WCAG AAA contrast across all 24 color combinations.
+
+**Distribution** — Unsigned NSIS / MSI installer + portable `.zip` published to GitHub Releases on every tag. See [Install](#install).
 
 ## Where Keepr stores your data
 

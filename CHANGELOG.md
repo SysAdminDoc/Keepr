@@ -6,6 +6,25 @@ All notable changes to Keepr are documented here. Format loosely follows [Keep a
 
 (See [ROADMAP.md](ROADMAP.md) for the live task list.)
 
+## [0.5.1] — 2026-05-26 — polish nice-to-haves
+
+### Added
+
+- **NF-V0.5-H** Per-label note counts in the sidebar. Each label row shows a tabular-nums count to the right of the name; `aria-label` reads "<name>, N notes" for screen readers; collapsed sidebar hides the number. Memoised from `store.notes` so the count updates optimistically on every label toggle.
+- **NF-V0.5-I** Paste image from clipboard + drag-drop file into the editor. New `add_image_attachment_bytes(note_id, bytes, mime, filename_hint)` Rust command stages clipboard/drop bytes to `%TEMP%`, reuses the existing add-image flow (thumbnail + DB insert + rollback), then deletes the temp file. Editor wraps a 2-px blue ring around itself during drag-over for affordance. MIME whitelist matches the file-picker (png/jpg/gif/webp).
+
+### Improved
+
+- **EI-V0.5-13** Backup pipeline polish.
+  - `export_zip` mirrors the import-side caps (10 000 entries, 512 MiB per file, 2 GiB total uncompressed). A user with too much attachment data now gets a clear error at export time instead of writing a backup they can't restore.
+  - `export_zip` streams each file into the zip via `std::io::copy` instead of buffering into a `Vec<u8>` — eliminates the per-file RAM spike on multi-MiB attachments.
+  - Takeout import: insert the attachments row FIRST, then write the bytes; on write failure DELETE the row so the DB never references a missing blob (mirrors `add_image_attachment`'s rollback pattern).
+- **EI-V0.5-15** `aria-pressed` audit. Toggle-state `IconBtn` callsites (color picker, label menu, bulk pin) now pass `pressed={state}` so screen readers announce active/inactive state.
+- **EI-V0.5-16** Docs catch-up.
+  - README "Features" rewritten to reflect v0.5 state — covered 19 user-visible capabilities across capture/organize/find/power/system/backup/theme/distribution.
+  - CONTRIBUTING project-layout updated with `src/hooks/`, `src/lib/`, `keep-palette.js`, capabilities config, both CI workflows, and the v0.5 research file.
+  - SECURITY.md gained a "Surfaces added since v0.4.0" section covering tray + global hotkey + custom protocol + reminder scheduler + auto-backup. Threat list updated to credit the v0.4.1 single-instance fix.
+
 ## [0.5.0] — 2026-05-26 — "Polish & Reliability"
 
 Closes every P1 from the [v0.5 audit](RESEARCH_FEATURE_PLAN_v0.5.md), raises automated test coverage to 89 (20 cargo + 69 vitest, up from 8 + 49), ships image thumbnails so card grids no longer decode full-res JPEGs, and — for the first time — publishes installable Windows binaries via GitHub Actions. Unsigned per the open-question resolution; first-launch SmartScreen warning expected. See [SECURITY.md](SECURITY.md).

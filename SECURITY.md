@@ -14,9 +14,18 @@ Keepr is a single-user, offline-first desktop app. It does **not** make outbound
 
 The threats it does **not** currently defend against (and where to expect future work):
 
-- **Stolen unlocked laptop.** Notes are plaintext SQLite. NF-10 (App Lock + Private Vault) will add this.
-- **Adversary with disk write access while Keepr is open.** A second writer to `keepr.db` outside Keepr's mutex is not detected.
-- **Local resource exhaustion.** The 2 GiB total + 512 MiB per-file uncompressed caps on import are sized for normal use, not a malicious operator with admin access.
+- **Stolen unlocked laptop.** Notes are plaintext SQLite. NF-V0.5-C (App Lock + Private Vault) will add this in v0.6+.
+- **Adversary with disk write access while Keepr is open.** A second writer to `keepr.db` outside Keepr's mutex is not detected. The single-instance plugin (v0.4.1) prevents the most common case — two `keepr.exe` processes — but doesn't protect against external tools.
+- **Local resource exhaustion.** The 2 GiB total + 512 MiB per-file uncompressed caps on both import AND export (v0.5.0+) are sized for normal use, not a malicious operator with admin access.
+- **Notification loss on permission denial.** Reminders fail-soft to the next 30 s sweep (v0.4.1 fix). If Windows Notifications are globally disabled, every sweep will fail and the reminder never visibly fires.
+
+### Surfaces added since v0.4.0
+
+- **System tray icon** with a Quit menu item. Closing the main window via the title-bar X minimizes to tray instead of exiting; Quit is the only intentional process termination.
+- **Global hotkey `Ctrl+Alt+N`** for quick-capture. Registration failure now surfaces as an in-app toast.
+- **`keepr-resource://` custom protocol** serves attachment blobs from `<data_dir>/resources/<id>.<ext>` and the v0.5 sibling thumbnail at `<id>.thumb.jpg`. Path-safety check rejects `..`, `/`, `\` in the id; CSP allows the scheme as `img-src` only.
+- **Reminder scheduler thread** runs every 30 s, queries pending reminders, fires native toasts. Marks `fired_at` only on successful `notification.show()` (v0.4.1 fix) so a failed permission doesn't lose data.
+- **Auto-backup tick** runs every 30 min in the renderer; writes ZIPs into a user-picked folder. No background-process surface — only runs while Keepr is open.
 
 ## Reporting a vulnerability
 
