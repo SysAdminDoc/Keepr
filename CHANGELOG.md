@@ -6,6 +6,25 @@ All notable changes to Keepr are documented here. Format loosely follows [Keep a
 
 (See [ROADMAP.md](ROADMAP.md) for the live task list.)
 
+## [0.6.0] — 2026-05-26 — "Reminders v2"
+
+Adds recurrence + snooze to the reminder system, a dedicated Reminders section in the sidebar, and an in-app fire toast so reminders aren't lost when the OS coalesces notifications. The schema gains an optional `rrule` column (whitelisted to `FREQ=DAILY|WEEKLY|MONTHLY|YEARLY`) and `snooze_until` is now honoured by the scheduler.
+
+### Added
+
+- **NF-V0.5-A** Reminders v2.
+  - `set_reminder(note_id, fire_at, rrule)` accepts an optional whitelisted RRULE. New `snooze_reminder(note_id, until)` Tauri command. Rust-side `next_fire_at(prev, rrule)` advances on each fire (chrono `Duration` + `Months` with leap-day clamp); single-shot reminders behave exactly as before.
+  - `mark_reminder_fired` now advances `fire_at` for recurring reminders (leaving `fired_at` NULL so the bell stays lit) and only sets `fired_at` for single-shot ones.
+  - Sidebar gains a **Reminders** entry under Notes with a live count of active reminders (excluding fired single-shots and dismissed). The section orders notes by next-due ascending, honouring `snooze_until` when later than `fire_at`.
+  - `ReminderPicker` extended with a recurrence dropdown (None / Daily / Weekly / Monthly / Yearly), a Snooze panel (10 min / 1 hour / Tomorrow / Custom) that only appears while editing an existing reminder, and a "Remove reminder" footer.
+  - NoteCard reminder badge shows the effective fire (snooze-aware) and the recurrence label inline (`Tomorrow, 8:00 AM · daily`).
+  - In-app toast on `keepr://reminder-fired` with a "View note" action that opens the editor — covers the case where the OS suppresses notifications for the focused window.
+
+### Tests
+
+- **24 cargo tests** (up from 20): 4 new — `next_fire_at_handles_supported_rrules`, `validate_rrule_rejects_unknown`, `mark_reminder_fired_advances_recurring`, `mark_reminder_fired_single_shot_sets_fired_at`.
+- **75 vitest cases** (up from 69): new `reminders.test.ts` covers the four helpers (`effectiveFireAt`, `isActive`, `recurrenceLabel`, `compareByDue`) and the Reminders-section variant of `filterNotes`.
+
 ## [0.5.1] — 2026-05-26 — polish nice-to-haves
 
 ### Added

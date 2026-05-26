@@ -44,26 +44,32 @@ Audit P1 batch + first bundled-release pipeline. Full notes in [CHANGELOG.md](CH
 
 ---
 
-## Phase C — v0.5.1 polish nice-to-haves
+## Phase C — v0.5.1 polish nice-to-haves — SHIPPED 2026-05-26
 
-- [ ] **EI-V0.5-10** — Refactor mega-files (`commands.rs` split; extract `<ChecklistSection>` + `<EditorToolbar>` from `NoteEditor.tsx`; sectionise `SettingsModal.tsx`)
-- [ ] **EI-V0.5-11** — Drop unused capability permissions
-- [ ] **EI-V0.5-12** — Scheduler shutdown via tokio task (cancel cleanly on app exit)
-- [ ] **EI-V0.5-13** — Backup pipeline polish (stream files into zip, mirror import caps to export, insert-then-write order on Takeout)
-- [ ] **EI-V0.5-14** — Reminder schema cleanup (drop unused `reminders.id`, add CHECK on `fire_at`)
-- [ ] **EI-V0.5-15** — Toolbar density (kebab "More" overflow) + `aria-pressed` audit across `IconBtn` callsites
-- [ ] **EI-V0.5-16** — Docs catch-up (README features list, SECURITY threat model, CONTRIBUTING project-layout, stale-banner)
-- [ ] **EI-V0.5-17** — Code-split secondary modals via `React.lazy`; tree-shake lucide-react
-- [ ] **EI-V0.5-18** — Nits batch (drag-handle whitespace, duplicate re-opens copy, "Later today" label after 6 PM, rename `nextWeek` → `nextMonday`, delete `_UnusedX` + `void useStore`, BulkActionBar Restore icon, `convertFileSrc` memoization, etc.)
-- [ ] **NF-V0.5-H** — Per-label note counts in sidebar
-- [ ] **NF-V0.5-I** — Paste image from clipboard + drag-drop onto editor
-- [ ] **NF-V0.5-J** — `tauri-plugin-log` + Settings → Open log
+Selective; the items most visible to users landed, the heavier refactors slip to v0.5.2+. Full notes in [CHANGELOG.md](CHANGELOG.md).
+
+- [x] **EI-V0.5-11** — Drop unused capability permissions
+- [x] **EI-V0.5-13** — Backup pipeline polish (stream files into zip, mirror import caps to export, insert-then-write order on Takeout)
+- [x] **EI-V0.5-15** (partial) — `aria-pressed` audit across `IconBtn` callsites (kebab overflow deferred)
+- [x] **EI-V0.5-16** — Docs catch-up (README features list, SECURITY threat model, CONTRIBUTING project-layout)
+- [x] **EI-V0.5-18** — Nits batch (rename `nextWeek` → `nextMonday`, delete `_UnusedX` + `void useStore`, BulkActionBar Restore icon, etc.)
+- [x] **NF-V0.5-H** — Per-label note counts in sidebar
+- [x] **NF-V0.5-I** — Paste image from clipboard + drag-drop onto editor
+- [ ] **EI-V0.5-10** — Refactor mega-files (`commands.rs` split; extract `<ChecklistSection>` + `<EditorToolbar>` from `NoteEditor.tsx`; sectionise `SettingsModal.tsx`) — deferred to v0.6.1
+- [ ] **EI-V0.5-12** — Scheduler shutdown via tokio task — deferred
+- [ ] **EI-V0.5-14** — Reminder schema cleanup (drop unused `reminders.id`, add CHECK on `fire_at`) — deferred
+- [ ] **EI-V0.5-15** (rest) — Kebab "More" overflow on the editor toolbar — deferred
+- [ ] **EI-V0.5-17** — Code-split secondary modals via `React.lazy`; tree-shake lucide-react — deferred
+- [ ] **NF-V0.5-J** — `tauri-plugin-log` + Settings → Open log — deferred
 
 ---
 
-## Phase D — v0.6 "Reminders v2 + Vault" (one of two as headliner)
+## Phase D — v0.6.0 "Reminders v2" — SHIPPED 2026-05-26
 
-- [ ] **NF-V0.5-A** — Reminders v2 (recurrence + dedicated sidebar section + snooze actions + in-app toast on fire) [P1, L]
+- [x] **NF-V0.5-A** — Reminders v2 (recurrence whitelist `FREQ=DAILY|WEEKLY|MONTHLY|YEARLY`, dedicated Reminders sidebar section, snooze panel, in-app fire toast with View-note action)
+
+## Phase D — v0.7 "App Lock" — NEXT
+
 - [ ] **NF-V0.5-C** — App Lock + Private Vault (Notesnook two-tier model, Argon2id + XChaCha20-Poly1305) [P2, XL]
 
 ---
