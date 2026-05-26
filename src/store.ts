@@ -65,6 +65,12 @@ interface UIState {
   appLockEnabled: boolean;
   /** Idle minutes before the UI auto-locks. */
   lockAfterMinutes: number;
+  /** NF-V0.5-C — Private Vault state. `initialized` = a vault DEK is
+   *  wrapped on disk; `unlocked` = the renderer has unlocked it via
+   *  unlock_vault. When unlocked = false, every vault note arrives with
+   *  empty title/body/checklist and the UI shows a locked placeholder. */
+  vaultInitialized: boolean;
+  vaultUnlocked: boolean;
   load: () => Promise<void>;
   setSection: (s: Section) => void;
   setSearch: (q: string) => void;
@@ -119,6 +125,9 @@ interface UIState {
   lock: () => void;
   /** After a settings change (enable/disable/change minutes). */
   refreshAppLockState: () => Promise<void>;
+  /** Reload vault status from Rust + re-fetch notes (so vaulted rows
+   *  flip between locked-placeholder and decrypted). */
+  refreshVaultState: () => Promise<void>;
   /** @internal — used by the system-theme matchMedia listener. */
   _setDarkFromSystem: (dark: boolean) => void;
 }
@@ -262,6 +271,8 @@ export const useStore = create<UIState>((set, get) => ({
   locked: false,
   appLockEnabled: false,
   lockAfterMinutes: 5,
+  vaultInitialized: false,
+  vaultUnlocked: false,
   load: async () => {
     try {
       const [notes, labels, reminders] = await Promise.all([
@@ -454,6 +465,12 @@ export const useStore = create<UIState>((set, get) => ({
   lock: () => {
     const s = get();
     if (s.appLockEnabled) set({ locked: true });
+    // NF-V0.5-C — locking the UI also drops the unlocked vault DEK so
+    // an attacker grabbing the laptop while Keepr is locked can't peek
+    // at vault notes via the Rust backend's still-resident key.
+    if (s.vaultUnlocked) {
+      void api.lockVault().then(() => s.refreshVaultState());
+    }
   },
   refreshAppLockState: async () => {
     try {
@@ -464,6 +481,19 @@ export const useStore = create<UIState>((set, get) => ({
       });
     } catch {
       /* ignore */
+    }
+  },
+  refreshVaultState: async () => {
+    try {
+      const status = await api.getVaultStatus();
+      set({
+        vaultInitialized: status.initialized,
+        vaultUnlocked: status.unlocked,
+      });
+      // Reload notes so vaulted rows flip between locked/unlocked text.
+      await get().load();
+    } catch {
+      /* ignore — older Rust binary may not have the command */
     }
   },
 }));

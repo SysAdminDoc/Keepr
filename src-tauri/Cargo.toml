@@ -1,6 +1,6 @@
 [package]
 name = "keepr"
-version = "0.7.0"
+version = "0.8.0"
 description = "Offline-first Google Keep clone"
 authors = ["Matthew Ashton"]
 edition = "2021"
@@ -35,6 +35,12 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg",
 # column. `std` for OsRng.
 argon2 = { version = "0.5", features = ["std"] }
 password-hash = "0.5"
+# Private Vault (NF-V0.5-C / 2 of 2): authenticated symmetric crypto.
+# XChaCha20-Poly1305 picks a 24-byte nonce so we can sample one per
+# encrypt without birthday-bound worries. `getrandom` for OsRng.
+chacha20poly1305 = { version = "0.10", features = ["std"] }
+getrandom = "0.2"
+zeroize = { version = "1", features = ["zeroize_derive"] }
 
 [dev-dependencies]
 tempfile = "3"

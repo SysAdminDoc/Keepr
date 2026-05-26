@@ -41,6 +41,8 @@ export interface Attachment {
   createdAt: string;
 }
 
+export type VaultState = "plain" | "vault";
+
 export interface Note {
   id: string;
   kind: NoteKind;
@@ -57,6 +59,13 @@ export interface Note {
   checklist: ChecklistItem[];
   labels: string[];
   attachments: Attachment[];
+  /** NF-V0.5-C — "plain" (default) or "vault". When "vault" and the
+   *  vault is locked, title/body/checklist arrive empty and the UI
+   *  must show a "🔒 Locked vault note" placeholder. When unlocked,
+   *  the fields are decrypted server-side and behave like a normal note.
+   *  Optional so pre-v0.8 fixtures and Rust payloads without the field
+   *  (older binaries) still deserialize cleanly. */
+  vault?: VaultState;
 }
 
 export interface NoteInput {

@@ -50,6 +50,15 @@ pub struct Note {
     pub checklist: Vec<ChecklistItem>,
     pub labels: Vec<String>, // label IDs
     pub attachments: Vec<Attachment>,
+    /// NF-V0.5-C — "plain" or "vault". When "vault" + DEK is unlocked,
+    /// title/body/checklist are decrypted before being returned. When
+    /// "vault" + DEK is locked, the renderer shows a "🔒 Locked" card.
+    #[serde(default = "default_vault_state")]
+    pub vault: String,
+}
+
+fn default_vault_state() -> String {
+    "plain".to_string()
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -120,50 +129,115 @@ fn validate_note_input(input: &NoteInput) -> Result<(), String> {
 }
 
 fn load_note(conn: &Connection, id: &str) -> Result<Option<Note>, rusqlite::Error> {
+    load_note_with_vault(conn, id, None)
+}
+
+/// NF-V0.5-C — `load_note` variant that decrypts a vault note in place
+/// if the caller passes the unlocked DEK. Without the DEK, vault notes
+/// come back with empty title/body/checklist + `vault = "vault"` so the
+/// renderer can show the lock placeholder.
+fn load_note_with_vault(
+    conn: &Connection,
+    id: &str,
+    dek: Option<&crate::vault::Dek>,
+) -> Result<Option<Note>, rusqlite::Error> {
     let mut stmt = conn.prepare(
         "SELECT id, kind, title, body, color, pinned, archived, trashed, position,
-                created_at, updated_at, trashed_at
+                created_at, updated_at, trashed_at, vault, vault_ciphertext
          FROM notes WHERE id = ?1",
     )?;
-    let note_opt = stmt
+    let row_opt = stmt
         .query_row(params![id], |row| {
-            Ok(Note {
-                id: row.get(0)?,
-                kind: row.get(1)?,
-                title: row.get(2)?,
-                body: row.get(3)?,
-                color: row.get(4)?,
-                pinned: row.get::<_, i64>(5)? != 0,
-                archived: row.get::<_, i64>(6)? != 0,
-                trashed: row.get::<_, i64>(7)? != 0,
-                position: row.get(8)?,
-                created_at: row.get(9)?,
-                updated_at: row.get(10)?,
-                trashed_at: row.get(11)?,
-                checklist: vec![],
-                labels: vec![],
-                attachments: vec![],
-            })
+            let id: String = row.get(0)?;
+            let kind: String = row.get(1)?;
+            let mut title: String = row.get(2)?;
+            let mut body: String = row.get(3)?;
+            let color: String = row.get(4)?;
+            let pinned = row.get::<_, i64>(5)? != 0;
+            let archived = row.get::<_, i64>(6)? != 0;
+            let trashed = row.get::<_, i64>(7)? != 0;
+            let position: i64 = row.get(8)?;
+            let created_at: String = row.get(9)?;
+            let updated_at: String = row.get(10)?;
+            let trashed_at: Option<String> = row.get(11)?;
+            let vault_state: String = row.get(12)?;
+            let ct_hex: Option<String> = row.get(13)?;
+            let mut vault_checklist: Vec<ChecklistItem> = Vec::new();
+            if vault_state == "vault" {
+                match (dek, ct_hex) {
+                    (Some(dek), Some(hex)) => {
+                        if let Ok(bundle) = crate::vault::from_hex(&hex) {
+                            if let Ok(payload) = crate::vault::decrypt_note(dek, &id, &bundle) {
+                                title = payload.title;
+                                body = payload.body;
+                                vault_checklist = payload
+                                    .checklist
+                                    .into_iter()
+                                    .map(|i| ChecklistItem {
+                                        id: i.id,
+                                        text: i.text,
+                                        checked: i.checked,
+                                        position: i.position,
+                                    })
+                                    .collect();
+                            }
+                        }
+                    }
+                    _ => {
+                        title = String::new();
+                        body = String::new();
+                    }
+                }
+            }
+            Ok((
+                Note {
+                    id,
+                    kind,
+                    title,
+                    body,
+                    color,
+                    pinned,
+                    archived,
+                    trashed,
+                    position,
+                    created_at,
+                    updated_at,
+                    trashed_at,
+                    checklist: vec![],
+                    labels: vec![],
+                    attachments: vec![],
+                    vault: vault_state.clone(),
+                },
+                vault_state,
+                vault_checklist,
+            ))
         })
         .optional()?;
-    let Some(mut note) = note_opt else {
+    let Some((mut note, vault_state, vault_checklist)) = row_opt else {
         return Ok(None);
     };
-    let mut cstmt = conn.prepare(
-        "SELECT id, text, checked, position FROM checklist_items
-         WHERE note_id = ?1 ORDER BY position ASC, rowid ASC",
-    )?;
-    let items = cstmt
-        .query_map(params![id], |row| {
-            Ok(ChecklistItem {
-                id: row.get(0)?,
-                text: row.get(1)?,
-                checked: row.get::<_, i64>(2)? != 0,
-                position: row.get(3)?,
-            })
-        })?
-        .collect::<Result<Vec<_>, _>>()?;
-    note.checklist = items;
+    if vault_state == "vault" {
+        // Checklist for vault notes lives inside the encrypted payload,
+        // not in `checklist_items`. Use whatever decrypt_note recovered
+        // (empty when the vault is locked).
+        note.checklist = vault_checklist;
+    } else {
+        let mut cstmt = conn.prepare(
+            "SELECT id, text, checked, position FROM checklist_items
+             WHERE note_id = ?1 ORDER BY position ASC, rowid ASC",
+        )?;
+        let items = cstmt
+            .query_map(params![id], |row| {
+                Ok(ChecklistItem {
+                    id: row.get(0)?,
+                    text: row.get(1)?,
+                    checked: row.get::<_, i64>(2)? != 0,
+                    position: row.get(3)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        note.checklist = items;
+    }
     let mut lstmt =
         conn.prepare("SELECT label_id FROM note_labels WHERE note_id = ?1")?;
     let labels: Vec<String> = lstmt
@@ -205,34 +279,116 @@ pub fn list_notes(state: State<'_, AppState>) -> Result<Vec<Note>, String> {
     let mut nstmt = conn
         .prepare(
             "SELECT id, kind, title, body, color, pinned, archived, trashed, position,
-                    created_at, updated_at, trashed_at
+                    created_at, updated_at, trashed_at, vault, vault_ciphertext
              FROM notes
              ORDER BY pinned DESC, updated_at DESC",
         )
         .map_err(err)?;
-    let mut notes: Vec<Note> = nstmt
-        .query_map([], |row| {
-            Ok(Note {
-                id: row.get(0)?,
-                kind: row.get(1)?,
-                title: row.get(2)?,
-                body: row.get(3)?,
-                color: row.get(4)?,
-                pinned: row.get::<_, i64>(5)? != 0,
-                archived: row.get::<_, i64>(6)? != 0,
-                trashed: row.get::<_, i64>(7)? != 0,
-                position: row.get(8)?,
-                created_at: row.get(9)?,
-                updated_at: row.get(10)?,
-                trashed_at: row.get(11)?,
-                checklist: Vec::new(),
-                labels: Vec::new(),
-                attachments: Vec::new(),
-            })
-        })
-        .map_err(err)?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(err)?;
+    // We collect (Note, vault_ciphertext) so we can decrypt vault rows
+    // after the rest of the query runs without holding the prepared
+    // statement borrow.
+    let dek_guard = state.vault_dek.lock();
+    let dek_opt = dek_guard.as_ref();
+    let mut notes: Vec<Note> = Vec::new();
+    let mut crows = nstmt.query([]).map_err(err)?;
+    while let Some(row) = crows.next().map_err(err)? {
+        let id: String = row.get(0).map_err(err)?;
+        let vault_state: String = row.get(12).map_err(err)?;
+        let mut title: String = row.get(2).map_err(err)?;
+        let mut body: String = row.get(3).map_err(err)?;
+        let mut vault_label = vault_state.clone();
+        if vault_state == "vault" {
+            if let Some(dek) = dek_opt {
+                let ct_hex: Option<String> = row.get(13).map_err(err)?;
+                if let Some(hex) = ct_hex {
+                    if let Ok(bundle) = crate::vault::from_hex(&hex) {
+                        if let Ok(payload) = crate::vault::decrypt_note(dek, &id, &bundle) {
+                            title = payload.title;
+                            body = payload.body;
+                            // Keep vault_label = "vault" so the UI knows
+                            // to show the unlocked vault badge.
+                        }
+                    }
+                }
+            } else {
+                // Vault is locked — surface placeholders. The frontend
+                // discriminates on `vault === "vault"` to render the
+                // lock icon.
+                title = String::new();
+                body = String::new();
+                vault_label = "vault".to_string();
+            }
+        }
+        notes.push(Note {
+            id,
+            kind: row.get(1).map_err(err)?,
+            title,
+            body,
+            color: row.get(4).map_err(err)?,
+            pinned: row.get::<_, i64>(5).map_err(err)? != 0,
+            archived: row.get::<_, i64>(6).map_err(err)? != 0,
+            trashed: row.get::<_, i64>(7).map_err(err)? != 0,
+            position: row.get(8).map_err(err)?,
+            created_at: row.get(9).map_err(err)?,
+            updated_at: row.get(10).map_err(err)?,
+            trashed_at: row.get(11).map_err(err)?,
+            checklist: Vec::new(),
+            labels: Vec::new(),
+            attachments: Vec::new(),
+            vault: vault_label,
+        });
+    }
+    drop(crows);
+    drop(nstmt);
+    let vault_unlocked = dek_opt.is_some();
+    drop(dek_guard);
+    // For vault rows we also need to decrypt and pull the checklist from
+    // the encrypted payload (the rows table is empty for those notes).
+    // The plain-text loop below covers all rows, so vault checklists are
+    // already in place — only restore-time decrypt is needed when the
+    // vault is unlocked.
+    if vault_unlocked {
+        // Re-decrypt to recover checklist for "vault" rows.
+        let dek_guard = state.vault_dek.lock();
+        let dek = dek_guard.as_ref().expect("we just confirmed it");
+        let mut stmt = conn
+            .prepare("SELECT id, vault_ciphertext FROM notes WHERE vault = 'vault'")
+            .map_err(err)?;
+        let mut rows = stmt.query([]).map_err(err)?;
+        let mut decrypted: std::collections::HashMap<String, Vec<ChecklistItem>> =
+            std::collections::HashMap::new();
+        while let Some(row) = rows.next().map_err(err)? {
+            let id: String = row.get(0).map_err(err)?;
+            let hex: Option<String> = row.get(1).map_err(err)?;
+            if let Some(hex) = hex {
+                if let Ok(bundle) = crate::vault::from_hex(&hex) {
+                    if let Ok(payload) = crate::vault::decrypt_note(dek, &id, &bundle) {
+                        let items: Vec<ChecklistItem> = payload
+                            .checklist
+                            .into_iter()
+                            .map(|i| ChecklistItem {
+                                id: i.id,
+                                text: i.text,
+                                checked: i.checked,
+                                position: i.position,
+                            })
+                            .collect();
+                        decrypted.insert(id, items);
+                    }
+                }
+            }
+        }
+        drop(rows);
+        drop(stmt);
+        drop(dek_guard);
+        for n in notes.iter_mut() {
+            if n.vault == "vault" {
+                if let Some(items) = decrypted.remove(&n.id) {
+                    n.checklist = items;
+                }
+            }
+        }
+    }
 
     // Build an id -> Vec index for in-place stitching.
     use std::collections::HashMap;
@@ -303,8 +459,9 @@ pub fn list_notes(state: State<'_, AppState>) -> Result<Vec<Note>, String> {
 
 #[tauri::command]
 pub fn get_note(state: State<'_, AppState>, id: String) -> Result<Option<Note>, String> {
+    let dek_guard = state.vault_dek.lock();
     let conn = state.db.lock();
-    load_note(&conn, &id).map_err(err)
+    load_note_with_vault(&conn, &id, dek_guard.as_ref()).map_err(err)
 }
 
 #[tauri::command]
@@ -377,6 +534,7 @@ pub fn create_note(state: State<'_, AppState>, input: NoteInput) -> Result<Note,
         checklist: checklist_out,
         labels: input.labels,
         attachments: Vec::new(),
+        vault: "plain".to_string(),
     })
 }
 
@@ -390,53 +548,107 @@ pub fn update_note(
         return Err("a restore is currently in progress".into());
     }
     validate_note_input(&input)?;
+    let dek_guard = state.vault_dek.lock();
     let mut conn = state.db.lock();
     let tx = conn.transaction().map_err(err)?;
     let now = now_iso();
     // Read created_at + archived/trashed flags so the returned Note
-    // accurately reflects what's on disk (we don't change those fields here).
-    let (created_at, archived, trashed, trashed_at, position): (String, i64, i64, Option<String>, i64) =
-        tx.query_row(
-            "SELECT created_at, archived, trashed, trashed_at, position FROM notes WHERE id = ?1",
+    // accurately reflects what's on disk (we don't change those fields
+    // here). `vault` decides whether we write plaintext columns or
+    // re-encrypt into vault_ciphertext.
+    let (created_at, archived, trashed, trashed_at, position, vault_state): (
+        String,
+        i64,
+        i64,
+        Option<String>,
+        i64,
+        String,
+    ) = tx
+        .query_row(
+            "SELECT created_at, archived, trashed, trashed_at, position, vault \
+             FROM notes WHERE id = ?1",
             params![id],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?)),
         )
         .map_err(|_| format!("note {id} not found"))?;
-    tx.execute(
-        "UPDATE notes
-           SET kind = ?1, title = ?2, body = ?3, color = ?4, pinned = ?5, updated_at = ?6
-         WHERE id = ?7",
-        params![
-            input.kind,
-            input.title,
-            input.body,
-            input.color,
-            input.pinned as i64,
-            now,
-            id,
-        ],
-    )
-    .map_err(err)?;
-    tx.execute("DELETE FROM checklist_items WHERE note_id = ?1", params![id])
-        .map_err(err)?;
+    let is_vault = vault_state == "vault";
+    if is_vault && dek_guard.is_none() {
+        return Err("vault is locked — unlock it before editing this note".into());
+    }
+    // Pre-assign ids for new checklist items so the encrypted payload
+    // and the returned Note agree on ids.
     let mut checklist_out: Vec<ChecklistItem> = Vec::with_capacity(input.checklist.len());
     for item in &input.checklist {
         let item_id = item
             .id
             .clone()
             .unwrap_or_else(|| Uuid::new_v4().to_string());
-        tx.execute(
-            "INSERT INTO checklist_items (id, note_id, text, checked, position)
-             VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![item_id, id, item.text, item.checked as i64, item.position],
-        )
-        .map_err(err)?;
         checklist_out.push(ChecklistItem {
             id: item_id,
             text: item.text.clone(),
             checked: item.checked,
             position: item.position,
         });
+    }
+    if is_vault {
+        let dek = dek_guard.as_ref().expect("checked above");
+        let payload = crate::vault::VaultPayload {
+            title: input.title.clone(),
+            body: input.body.clone(),
+            checklist: checklist_out
+                .iter()
+                .map(|c| crate::vault::VaultChecklistItem {
+                    id: c.id.clone(),
+                    text: c.text.clone(),
+                    checked: c.checked,
+                    position: c.position,
+                })
+                .collect(),
+        };
+        let bundle = crate::vault::encrypt_note(dek, &id, &payload).map_err(|e| e.to_string())?;
+        tx.execute(
+            "UPDATE notes
+               SET kind = ?1, title = '', body = '', color = ?2, pinned = ?3, updated_at = ?4,
+                   vault_ciphertext = ?5
+             WHERE id = ?6",
+            params![
+                input.kind,
+                input.color,
+                input.pinned as i64,
+                now,
+                crate::vault::to_hex(&bundle),
+                id,
+            ],
+        )
+        .map_err(err)?;
+        // Vault rows never carry checklist_items rows — they were
+        // deleted at move_note_to_vault time. Skip the per-row inserts.
+    } else {
+        tx.execute(
+            "UPDATE notes
+               SET kind = ?1, title = ?2, body = ?3, color = ?4, pinned = ?5, updated_at = ?6
+             WHERE id = ?7",
+            params![
+                input.kind,
+                input.title,
+                input.body,
+                input.color,
+                input.pinned as i64,
+                now,
+                id,
+            ],
+        )
+        .map_err(err)?;
+        tx.execute("DELETE FROM checklist_items WHERE note_id = ?1", params![id])
+            .map_err(err)?;
+        for item in &checklist_out {
+            tx.execute(
+                "INSERT INTO checklist_items (id, note_id, text, checked, position)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![item.id, id, item.text, item.checked as i64, item.position],
+            )
+            .map_err(err)?;
+        }
     }
     tx.execute("DELETE FROM note_labels WHERE note_id = ?1", params![id])
         .map_err(err)?;
@@ -449,6 +661,7 @@ pub fn update_note(
     }
     tx.commit().map_err(err)?;
     drop(conn);
+    drop(dek_guard);
     // Re-read attachments (we don't change them in update_note) for the
     // returned Note. Cheap — one indexed SELECT.
     let conn = state.db.lock();
@@ -470,6 +683,7 @@ pub fn update_note(
         checklist: checklist_out,
         labels: input.labels,
         attachments,
+        vault: vault_state,
     })
 }
 
@@ -512,6 +726,12 @@ pub fn duplicate_note(state: State<'_, AppState>, id: String) -> Result<Note, St
     }
     let mut conn = state.db.lock();
     let source = load_note(&conn, &id).map_err(err)?.ok_or_else(|| format!("note {id} not found"))?;
+    if source.vault == "vault" {
+        // Duplicating a vault note would silently drop its contents
+        // (the row's title/body columns are empty until decrypted). Make
+        // the user move the source out of the vault first.
+        return Err("vault notes cannot be duplicated — move out of the vault first".into());
+    }
     let tx = conn.transaction().map_err(err)?;
     let new_id = Uuid::new_v4().to_string();
     let now = now_iso();
@@ -572,6 +792,7 @@ pub fn duplicate_note(state: State<'_, AppState>, id: String) -> Result<Note, St
         // user can manually re-attach if they really want a copy. Calling
         // it out so the absence isn't a bug.
         attachments: Vec::new(),
+        vault: "plain".to_string(),
     })
 }
 
@@ -1970,6 +2191,270 @@ pub fn set_app_lock_minutes(
     Ok(())
 }
 
+// --- Private Vault (NF-V0.5-C / 2 of 2) -------------------------------------
+//
+// Stores three hex-encoded values in app_settings:
+//   vault_kdf_salt      — 16 bytes (Argon2id salt)
+//   vault_dek_nonce     — 24 bytes (XChaCha20 nonce used to wrap the DEK)
+//   vault_dek_wrapped   — wrapped DEK bundle (XChaCha20-Poly1305 ct + tag)
+// The unlocked DEK lives in `AppState.vault_dek` and is wiped on
+// `lock_vault` or app exit (Drop on Dek zeroizes).
+
+const KEY_VAULT_SALT: &str = "vault_kdf_salt";
+const KEY_VAULT_NONCE: &str = "vault_dek_nonce";
+const KEY_VAULT_WRAPPED: &str = "vault_dek_wrapped";
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VaultStatus {
+    pub initialized: bool,
+    pub unlocked: bool,
+}
+
+fn read_vault_material(
+    conn: &rusqlite::Connection,
+) -> Result<Option<(Vec<u8>, Vec<u8>, Vec<u8>)>, String> {
+    let salt = read_app_setting(conn, KEY_VAULT_SALT)?;
+    let nonce = read_app_setting(conn, KEY_VAULT_NONCE)?;
+    let wrapped = read_app_setting(conn, KEY_VAULT_WRAPPED)?;
+    match (salt, nonce, wrapped) {
+        (Some(s), Some(n), Some(w)) => {
+            let s = crate::vault::from_hex(&s).map_err(|e| e.to_string())?;
+            let n = crate::vault::from_hex(&n).map_err(|e| e.to_string())?;
+            let w = crate::vault::from_hex(&w).map_err(|e| e.to_string())?;
+            Ok(Some((s, n, w)))
+        }
+        _ => Ok(None),
+    }
+}
+
+fn require_unlocked_dek<'a>(
+    guard: &'a parking_lot::MutexGuard<'_, Option<crate::vault::Dek>>,
+) -> Result<&'a crate::vault::Dek, String> {
+    guard
+        .as_ref()
+        .ok_or_else(|| "vault is locked".to_string())
+}
+
+#[tauri::command]
+pub fn get_vault_status(state: State<'_, AppState>) -> Result<VaultStatus, String> {
+    let conn = state.db.lock();
+    let initialized = read_vault_material(&conn)?.is_some();
+    let unlocked = state.vault_dek.lock().is_some();
+    Ok(VaultStatus {
+        initialized,
+        unlocked,
+    })
+}
+
+#[tauri::command]
+pub fn init_vault(state: State<'_, AppState>, password: String) -> Result<(), String> {
+    let conn = state.db.lock();
+    if read_vault_material(&conn)?.is_some() {
+        return Err("vault already initialized".into());
+    }
+    let (init_data, dek) = crate::vault::init(&password).map_err(|e| e.to_string())?;
+    write_app_setting(&conn, KEY_VAULT_SALT, &crate::vault::to_hex(&init_data.salt))?;
+    write_app_setting(&conn, KEY_VAULT_NONCE, &crate::vault::to_hex(&init_data.dek_nonce))?;
+    write_app_setting(
+        &conn,
+        KEY_VAULT_WRAPPED,
+        &crate::vault::to_hex(&init_data.dek_wrapped),
+    )?;
+    drop(conn);
+    *state.vault_dek.lock() = Some(dek);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn unlock_vault(state: State<'_, AppState>, password: String) -> Result<bool, String> {
+    let conn = state.db.lock();
+    let Some((salt, nonce, wrapped)) = read_vault_material(&conn)? else {
+        return Err("vault is not initialized".into());
+    };
+    drop(conn);
+    let salt_arr: [u8; 16] = salt
+        .as_slice()
+        .try_into()
+        .map_err(|_| "vault salt has wrong length".to_string())?;
+    let nonce_arr: [u8; 24] = nonce
+        .as_slice()
+        .try_into()
+        .map_err(|_| "vault dek nonce has wrong length".to_string())?;
+    let dek_opt = crate::vault::unlock(&password, &salt_arr, &nonce_arr, &wrapped)
+        .map_err(|e| e.to_string())?;
+    match dek_opt {
+        Some(dek) => {
+            *state.vault_dek.lock() = Some(dek);
+            Ok(true)
+        }
+        None => Ok(false),
+    }
+}
+
+#[tauri::command]
+pub fn lock_vault(state: State<'_, AppState>) -> Result<(), String> {
+    let mut guard = state.vault_dek.lock();
+    *guard = None; // Dek::drop zeroizes
+    Ok(())
+}
+
+#[tauri::command]
+pub fn change_vault_password(
+    state: State<'_, AppState>,
+    current_password: String,
+    new_password: String,
+) -> Result<(), String> {
+    if new_password.is_empty() {
+        return Err("new vault password must not be empty".into());
+    }
+    // Re-derive KEK from current password to confirm; on success rewrap.
+    let conn = state.db.lock();
+    let Some((salt, nonce, wrapped)) = read_vault_material(&conn)? else {
+        return Err("vault is not initialized".into());
+    };
+    let salt_arr: [u8; 16] = salt
+        .as_slice()
+        .try_into()
+        .map_err(|_| "vault salt has wrong length".to_string())?;
+    let nonce_arr: [u8; 24] = nonce
+        .as_slice()
+        .try_into()
+        .map_err(|_| "vault dek nonce has wrong length".to_string())?;
+    let dek_opt = crate::vault::unlock(&current_password, &salt_arr, &nonce_arr, &wrapped)
+        .map_err(|e| e.to_string())?;
+    let dek = dek_opt.ok_or_else(|| "incorrect current vault password".to_string())?;
+    let rewrapped = crate::vault::rewrap(&dek, &new_password).map_err(|e| e.to_string())?;
+    write_app_setting(&conn, KEY_VAULT_SALT, &crate::vault::to_hex(&rewrapped.salt))?;
+    write_app_setting(
+        &conn,
+        KEY_VAULT_NONCE,
+        &crate::vault::to_hex(&rewrapped.dek_nonce),
+    )?;
+    write_app_setting(
+        &conn,
+        KEY_VAULT_WRAPPED,
+        &crate::vault::to_hex(&rewrapped.dek_wrapped),
+    )?;
+    // Keep vault unlocked with the same DEK so the user doesn't have to
+    // re-enter the new password right after changing it.
+    *state.vault_dek.lock() = Some(dek);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn move_note_to_vault(state: State<'_, AppState>, id: String) -> Result<Note, String> {
+    if state.importing.load(std::sync::atomic::Ordering::SeqCst) {
+        return Err("a restore is currently in progress".into());
+    }
+    let dek_guard = state.vault_dek.lock();
+    let dek = require_unlocked_dek(&dek_guard)?;
+    let mut conn = state.db.lock();
+    let tx = conn.transaction().map_err(err)?;
+    let (title, body, vault_state): (String, String, String) = tx
+        .query_row(
+            "SELECT title, body, vault FROM notes WHERE id = ?1",
+            params![id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .map_err(err)?;
+    if vault_state == "vault" {
+        return Err("note is already in the vault".into());
+    }
+    let checklist: Vec<crate::vault::VaultChecklistItem> = tx
+        .prepare(
+            "SELECT id, text, checked, position FROM checklist_items \
+             WHERE note_id = ?1 ORDER BY position, id",
+        )
+        .map_err(err)?
+        .query_map(params![id], |r| {
+            Ok(crate::vault::VaultChecklistItem {
+                id: r.get(0)?,
+                text: r.get(1)?,
+                checked: r.get::<_, i64>(2)? != 0,
+                position: r.get(3)?,
+            })
+        })
+        .map_err(err)?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(err)?;
+    let payload = crate::vault::VaultPayload {
+        title,
+        body,
+        checklist,
+    };
+    let bundle = crate::vault::encrypt_note(dek, &id, &payload).map_err(|e| e.to_string())?;
+    let now = chrono::Utc::now().to_rfc3339();
+    tx.execute(
+        "UPDATE notes SET title = '', body = '', vault = 'vault', \
+             vault_ciphertext = ?2, updated_at = ?3 WHERE id = ?1",
+        params![id, crate::vault::to_hex(&bundle), now],
+    )
+    .map_err(err)?;
+    tx.execute(
+        "DELETE FROM checklist_items WHERE note_id = ?1",
+        params![id],
+    )
+    .map_err(err)?;
+    tx.commit().map_err(err)?;
+    drop(dek_guard);
+    drop(conn);
+    get_note(state.clone(), id)
+        .and_then(|opt| opt.ok_or_else(|| "note vanished after vaulting".into()))
+}
+
+#[tauri::command]
+pub fn move_note_out_of_vault(state: State<'_, AppState>, id: String) -> Result<Note, String> {
+    if state.importing.load(std::sync::atomic::Ordering::SeqCst) {
+        return Err("a restore is currently in progress".into());
+    }
+    let dek_guard = state.vault_dek.lock();
+    let dek = require_unlocked_dek(&dek_guard)?;
+    let mut conn = state.db.lock();
+    let tx = conn.transaction().map_err(err)?;
+    let (vault_state, ciphertext_hex): (String, Option<String>) = tx
+        .query_row(
+            "SELECT vault, vault_ciphertext FROM notes WHERE id = ?1",
+            params![id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .map_err(err)?;
+    if vault_state != "vault" {
+        return Err("note is not in the vault".into());
+    }
+    let bundle_hex = ciphertext_hex
+        .ok_or_else(|| "vault note missing ciphertext".to_string())?;
+    let bundle = crate::vault::from_hex(&bundle_hex).map_err(|e| e.to_string())?;
+    let payload = crate::vault::decrypt_note(dek, &id, &bundle).map_err(|e| e.to_string())?;
+    let now = chrono::Utc::now().to_rfc3339();
+    tx.execute(
+        "UPDATE notes SET title = ?2, body = ?3, vault = 'plain', \
+             vault_ciphertext = NULL, updated_at = ?4 WHERE id = ?1",
+        params![id, payload.title, payload.body, now],
+    )
+    .map_err(err)?;
+    // Restore checklist items.
+    for item in &payload.checklist {
+        tx.execute(
+            "INSERT INTO checklist_items (id, note_id, text, checked, position) \
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![
+                item.id,
+                id,
+                item.text,
+                if item.checked { 1 } else { 0 },
+                item.position
+            ],
+        )
+        .map_err(err)?;
+    }
+    tx.commit().map_err(err)?;
+    drop(dek_guard);
+    drop(conn);
+    get_note(state.clone(), id)
+        .and_then(|opt| opt.ok_or_else(|| "note vanished after unvaulting".into()))
+}
+
 // --- Backup / restore -------------------------------------------------------
 //
 // EI-01: Validate every zip entry before writing it. Even though zip's
@@ -2486,6 +2971,7 @@ mod tests {
             db: Arc::new(Mutex::new(conn)),
             importing: Arc::new(AtomicBool::new(false)),
             data_dir,
+            vault_dek: Arc::new(Mutex::new(None)),
         }
     }
 

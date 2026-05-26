@@ -1,6 +1,7 @@
 mod db;
 mod commands;
 mod lock;
+mod vault;
 
 use parking_lot::Mutex;
 use std::path::{Path, PathBuf};
@@ -43,6 +44,10 @@ pub struct AppState {
     /// the EXE's parent (portable mode — see `PORTABLE_SENTINEL`). Used by
     /// every command that needs to read or write keepr.db / attachments.
     pub data_dir: PathBuf,
+    /// NF-V0.5-C — Private Vault data-encryption-key, present only while
+    /// the vault is unlocked. Zeroized on Drop; replaced with `None`
+    /// when `lock_vault` is called or the app exits.
+    pub vault_dek: Arc<Mutex<Option<vault::Dek>>>,
 }
 
 /// Subdirectory under the data dir where the `keepr-resource://` protocol
@@ -214,6 +219,7 @@ pub fn run() {
                 db: Arc::new(Mutex::new(conn)),
                 importing: Arc::new(AtomicBool::new(false)),
                 data_dir,
+                vault_dek: Arc::new(Mutex::new(None)),
             });
 
             // NF-06 — tray icon + menu. "Show / Hide Keepr" toggles the
@@ -372,6 +378,13 @@ pub fn run() {
             commands::disable_app_lock,
             commands::verify_app_lock_pin,
             commands::set_app_lock_minutes,
+            commands::get_vault_status,
+            commands::init_vault,
+            commands::unlock_vault,
+            commands::lock_vault,
+            commands::change_vault_password,
+            commands::move_note_to_vault,
+            commands::move_note_out_of_vault,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

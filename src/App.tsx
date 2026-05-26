@@ -191,9 +191,11 @@ export default function App() {
   const locked = useStore((s) => s.locked);
   const appLockEnabled = useStore((s) => s.appLockEnabled);
   const lockAfterMinutes = useStore((s) => s.lockAfterMinutes);
+  const refreshVaultState = useStore((s) => s.refreshVaultState);
   useEffect(() => {
     initAppLock();
-  }, [initAppLock]);
+    refreshVaultState();
+  }, [initAppLock, refreshVaultState]);
   // Idle timer is only armed while App Lock is configured AND the UI is
   // currently unlocked — locked → already on the overlay, no need to
   // re-fire.

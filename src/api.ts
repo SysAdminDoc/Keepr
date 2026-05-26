@@ -67,4 +67,16 @@ export const api = {
     invoke<boolean>("verify_app_lock_pin", { pin }),
   setAppLockMinutes: (lockAfterMinutes: number) =>
     invoke<void>("set_app_lock_minutes", { lockAfterMinutes }),
+  getVaultStatus: () =>
+    invoke<{ initialized: boolean; unlocked: boolean }>("get_vault_status"),
+  initVault: (password: string) => invoke<void>("init_vault", { password }),
+  unlockVault: (password: string) =>
+    invoke<boolean>("unlock_vault", { password }),
+  lockVault: () => invoke<void>("lock_vault"),
+  changeVaultPassword: (currentPassword: string, newPassword: string) =>
+    invoke<void>("change_vault_password", { currentPassword, newPassword }),
+  moveNoteToVault: (id: string) =>
+    invoke<Note>("move_note_to_vault", { id }),
+  moveNoteOutOfVault: (id: string) =>
+    invoke<Note>("move_note_out_of_vault", { id }),
 };

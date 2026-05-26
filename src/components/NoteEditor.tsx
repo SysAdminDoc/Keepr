@@ -19,6 +19,8 @@ import {
   GripVertical,
   Image as ImageIcon,
   Bell,
+  Lock,
+  Unlock,
 } from "lucide-react";
 import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import type { Attachment } from "../types";
@@ -189,6 +191,8 @@ export function NoteEditor() {
   const upsertReminder = useStore((s) => s.upsertReminder);
   const removeReminder = useStore((s) => s.removeReminder);
   const reminders = useStore((s) => s.reminders);
+  const vaultInitialized = useStore((s) => s.vaultInitialized);
+  const vaultUnlocked = useStore((s) => s.vaultUnlocked);
   const [checkedCollapsed, setCheckedCollapsed] = useState(false);
   // NF-01 — attachments live alongside draft state but aren't part of the
   // NoteInput payload (add/remove go through their own commands so the
@@ -568,6 +572,26 @@ export function NoteEditor() {
       showToast(becomingArchived ? "Note archived" : "Note unarchived");
     } catch (e) {
       showToast("Could not archive: " + String(e));
+    } finally {
+      closeEditor();
+    }
+  };
+
+  const toggleVault = async () => {
+    if (!existing) return;
+    try {
+      const updated = await flushDraft();
+      if (updated) upsertNote(updated);
+      const next =
+        existing.vault === "vault"
+          ? await api.moveNoteOutOfVault(existing.id)
+          : await api.moveNoteToVault(existing.id);
+      upsertNote(next);
+      showToast(
+        next.vault === "vault" ? "Moved to vault" : "Moved out of vault",
+      );
+    } catch (e) {
+      showToast("Could not toggle vault: " + String(e));
     } finally {
       closeEditor();
     }
@@ -1073,6 +1097,26 @@ export function NoteEditor() {
               )}
             </IconBtn>
           )}
+          {existing &&
+            !existing.trashed &&
+            vaultInitialized &&
+            vaultUnlocked && (
+              <IconBtn
+                ariaLabel={
+                  existing.vault === "vault"
+                    ? "Move out of vault"
+                    : "Move to vault"
+                }
+                onClick={toggleVault}
+                pressed={existing.vault === "vault"}
+              >
+                {existing.vault === "vault" ? (
+                  <Unlock size={18} aria-hidden />
+                ) : (
+                  <Lock size={18} aria-hidden />
+                )}
+              </IconBtn>
+            )}
           {existing && !existing.trashed && (
             <IconBtn ariaLabel="Delete" onClick={trash}>
               <Trash2 size={18} aria-hidden />

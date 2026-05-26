@@ -8,6 +8,7 @@ import {
   RotateCcw,
   Check,
   Bell,
+  Lock,
 } from "lucide-react";
 import clsx from "clsx";
 import { useRef, useState } from "react";
@@ -67,6 +68,8 @@ export function NoteCard({ note }: Props) {
 
   const inTrash = section.kind === "trash";
   const inArchive = section.kind === "archive";
+  const vaultUnlocked = useStore((s) => s.vaultUnlocked);
+  const lockedVault = note.vault === "vault" && !vaultUnlocked;
 
   const bg = bgFor(note.color, dark);
   const border = borderFor(note.color, dark);
@@ -179,6 +182,10 @@ export function NoteCard({ note }: Props) {
       return;
     }
     if (inTrash) return;
+    if (lockedVault) {
+      showToast("Unlock the vault in Settings to view this note");
+      return;
+    }
     openEditor(note.id);
   };
 
@@ -270,49 +277,57 @@ export function NoteCard({ note }: Props) {
       )}
 
       <div className="px-4 pt-3 pb-2 pr-10">
-        {note.title && (
-          <div className="font-medium text-base leading-snug break-words">
-            <HighlightHashtags text={note.title} />
+        {lockedVault ? (
+          <div className="flex items-center gap-2 text-sm opacity-70">
+            <Lock size={14} aria-hidden /> Locked vault note
           </div>
+        ) : (
+          note.title && (
+            <div className="font-medium text-base leading-snug break-words">
+              <HighlightHashtags text={note.title} />
+            </div>
+          )
         )}
       </div>
 
-      {note.kind === "text" ? (
-        note.body && (
-          <div className="px-4 pb-3 text-[14px] leading-snug whitespace-pre-wrap break-words max-h-[16rem] overflow-hidden">
-            <HighlightHashtags text={note.body} />
+      {!lockedVault && (
+        note.kind === "text" ? (
+          note.body && (
+            <div className="px-4 pb-3 text-[14px] leading-snug whitespace-pre-wrap break-words max-h-[16rem] overflow-hidden">
+              <HighlightHashtags text={note.body} />
+            </div>
+          )
+        ) : (
+          <div className="px-2 pb-2">
+            {note.checklist.slice(0, 12).map((it) => (
+              <div
+                key={it.id}
+                className="flex items-start gap-2 px-2 py-1 text-[14px]"
+              >
+                <span
+                  className="w-4 h-4 mt-0.5 grid place-items-center border rounded-sm border-current opacity-70"
+                  role="img"
+                  aria-label={it.checked ? "Checked" : "Unchecked"}
+                >
+                  {it.checked && <Check size={12} aria-hidden />}
+                </span>
+                <span
+                  className={clsx(
+                    "flex-1 break-words",
+                    it.checked && "line-through opacity-60",
+                  )}
+                >
+                  {it.text}
+                </span>
+              </div>
+            ))}
+            {note.checklist.length > 12 && (
+              <div className="px-3 py-1 text-xs opacity-70">
+                + {note.checklist.length - 12} more
+              </div>
+            )}
           </div>
         )
-      ) : (
-        <div className="px-2 pb-2">
-          {note.checklist.slice(0, 12).map((it) => (
-            <div
-              key={it.id}
-              className="flex items-start gap-2 px-2 py-1 text-[14px]"
-            >
-              <span
-                className="w-4 h-4 mt-0.5 grid place-items-center border rounded-sm border-current opacity-70"
-                role="img"
-                aria-label={it.checked ? "Checked" : "Unchecked"}
-              >
-                {it.checked && <Check size={12} aria-hidden />}
-              </span>
-              <span
-                className={clsx(
-                  "flex-1 break-words",
-                  it.checked && "line-through opacity-60",
-                )}
-              >
-                {it.text}
-              </span>
-            </div>
-          ))}
-          {note.checklist.length > 12 && (
-            <div className="px-3 py-1 text-xs opacity-70">
-              + {note.checklist.length - 12} more
-            </div>
-          )}
-        </div>
       )}
 
       {daysLeft !== null && (
@@ -321,13 +336,20 @@ export function NoteCard({ note }: Props) {
         </div>
       )}
 
-      {reminder && isActive(reminder) && (
+      {reminder && isActive(reminder) && !lockedVault && (
         <div className="flex flex-wrap gap-1 px-3 pb-1">
           <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-black/5 dark:bg-white/10">
             <Bell size={11} aria-hidden /> {formatReminder(effectiveFireAt(reminder))}
             {reminder.rrule && (
               <span className="opacity-70">· {recurrenceLabel(reminder.rrule)}</span>
             )}
+          </span>
+        </div>
+      )}
+      {note.vault === "vault" && vaultUnlocked && (
+        <div className="flex flex-wrap gap-1 px-3 pb-1">
+          <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-[#fdd663]/30 text-[#594300] dark:bg-[#41331c] dark:text-[#fdd663]">
+            <Lock size={11} aria-hidden /> Vaulted
           </span>
         </div>
       )}

@@ -4,7 +4,7 @@ use std::path::Path;
 
 /// Current schema version. Bump and add a new arm to `apply_migration` for every
 /// schema change. Migrations are forward-only and ordered.
-pub const SCHEMA_VERSION: i32 = 5;
+pub const SCHEMA_VERSION: i32 = 6;
 
 pub fn open(path: &Path) -> Result<Connection> {
     let mut conn = Connection::open(path)?;
@@ -50,6 +50,7 @@ fn apply_migration(tx: &rusqlite::Transaction, version: i32) -> Result<()> {
         3 => tx.execute_batch(MIGRATION_V3)?,
         4 => tx.execute_batch(MIGRATION_V4)?,
         5 => tx.execute_batch(MIGRATION_V5)?,
+        6 => tx.execute_batch(MIGRATION_V6)?,
         v => bail!("no migration defined for schema v{v}"),
     }
     Ok(())
@@ -163,6 +164,26 @@ CREATE TABLE IF NOT EXISTS app_settings (
 );
 "#;
 
+/// v6 — Private Vault (NF-V0.5-C / 2 of 2).
+///
+/// `notes.vault` is one of:
+///   - 'plain'  — title/body/checklist columns are authoritative (default).
+///   - 'vault'  — title/body are empty strings; checklist_items rows for
+///                this note are deleted; the real payload lives in
+///                `vault_ciphertext` (hex-encoded `nonce || aead`).
+///
+/// The vault DEK is wrapped under a password-derived KEK; the wrap
+/// material lives in `app_settings` under three hex-string keys:
+///   - `vault_kdf_salt`     — 16 bytes
+///   - `vault_dek_nonce`    — 24 bytes
+///   - `vault_dek_wrapped`  — DEK bundle (XChaCha20-Poly1305 ciphertext)
+const MIGRATION_V6: &str = r#"
+ALTER TABLE notes ADD COLUMN vault TEXT NOT NULL DEFAULT 'plain'
+    CHECK (vault IN ('plain','vault'));
+ALTER TABLE notes ADD COLUMN vault_ciphertext TEXT;
+CREATE INDEX IF NOT EXISTS idx_notes_vault ON notes(vault);
+"#;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -242,6 +263,34 @@ mod tests {
             .unwrap();
         let err = migrate(&mut conn).unwrap_err();
         assert!(err.to_string().contains("upgrade Keepr"));
+    }
+
+    #[test]
+    fn migration_v6_adds_vault_columns_to_notes() {
+        let conn = fresh_conn();
+        // Insert a plain note and confirm the new columns default sanely.
+        conn.execute(
+            "INSERT INTO notes (id, kind, title, body, color, pinned, archived, trashed, \
+                                position, created_at, updated_at) \
+             VALUES ('n1', 'text', 't', 'b', 'default', 0, 0, 0, 0, \
+                     '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+        let vault: String = conn
+            .query_row("SELECT vault FROM notes WHERE id = 'n1'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(vault, "plain");
+        let ct: Option<String> = conn
+            .query_row("SELECT vault_ciphertext FROM notes WHERE id = 'n1'", [], |r| r.get(0))
+            .unwrap();
+        assert!(ct.is_none());
+        // CHECK constraint should reject bogus values.
+        let bad = conn.execute(
+            "UPDATE notes SET vault = 'whatever' WHERE id = 'n1'",
+            [],
+        );
+        assert!(bad.is_err(), "CHECK should reject unknown vault state");
     }
 
     #[test]
