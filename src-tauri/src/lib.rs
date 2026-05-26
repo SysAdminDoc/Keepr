@@ -347,6 +347,7 @@ pub fn run() {
             commands::add_image_attachment_bytes,
             commands::delete_attachment,
             commands::set_reminder,
+            commands::snooze_reminder,
             commands::clear_reminder,
             commands::list_reminders,
             commands::export_vault,

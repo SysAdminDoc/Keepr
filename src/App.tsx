@@ -18,7 +18,7 @@ import { useKeepShortcuts } from "./hooks/useKeepShortcuts";
 import { HelpOverlay } from "./components/HelpOverlay";
 import { BulkActionBar } from "./components/BulkActionBar";
 import { FilterChips } from "./components/FilterChips";
-import { Lightbulb, Archive, Trash2, Tag, Loader2 } from "lucide-react";
+import { Lightbulb, Archive, Trash2, Tag, Loader2, Bell } from "lucide-react";
 
 export default function App() {
   const notes = useStore((s) => s.notes);
@@ -55,12 +55,25 @@ export default function App() {
         const u1 = await listen("keepr://quick-capture", () => {
           useStore.getState().openEditor(null);
         });
-        const u2 = await listen("keepr://reminder-fired", async () => {
+        const u2 = await listen<string>("keepr://reminder-fired", async (e) => {
+          const noteId = e.payload;
           try {
             const next = await api.listReminders();
             useStore.setState({ reminders: next });
           } catch {
             /* ignore */
+          }
+          // In-app toast in addition to the OS notification so the user
+          // sees the fire while the window is focused (OS notifications
+          // are coalesced or suppressed in that case on some platforms).
+          if (typeof noteId === "string" && noteId.length > 0) {
+            useStore.getState().showToast("Reminder", {
+              durationMs: 8000,
+              action: {
+                label: "View note",
+                onClick: () => useStore.getState().openEditor(noteId),
+              },
+            });
           }
         });
         // EI-V0.5-7 — surface global-hotkey registration failure (most
@@ -171,9 +184,10 @@ export default function App() {
   }, [load]);
 
   const filters = useStore((s) => s.filters);
+  const reminders = useStore((s) => s.reminders);
   const filtered = useMemo(
-    () => filterNotes(notes, section, search, filters),
-    [notes, section, search, filters],
+    () => filterNotes(notes, section, search, filters, reminders),
+    [notes, section, search, filters, reminders],
   );
   // NF-04 — Ctrl+A handler reaches the latest filtered list via this ref
   // so we don't need to register a new hotkey on every keystroke.
@@ -204,6 +218,7 @@ export default function App() {
     }
     if (section.kind === "archive") return "Archive";
     if (section.kind === "trash") return "Trash";
+    if (section.kind === "reminders") return "Reminders";
     return "Notes";
   })();
 
@@ -333,7 +348,7 @@ function EmptyState({
   section,
   headerLabel,
 }: {
-  section: "notes" | "archive" | "trash" | "label";
+  section: "notes" | "archive" | "trash" | "label" | "reminders";
   headerLabel: string;
 }) {
   const map: Record<string, { icon: React.ReactNode; text: string }> = {
@@ -352,6 +367,10 @@ function EmptyState({
     label: {
       icon: <Tag size={120} strokeWidth={1.2} />,
       text: `No notes with label "${headerLabel}"`,
+    },
+    reminders: {
+      icon: <Bell size={120} strokeWidth={1.2} />,
+      text: "Notes with upcoming reminders appear here",
     },
   };
   const { icon, text } = map[section];

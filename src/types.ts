@@ -87,9 +87,19 @@ export interface Reminder {
 
 export type Section =
   | { kind: "notes" }
+  | { kind: "reminders" }
   | { kind: "archive" }
   | { kind: "trash" }
   | { kind: "label"; labelId: string };
+
+/** RRULE recurrence shapes supported by NF-V0.5-A. The Rust side
+ *  whitelists these strings literally — see `ALLOWED_RRULES` in
+ *  src-tauri/src/commands.rs. */
+export type RecurrenceRule =
+  | "FREQ=DAILY"
+  | "FREQ=WEEKLY"
+  | "FREQ=MONTHLY"
+  | "FREQ=YEARLY";
 
 export interface SearchFilters {
   /** Note kinds to include. Empty = no kind constraint. */

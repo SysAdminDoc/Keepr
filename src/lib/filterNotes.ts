@@ -1,4 +1,5 @@
-import type { Note, SearchFilters, Section } from "../types";
+import type { Note, Reminder, SearchFilters, Section } from "../types";
+import { compareByDue, isActive } from "./reminders";
 
 /**
  * Filter notes by section (Notes / Archive / Trash / Label), an optional
@@ -23,6 +24,7 @@ export function filterNotes(
   section: Section,
   search: string,
   filters?: SearchFilters,
+  reminders?: Reminder[],
 ): Note[] {
   let pool = notes;
   if (section.kind === "notes") {
@@ -33,6 +35,18 @@ export function filterNotes(
     pool = pool.filter((n) => n.trashed);
   } else if (section.kind === "label") {
     pool = pool.filter((n) => !n.trashed && n.labels.includes(section.labelId));
+  } else if (section.kind === "reminders") {
+    // Order notes by when their reminder is next due. Excludes trashed
+    // notes (a trashed reminder is dead weight) and notes without an
+    // active reminder.
+    const due = new Map<string, Reminder>();
+    for (const r of reminders ?? []) {
+      if (!isActive(r)) continue;
+      due.set(r.noteId, r);
+    }
+    pool = pool
+      .filter((n) => !n.trashed && due.has(n.id))
+      .sort((a, b) => compareByDue(due.get(a.id)!, due.get(b.id)!));
   }
 
   if (filters) {

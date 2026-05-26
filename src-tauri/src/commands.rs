@@ -939,6 +939,7 @@ pub fn import_takeout(
                         state.clone(),
                         created.id.clone(),
                         fire_at,
+                        None, // Takeout reminders import as single-shot; v0.6 recurrence happens at edit time
                     );
                     break; // schema only supports one pending reminder per note
                 }
@@ -1089,11 +1090,62 @@ pub struct Reminder {
     pub created_at: String,
 }
 
+/// Supported recurrence rule shapes (NF-V0.5-A). We accept only the
+/// four FREQ= bases that Keep's UI exposes, not arbitrary RFC 5545
+/// strings — that lets us expand `next_fire_at` in plain Rust without
+/// pulling a 70 KB RRULE crate. Custom intervals (e.g. every 2 weeks)
+/// land in a future pass.
+const ALLOWED_RRULES: &[&str] = &[
+    "FREQ=DAILY",
+    "FREQ=WEEKLY",
+    "FREQ=MONTHLY",
+    "FREQ=YEARLY",
+];
+
+fn validate_rrule(rrule: Option<&str>) -> Result<(), String> {
+    match rrule {
+        None => Ok(()),
+        Some(s) if ALLOWED_RRULES.iter().any(|allowed| *allowed == s) => Ok(()),
+        Some(other) => Err(format!(
+            "unsupported rrule '{other}' — expected one of {:?}",
+            ALLOWED_RRULES
+        )),
+    }
+}
+
+/// Compute the next `fire_at` after a successful fire, given the
+/// previous `fire_at` and the recurrence rule. Returns None for
+/// one-shot reminders (no rrule). NF-V0.5-A.
+pub fn next_fire_at(prev_fire_at: &str, rrule: Option<&str>) -> Option<String> {
+    use chrono::{DateTime, Datelike, Months, Utc};
+    let rule = rrule?;
+    let prev = DateTime::parse_from_rfc3339(prev_fire_at).ok()?;
+    let prev_utc: DateTime<Utc> = prev.with_timezone(&Utc);
+    let next = match rule {
+        "FREQ=DAILY" => prev_utc + chrono::Duration::days(1),
+        "FREQ=WEEKLY" => prev_utc + chrono::Duration::weeks(1),
+        "FREQ=MONTHLY" => prev_utc.checked_add_months(Months::new(1))?,
+        "FREQ=YEARLY" => {
+            // Construct a new DateTime with year + 1. chrono doesn't
+            // have add_years; do via with_year + leap-day clamp.
+            let y = prev_utc.year() + 1;
+            prev_utc.with_year(y)
+                .or_else(|| {
+                    // Feb 29 → Feb 28 in non-leap years
+                    prev_utc.with_day(28).and_then(|d| d.with_year(y))
+                })?
+        }
+        _ => return None,
+    };
+    Some(next.to_rfc3339())
+}
+
 #[tauri::command]
 pub fn set_reminder(
     state: State<'_, AppState>,
     note_id: String,
     fire_at: String,
+    rrule: Option<String>,
 ) -> Result<Reminder, String> {
     if state.importing.load(std::sync::atomic::Ordering::SeqCst) {
         return Err("a restore is currently in progress".into());
@@ -1102,22 +1154,65 @@ pub fn set_reminder(
     if chrono::DateTime::parse_from_rfc3339(&fire_at).is_err() {
         return Err(format!("fire_at not a valid RFC3339 timestamp: {fire_at}"));
     }
+    validate_rrule(rrule.as_deref())?;
     let conn = state.db.lock();
     let id = Uuid::new_v4().to_string();
     let now = now_iso();
     // UPSERT keyed on the UNIQUE note_id — replacing an existing
-    // reminder rather than appending.
+    // reminder rather than appending. Also resets fired/dismissed/
+    // snooze so re-setting effectively re-arms it.
     conn.execute(
-        "INSERT INTO reminders (id, note_id, fire_at, created_at)
-         VALUES (?1, ?2, ?3, ?4)
+        "INSERT INTO reminders (id, note_id, fire_at, rrule, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5)
          ON CONFLICT(note_id) DO UPDATE SET
             fire_at = excluded.fire_at,
+            rrule = excluded.rrule,
             fired_at = NULL,
             dismissed_at = NULL,
             snooze_until = NULL",
-        params![id, note_id, fire_at, now],
+        params![id, note_id, fire_at, rrule, now],
     )
     .map_err(err)?;
+    let r = conn
+        .query_row(
+            "SELECT id, note_id, fire_at, rrule, snooze_until, fired_at, dismissed_at, created_at
+             FROM reminders WHERE note_id = ?1",
+            params![note_id],
+            reminder_from_row,
+        )
+        .map_err(err)?;
+    Ok(r)
+}
+
+/// NF-V0.5-A — snooze a reminder until a later time. The reminder
+/// stays in the pending pool but `take_due_reminders`'s WHERE clause
+/// excludes anything with `snooze_until > now`, so the scheduler
+/// skips it until the snooze elapses. fired_at is also cleared so
+/// a freshly-snoozed reminder fires again.
+#[tauri::command]
+pub fn snooze_reminder(
+    state: State<'_, AppState>,
+    note_id: String,
+    until: String,
+) -> Result<Reminder, String> {
+    if state.importing.load(std::sync::atomic::Ordering::SeqCst) {
+        return Err("a restore is currently in progress".into());
+    }
+    if chrono::DateTime::parse_from_rfc3339(&until).is_err() {
+        return Err(format!("until not a valid RFC3339 timestamp: {until}"));
+    }
+    let conn = state.db.lock();
+    let affected = conn
+        .execute(
+            "UPDATE reminders
+             SET snooze_until = ?1, fired_at = NULL
+             WHERE note_id = ?2",
+            params![until, note_id],
+        )
+        .map_err(err)?;
+    if affected == 0 {
+        return Err(format!("no reminder set for note {note_id}"));
+    }
     let r = conn
         .query_row(
             "SELECT id, note_id, fire_at, rrule, snooze_until, fired_at, dismissed_at, created_at
@@ -1218,12 +1313,43 @@ pub fn peek_due_reminders(
 /// `notification.show()`. If the show failed we deliberately do NOT call
 /// this, so the reminder reappears in the next `peek_due_reminders` and
 /// retries (EI-V0.5-2).
+///
+/// NF-V0.5-A — if the reminder has an rrule, this also advances
+/// `fire_at` to the next occurrence and clears `fired_at` + `snooze_until`
+/// so the recurring reminder re-arms automatically for the next cycle.
 pub fn mark_reminder_fired(
     state: &AppState,
     reminder_id: &str,
     fired_at_rfc3339: &str,
 ) -> Result<(), String> {
     let conn = state.db.lock();
+    // Read the rrule + fire_at so we can decide whether to advance or
+    // just mark fired.
+    let row: Option<(String, Option<String>)> = conn
+        .query_row(
+            "SELECT fire_at, rrule FROM reminders WHERE id = ?1",
+            params![reminder_id],
+            |r| {
+                let fa: String = r.get(0)?;
+                let rr: Option<String> = r.get(1)?;
+                Ok((fa, rr))
+            },
+        )
+        .ok();
+    if let Some((current_fire_at, rrule)) = row {
+        if let Some(next) = next_fire_at(&current_fire_at, rrule.as_deref()) {
+            // Advance to next occurrence; leave fired_at NULL.
+            conn.execute(
+                "UPDATE reminders
+                 SET fire_at = ?1, fired_at = NULL, snooze_until = NULL
+                 WHERE id = ?2",
+                params![next, reminder_id],
+            )
+            .map_err(err)?;
+            return Ok(());
+        }
+    }
+    // Single-shot: just mark fired.
     conn.execute(
         "UPDATE reminders SET fired_at = ?1 WHERE id = ?2",
         params![fired_at_rfc3339, reminder_id],
@@ -2349,6 +2475,103 @@ mod tests {
             )
             .unwrap();
         assert!(fired.is_none(), "fired_at should still be NULL after peek");
+    }
+
+    #[test]
+    fn next_fire_at_handles_supported_rrules() {
+        // Daily
+        assert_eq!(
+            next_fire_at("2026-05-26T08:00:00+00:00", Some("FREQ=DAILY"))
+                .unwrap()
+                .starts_with("2026-05-27T08:00:00"),
+            true,
+        );
+        // Weekly
+        assert_eq!(
+            next_fire_at("2026-05-26T08:00:00+00:00", Some("FREQ=WEEKLY"))
+                .unwrap()
+                .starts_with("2026-06-02T08:00:00"),
+            true,
+        );
+        // Monthly
+        assert_eq!(
+            next_fire_at("2026-05-26T08:00:00+00:00", Some("FREQ=MONTHLY"))
+                .unwrap()
+                .starts_with("2026-06-26T08:00:00"),
+            true,
+        );
+        // Yearly (with leap-day clamp)
+        assert!(next_fire_at("2024-02-29T08:00:00+00:00", Some("FREQ=YEARLY"))
+            .unwrap()
+            .starts_with("2025-02-28"));
+        // None for single-shot
+        assert_eq!(next_fire_at("2026-05-26T08:00:00+00:00", None), None);
+        // Unsupported rrule
+        assert_eq!(
+            next_fire_at("2026-05-26T08:00:00+00:00", Some("FREQ=HOURLY")),
+            None
+        );
+    }
+
+    #[test]
+    fn validate_rrule_rejects_unknown() {
+        assert!(validate_rrule(None).is_ok());
+        assert!(validate_rrule(Some("FREQ=DAILY")).is_ok());
+        assert!(validate_rrule(Some("FREQ=WEEKLY")).is_ok());
+        assert!(validate_rrule(Some("FREQ=MONTHLY")).is_ok());
+        assert!(validate_rrule(Some("FREQ=YEARLY")).is_ok());
+        assert!(validate_rrule(Some("FREQ=HOURLY")).is_err());
+        assert!(validate_rrule(Some("garbage")).is_err());
+    }
+
+    #[test]
+    fn mark_reminder_fired_advances_recurring() {
+        // NF-V0.5-A regression test — recurring reminders re-arm to the
+        // next occurrence after a successful fire; fired_at stays NULL
+        // so the row is still pending in the next sweep.
+        let state = test_state();
+        insert_test_note(&state, "n1", "daily standup");
+        let conn = state.db.lock();
+        conn.execute(
+            "INSERT INTO reminders (id, note_id, fire_at, rrule, created_at) VALUES ('r1', 'n1', '2026-05-26T08:00:00+00:00', 'FREQ=DAILY', '2026-05-26T08:00:00+00:00')",
+            [],
+        )
+        .unwrap();
+        drop(conn);
+        mark_reminder_fired(&state, "r1", "2026-05-26T08:05:00+00:00").unwrap();
+        let conn = state.db.lock();
+        let (fire_at, fired_at): (String, Option<String>) = conn
+            .query_row(
+                "SELECT fire_at, fired_at FROM reminders WHERE id = 'r1'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert!(fire_at.starts_with("2026-05-27T08:00:00"), "got fire_at: {fire_at}");
+        assert!(fired_at.is_none(), "fired_at should be NULL after recurring advance");
+    }
+
+    #[test]
+    fn mark_reminder_fired_single_shot_sets_fired_at() {
+        let state = test_state();
+        insert_test_note(&state, "n1", "single");
+        let conn = state.db.lock();
+        conn.execute(
+            "INSERT INTO reminders (id, note_id, fire_at, created_at) VALUES ('r1', 'n1', '2026-05-26T08:00:00+00:00', '2026-05-26T08:00:00+00:00')",
+            [],
+        )
+        .unwrap();
+        drop(conn);
+        mark_reminder_fired(&state, "r1", "2026-05-26T08:05:00+00:00").unwrap();
+        let conn = state.db.lock();
+        let fired_at: Option<String> = conn
+            .query_row(
+                "SELECT fired_at FROM reminders WHERE id = 'r1'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(fired_at.is_some(), "fired_at should be set for single-shot");
     }
 
     #[test]

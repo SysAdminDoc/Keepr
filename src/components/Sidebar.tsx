@@ -1,5 +1,6 @@
 import { useMemo } from "react";
-import { Lightbulb, Tag, Archive, Trash2, Pencil } from "lucide-react";
+import { Lightbulb, Tag, Archive, Trash2, Pencil, Bell } from "lucide-react";
+import { isActive as isReminderActive } from "../lib/reminders";
 import clsx from "clsx";
 import { useStore } from "../store";
 import type { Section } from "../types";
@@ -16,7 +17,16 @@ export function Sidebar({ expanded }: Props) {
   const setSection = useStore((s) => s.setSection);
   const labels = useStore((s) => s.labels);
   const notes = useStore((s) => s.notes);
+  const reminders = useStore((s) => s.reminders);
   const openLabelsManager = useStore((s) => s.openLabelsManager);
+
+  // NF-V0.5-A — badge count of active (non-fired, non-dismissed) reminders.
+  // Recurring reminders never set `firedAt`, so they stay counted between
+  // fires and the badge always reflects what's actually pending.
+  const reminderCount = useMemo(
+    () => reminders.filter(isReminderActive).length,
+    [reminders],
+  );
 
   // NF-V0.5-H — per-label note counts. Computed once per labels/notes
   // change, not per render. Excludes trashed notes (they're not visible
@@ -94,6 +104,12 @@ export function Sidebar({ expanded }: Props) {
     >
       <ul className="py-2">
         {item({ kind: "notes" }, <Lightbulb size={22} />, "Notes")}
+        {item(
+          { kind: "reminders" },
+          <Bell size={20} />,
+          "Reminders",
+          reminderCount,
+        )}
         {expanded && (
           <li className="px-6 pt-4 pb-1 text-xs font-medium text-gray-500 uppercase tracking-wide">
             Labels

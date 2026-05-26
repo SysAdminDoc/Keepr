@@ -43,6 +43,7 @@ import { bgFor, borderFor } from "../colors";
 import { ColorPicker } from "./ColorPicker";
 import { IconBtn } from "./IconBtn";
 import { extractHashtagsFromNote } from "../lib/hashtags";
+import { recurrenceLabel } from "../lib/reminders";
 import { AttachmentGrid } from "./AttachmentGrid";
 import { ReminderPicker } from "./ReminderPicker";
 import type { ChecklistItemInput, ColorKey, Note, NoteKind, NoteInput } from "../types";
@@ -732,18 +733,30 @@ export function NoteEditor() {
 
   // NF-02 — reminder hookup. New notes must exist before they can carry
   // a reminder, so reuse the ensureExistingId helper from NF-01.
-  const setReminderForNote = async (fireAtIso: string) => {
+  const setReminderForNote = async (fireAtIso: string, rrule: string | null) => {
     setReminderPickerOpen(false);
     const noteId = await ensureExistingId();
     if (!noteId) return;
     try {
-      const r = await api.setReminder(noteId, fireAtIso);
+      const r = await api.setReminder(noteId, fireAtIso, rrule);
       upsertReminder(r);
+      const when = new Date(fireAtIso).toLocaleString();
       showToast(
-        `Reminder set for ${new Date(fireAtIso).toLocaleString()}`,
+        rrule ? `Reminder set for ${when} (${recurrenceLabel(rrule)})` : `Reminder set for ${when}`,
       );
     } catch (e) {
       showToast("Could not set reminder: " + String(e));
+    }
+  };
+  const snoozeReminderForNote = async (untilIso: string) => {
+    setReminderPickerOpen(false);
+    if (!existing) return;
+    try {
+      const r = await api.snoozeReminder(existing.id, untilIso);
+      upsertReminder(r);
+      showToast(`Snoozed until ${new Date(untilIso).toLocaleString()}`);
+    } catch (e) {
+      showToast("Could not snooze reminder: " + String(e));
     }
   };
   const clearReminderForNote = async () => {
@@ -1078,7 +1091,9 @@ export function NoteEditor() {
       <ReminderPicker
         open={reminderPickerOpen}
         existingFireAt={noteReminder?.fireAt ?? null}
+        existingRrule={noteReminder?.rrule ?? null}
         onSet={setReminderForNote}
+        onSnooze={snoozeReminderForNote}
         onClear={clearReminderForNote}
         onClose={() => setReminderPickerOpen(false)}
       />

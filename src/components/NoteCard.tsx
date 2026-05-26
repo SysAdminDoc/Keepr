@@ -18,6 +18,7 @@ import { api } from "../api";
 import { ColorPicker } from "./ColorPicker";
 import { IconBtn } from "./IconBtn";
 import { AttachmentGrid } from "./AttachmentGrid";
+import { effectiveFireAt, isActive, recurrenceLabel } from "../lib/reminders";
 import { useClickOutside } from "../hooks/useClickOutside";
 import { daysLeftInTrash } from "../lib/trashRetention";
 import { useSortable } from "@dnd-kit/sortable";
@@ -320,10 +321,13 @@ export function NoteCard({ note }: Props) {
         </div>
       )}
 
-      {reminder && !reminder.firedAt && (
+      {reminder && isActive(reminder) && (
         <div className="flex flex-wrap gap-1 px-3 pb-1">
           <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-black/5 dark:bg-white/10">
-            <Bell size={11} aria-hidden /> {formatReminder(reminder.fireAt)}
+            <Bell size={11} aria-hidden /> {formatReminder(effectiveFireAt(reminder))}
+            {reminder.rrule && (
+              <span className="opacity-70">· {recurrenceLabel(reminder.rrule)}</span>
+            )}
           </span>
         </div>
       )}

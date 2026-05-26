@@ -25,8 +25,10 @@ export const api = {
     }),
   deleteAttachment: (id: string) =>
     invoke<void>("delete_attachment", { id }),
-  setReminder: (noteId: string, fireAt: string) =>
-    invoke<Reminder>("set_reminder", { noteId, fireAt }),
+  setReminder: (noteId: string, fireAt: string, rrule?: string | null) =>
+    invoke<Reminder>("set_reminder", { noteId, fireAt, rrule: rrule ?? null }),
+  snoozeReminder: (noteId: string, until: string) =>
+    invoke<Reminder>("snooze_reminder", { noteId, until }),
   clearReminder: (noteId: string) =>
     invoke<void>("clear_reminder", { noteId }),
   listReminders: () => invoke<Reminder[]>("list_reminders"),
