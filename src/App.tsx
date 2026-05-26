@@ -8,31 +8,8 @@ import { SettingsModal } from "./components/SettingsModal";
 import { LabelsManager } from "./components/LabelsManager";
 import { useStore } from "./store";
 import { api } from "./api";
-import type { Note } from "./types";
+import { filterNotes } from "./lib/filterNotes";
 import { Lightbulb, Archive, Trash2, Tag } from "lucide-react";
-
-function filterNotes(notes: Note[], section: ReturnType<typeof useStore.getState>["section"], search: string): Note[] {
-  let pool = notes;
-  if (section.kind === "notes") {
-    pool = pool.filter((n) => !n.archived && !n.trashed);
-  } else if (section.kind === "archive") {
-    pool = pool.filter((n) => n.archived && !n.trashed);
-  } else if (section.kind === "trash") {
-    pool = pool.filter((n) => n.trashed);
-  } else if (section.kind === "label") {
-    pool = pool.filter((n) => !n.trashed && n.labels.includes(section.labelId));
-  }
-  if (search.trim()) {
-    const q = search.trim().toLowerCase();
-    pool = pool.filter((n) => {
-      if (n.title.toLowerCase().includes(q)) return true;
-      if (n.body.toLowerCase().includes(q)) return true;
-      if (n.checklist.some((c) => c.text.toLowerCase().includes(q))) return true;
-      return false;
-    });
-  }
-  return pool;
-}
 
 export default function App() {
   const { notes, labels, section, search, load, toast, showToast } = useStore();
