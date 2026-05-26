@@ -14,10 +14,25 @@ Keepr is a single-user, offline-first desktop app. It does **not** make outbound
 
 The threats it does **not** currently defend against (and where to expect future work):
 
-- **Stolen unlocked laptop.** Notes are plaintext SQLite. NF-V0.5-C (App Lock + Private Vault) will add this in v0.6+.
+- **Disk-level read of `keepr.db`.** Notes are still plaintext SQLite on disk. v0.7.0 App Lock gates the UI but does not encrypt data at rest; an attacker with filesystem access can open `keepr.db` directly. Private Vault (per-note XChaCha20-Poly1305 encryption) is the next planned milestone — see ROADMAP.md.
 - **Adversary with disk write access while Keepr is open.** A second writer to `keepr.db` outside Keepr's mutex is not detected. The single-instance plugin (v0.4.1) prevents the most common case — two `keepr.exe` processes — but doesn't protect against external tools.
 - **Local resource exhaustion.** The 2 GiB total + 512 MiB per-file uncompressed caps on both import AND export (v0.5.0+) are sized for normal use, not a malicious operator with admin access.
 - **Notification loss on permission denial.** Reminders fail-soft to the next 30 s sweep (v0.4.1 fix). If Windows Notifications are globally disabled, every sweep will fail and the reminder never visibly fires.
+
+### App Lock (v0.7.0+)
+
+App Lock hides every note behind an Argon2id-hashed PIN whenever Keepr launches or stays idle for N minutes. **It is a UI gate, not at-rest encryption** — see the "Disk-level read" item above. It defends against:
+
+- casual shoulder-surfing on an unlocked OS session,
+- screenshot tools that capture the foreground window,
+- the "Keepr in the tray on an unattended machine" case.
+
+It does **not** defend against:
+
+- an attacker with filesystem access (open `keepr.db` in any SQLite browser),
+- an attacker who edits `app_settings` and deletes the `app_lock_pin_phc` row (the data is back to plaintext access, no key was ever holding it captive).
+
+**Lost-PIN policy: there is no recovery.** Argon2id is deliberately slow (~150-300 ms per attempt at m=64MiB, t=3, p=1). A forgotten PIN can be cleared by editing the SQLite file directly with any browser; the notes are immediately readable. We deliberately do not ship a reset escape-hatch in the UI because that would be exactly the bypass a casual snoop would use.
 
 ### Surfaces added since v0.4.0
 

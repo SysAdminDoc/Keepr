@@ -6,6 +6,30 @@ All notable changes to Keepr are documented here. Format loosely follows [Keep a
 
 (See [ROADMAP.md](ROADMAP.md) for the live task list.)
 
+## [0.7.0] — 2026-05-26 — "App Lock"
+
+Adds the first half of NF-V0.5-C — a PIN-gated lock screen with idle auto-lock — and lays the `app_settings` table schema that Private Vault (per-note at-rest encryption) will plug into. Argon2id PHC for the PIN (m=64MiB, t=3, p=1); see SECURITY.md for the full threat model and the explicit lost-PIN policy (no recovery).
+
+### Added
+
+- **NF-V0.5-C** App Lock (Private Vault deferred to v0.7.1+).
+  - Schema v5 adds `app_settings(key, value)`. Two keys used: `app_lock_pin_phc` (Argon2id PHC, absent when disabled) and `app_lock_after_minutes` (idle minutes).
+  - New `src-tauri/src/lock.rs` wrapping the `argon2` + `password-hash` crates. PHC string captures algo + version + params + salt + hash, so one column stores everything `verify_pin` needs.
+  - New Tauri commands: `enable_app_lock`, `disable_app_lock`, `verify_app_lock_pin`, `set_app_lock_minutes`, `get_app_lock_settings`. Argon2id verification runs ~150-300 ms on commodity hardware — the LockScreen surfaces a "Verifying…" busy state.
+  - New `<LockScreen />` overlay (z-index 100, full-window) with PIN input, show/hide toggle, busy state, error display, and a "no recovery" footer linking to SECURITY.md.
+  - New `useIdleLock(idleMinutes, onIdle, active)` hook that rearms on `mousedown` / `keydown` / `touchstart` / `pointerdown` / `scroll` / `visibilitychange`. Floor of 1 minute so a user can never accidentally set themselves to lock immediately.
+  - Settings → new "App Lock" section (`AppLockSection.tsx`) with three states: not configured (Enable form with PIN + Confirm + minutes), configured (Lock-after selector + "Lock now" + Disable form requiring current PIN), busy (Argon2id chewing).
+  - App auto-locks on launch when `appLockEnabled === true` so a user closing Keepr from the tray and reopening it later still hits the lock screen.
+
+### Security
+
+- **SECURITY.md** gains an "App Lock (v0.7.0+)" section spelling out the UI-gate-not-at-rest-encryption boundary and the no-PIN-recovery design choice. The "stolen laptop" item under "threats we do **not** defend against" rewritten to reflect what App Lock actually changes.
+
+### Tests
+
+- **30 cargo tests** (up from 24): 5 from new `lock.rs` (hash + verify roundtrip, wrong-PIN rejection, empty-PIN rejection, Argon2id variant assertion, malformed-PHC error vs wrong-PIN) and 1 schema v5 migration test.
+- **80 vitest cases** (up from 75): new `useIdleLock.test.ts` (5) covers timer fire, rearm-on-keydown, active=false no-op, idleMinutes < 1 floor, and event-subscription/teardown.
+
 ## [0.6.0] — 2026-05-26 — "Reminders v2"
 
 Adds recurrence + snooze to the reminder system, a dedicated Reminders section in the sidebar, and an in-app fire toast so reminders aren't lost when the OS coalesces notifications. The schema gains an optional `rrule` column (whitelisted to `FREQ=DAILY|WEEKLY|MONTHLY|YEARLY`) and `snooze_until` is now honoured by the scheduler.

@@ -68,9 +68,12 @@ Selective; the items most visible to users landed, the heavier refactors slip to
 
 - [x] **NF-V0.5-A** — Reminders v2 (recurrence whitelist `FREQ=DAILY|WEEKLY|MONTHLY|YEARLY`, dedicated Reminders sidebar section, snooze panel, in-app fire toast with View-note action)
 
-## Phase D — v0.7 "App Lock" — NEXT
+## Phase D — v0.7.0 "App Lock" — SHIPPED 2026-05-26
 
-- [ ] **NF-V0.5-C** — App Lock + Private Vault (Notesnook two-tier model, Argon2id + XChaCha20-Poly1305) [P2, XL]
+NF-V0.5-C split in half: App Lock (UI-gating PIN with Argon2id) ships first; Private Vault (per-note at-rest encryption with XChaCha20-Poly1305) is the next milestone. Full notes in [CHANGELOG.md](CHANGELOG.md) and the threat model in [SECURITY.md](SECURITY.md).
+
+- [x] **NF-V0.5-C (App Lock)** — Argon2id PHC + LockScreen overlay + idle auto-lock + Settings panel + lost-PIN-no-recovery policy documented
+- [ ] **NF-V0.5-C (Private Vault)** — Per-note XChaCha20-Poly1305 encryption gated by a separate password; "Move to Vault" / "Move out of Vault" per-note action; schema v6 adds `vault: TEXT DEFAULT 'plain'` to `notes` [P2, L]
 
 ---
 
