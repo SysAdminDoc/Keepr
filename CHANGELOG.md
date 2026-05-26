@@ -6,6 +6,25 @@ All notable changes to Keepr are documented here. Format loosely follows [Keep a
 
 (See [ROADMAP.md](ROADMAP.md) for the live task list.)
 
+## [0.10.0] — 2026-05-26 — "Cross-platform CI"
+
+Extends the GitHub Actions release pipeline to also produce macOS and Linux artifacts on every `v*.*.*` tag push. Windows stays the **supported** channel; macOS and Linux are **best-effort** so the codebase stays buildable on those platforms and so users can self-build without setting up the Tauri toolchain locally.
+
+### Added
+
+- **NF-V0.5-K** Cross-platform CI matrix.
+  - `.github/workflows/release.yml` rewritten as a matrix job over Windows / macOS-aarch64 (M1+) / macOS-x86_64 (Intel) / Ubuntu-22.04 (x86_64). `fail-fast: false` so a Mac toolchain hiccup doesn't kill the Windows + Linux builds.
+  - Linux step installs the WebKitGTK 4.1 + GTK3 + libsoup3 + libayatana-appindicator + librsvg2 + patchelf chain that tauri-action needs but doesn't preinstall.
+  - `src-tauri/tauri.conf.json` `bundle.targets` extended to `["nsis", "msi", "dmg", "deb", "appimage"]` — Tauri's bundler picks the relevant subset per-OS, so the same config drives every platform.
+  - tauri-action publishes all artifacts to a single draft Release; the release body lists per-OS instructions including the macOS "right-click → Open" + `xattr -d com.apple.quarantine` workaround for unsigned-and-unnotarized builds.
+  - Windows portable-zip step is gated on `matrix.os == 'windows-latest'` so the Mac/Linux runners don't try to run the PowerShell packaging.
+- **README** Install section reorganised into Windows / macOS / Linux blocks with the exact artifact names and the per-platform quirks (SmartScreen, Gatekeeper quarantine, glibc-2.35 floor on Linux).
+
+### Tests
+
+- **43 cargo tests** unchanged — the CI matrix change is a workflow rewrite + config metadata, not new application code. The matrix itself is the verification: a tag push that fails to build on any platform fails the release.
+- **80 vitest cases** unchanged.
+
 ## [0.9.0] — 2026-05-26 — "History & Calendar"
 
 Two Phase E items in one shot: per-note version history with one-click restore (NF-V0.5-D) and iCalendar export of active reminders (NF-V0.5-G). Both ship the missing-bit-of-trust Trash alone couldn't cover and let users see their reminders in their existing calendar without writing any sync glue.

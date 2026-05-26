@@ -85,7 +85,11 @@ NF-V0.5-C split in half: App Lock (UI-gating PIN with Argon2id) shipped first; P
 - [x] **NF-V0.5-D** — Note version history with one-click restore (last 20 per note, vault snapshots store ciphertext as-is)
 - [x] **NF-V0.5-G** — ICS export of active reminders (RFC 5545 VCALENDAR/VEVENT, RRULE preserved, vault titles redacted)
 
-## Phase E — v0.10+ "Long-running bets remaining"
+## Phase E — v0.10.0 "Cross-platform CI" — SHIPPED 2026-05-26
+
+- [x] **NF-V0.5-K** — GitHub Actions release matrix expanded to macOS (aarch64+x86_64) and Linux x86_64; tauri.conf.json bundle.targets covers dmg/deb/appimage; README documents per-OS install quirks
+
+## Phase E — v0.11+ "Long-running bets remaining"
 
 - [ ] **NF-V0.5-E** — Drawing notes (vector canvas) [P3, L]
 - [ ] **NF-V0.5-K** — macOS + Linux CI matrix (no platform support promise) [P3, S]
