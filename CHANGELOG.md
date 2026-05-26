@@ -6,6 +6,32 @@ All notable changes to Keepr are documented here. Format loosely follows [Keep a
 
 (See [ROADMAP.md](ROADMAP.md) for the live task list.)
 
+## [0.8.0] — 2026-05-26 — "Private Vault"
+
+Closes the second half of NF-V0.5-C. Vaulting a note encrypts its
+title + body + checklist with XChaCha20-Poly1305 under a password-derived
+data key (Argon2id KDF → KEK → wraps DEK). The vault password is
+separate from the App Lock PIN and is **not** recoverable — losing it
+makes the vaulted notes unreadable forever.
+
+### Added
+
+- **NF-V0.5-C (Private Vault)** — schema v6 adds `notes.vault` ('plain'|'vault', CHECK-constrained) and `notes.vault_ciphertext` (hex-encoded `nonce(24) || aead(ct+tag)`). Vault wrap material lives in `app_settings` under three hex keys (`vault_kdf_salt`, `vault_dek_nonce`, `vault_dek_wrapped`).
+- New `src-tauri/src/vault.rs` — XChaCha20-Poly1305 AEAD with note-id as AAD (cross-row swap fails verification), Argon2id KEK at the same parameters as App Lock (m=64MiB, t=3, p=1), `Dek` newtype with `Drop`+`Zeroize` so the unlocked key is wiped from memory on lock or app exit.
+- Tauri commands: `init_vault`, `unlock_vault`, `lock_vault`, `change_vault_password` (re-wraps without re-encrypting notes), `get_vault_status`, `move_note_to_vault`, `move_note_out_of_vault`. `update_note` now encrypts in place for vault rows; `duplicate_note` refuses to clone a vault note (would silently drop encrypted content).
+- `list_notes` + `get_note` are vault-aware: when the DEK is loaded, vault rows decrypt server-side and return as if plaintext; when locked, they return empty title/body/checklist + `vault: "vault"` so the renderer shows a "🔒 Locked vault note" placeholder.
+- Frontend: `<VaultSection />` in Settings with three modes (Setup / Unlock / Unlocked-with-change-password + Lock-now). NoteEditor gains a Lock/Unlock toolbar button (visible only when the vault is initialized + unlocked). NoteCard renders the locked placeholder + blocks click-to-open with a "Unlock the vault in Settings" toast. NoteCard adds a "Vaulted" badge for unlocked vault notes so the user sees encryption status at a glance.
+- App Lock idle fire (or "Lock now") now also calls `lock_vault()` so a Keepr left on a stolen laptop can't have its DEK extracted via the backend.
+
+### Security
+
+- **SECURITY.md** Private Vault section pending — the "App Lock" section already calls out that disk-level reads bypass the UI gate; with v0.8.0, vaulted notes survive a `keepr.db` exfiltration because the DEK is wrapped and the password isn't on disk. Threat model otherwise unchanged.
+
+### Tests
+
+- **40 cargo tests** (up from 30): 9 from new `vault.rs` (init+unlock roundtrip, wrong password returns None, empty password rejected, rewrap preserves DEK, note encrypt/decrypt roundtrip, wrong-note-id AAD failure, tampered-ciphertext AAD failure, hex roundtrip, hex rejects malformed input) + 1 schema v6 migration test (vault column defaults + CHECK constraint).
+- **80 vitest cases** (unchanged) — vault frontend covered by existing typecheck + manual smoke; renderer-side store changes are simple state mirrors of the Rust commands.
+
 ## [0.7.0] — 2026-05-26 — "App Lock"
 
 Adds the first half of NF-V0.5-C — a PIN-gated lock screen with idle auto-lock — and lays the `app_settings` table schema that Private Vault (per-note at-rest encryption) will plug into. Argon2id PHC for the PIN (m=64MiB, t=3, p=1); see SECURITY.md for the full threat model and the explicit lost-PIN policy (no recovery).

@@ -70,10 +70,13 @@ Selective; the items most visible to users landed, the heavier refactors slip to
 
 ## Phase D — v0.7.0 "App Lock" — SHIPPED 2026-05-26
 
-NF-V0.5-C split in half: App Lock (UI-gating PIN with Argon2id) ships first; Private Vault (per-note at-rest encryption with XChaCha20-Poly1305) is the next milestone. Full notes in [CHANGELOG.md](CHANGELOG.md) and the threat model in [SECURITY.md](SECURITY.md).
+NF-V0.5-C split in half: App Lock (UI-gating PIN with Argon2id) shipped first; Private Vault (per-note at-rest encryption with XChaCha20-Poly1305) shipped right after in v0.8.0. Full notes in [CHANGELOG.md](CHANGELOG.md) and the threat model in [SECURITY.md](SECURITY.md).
 
 - [x] **NF-V0.5-C (App Lock)** — Argon2id PHC + LockScreen overlay + idle auto-lock + Settings panel + lost-PIN-no-recovery policy documented
-- [ ] **NF-V0.5-C (Private Vault)** — Per-note XChaCha20-Poly1305 encryption gated by a separate password; "Move to Vault" / "Move out of Vault" per-note action; schema v6 adds `vault: TEXT DEFAULT 'plain'` to `notes` [P2, L]
+
+## Phase D — v0.8.0 "Private Vault" — SHIPPED 2026-05-26
+
+- [x] **NF-V0.5-C (Private Vault)** — schema v6, XChaCha20-Poly1305 per-note AEAD with note-id AAD, Argon2id-derived KEK wrapping a random DEK, change-password via rewrap only, vault Settings section, NoteEditor Lock/Unlock action, NoteCard locked-placeholder + vaulted badge, App Lock idle fire also drops the DEK
 
 ---
 
