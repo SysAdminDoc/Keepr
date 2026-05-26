@@ -262,10 +262,18 @@ pub fn run() {
                 .build(app)?;
 
             // NF-06 — register the Ctrl+Alt+N global hotkey now that the
-            // window is up. Failure is logged but not fatal — the rest of
-            // the app still works without the shortcut.
-            if let Err(e) = app.global_shortcut().register(quick_shortcut) {
-                eprintln!("keepr: failed to register Ctrl+Alt+N: {e}");
+            // window is up. EI-V0.5-7 — surface failure to the renderer
+            // (not just stderr) so users see a toast instead of silently
+            // wondering why nothing happens when they press the hotkey.
+            // Common cause: another app has Ctrl+Alt+N grabbed already.
+            match app.global_shortcut().register(quick_shortcut) {
+                Ok(_) => {
+                    let _ = app.emit("keepr://hotkey-status", "ok");
+                }
+                Err(e) => {
+                    eprintln!("keepr: failed to register Ctrl+Alt+N: {e}");
+                    let _ = app.emit("keepr://hotkey-status", e.to_string());
+                }
             }
 
             // NF-02 — reminder scheduler thread. Polls peek_due_reminders

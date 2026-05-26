@@ -269,22 +269,37 @@ export function NoteEditor() {
     const d = draftRef.current;
     const ex = existingRef.current;
 
-    // NF-07 — extract inline #hashtags from title/body/checklist, create
-    // any missing labels, and union them with the draft's manually-picked
-    // labels. Case-insensitive matching against existing labels avoids
-    // creating duplicates (the Rust create_label already de-dupes, but
-    // we want the merged label id to land on the saved note).
+    // NF-07 / EI-V0.5-9 — hashtag → label merge.
+    // The original behaviour added labels for every #tag in the note;
+    // EI-V0.5-9 also REMOVES labels whose hashtag was present when the
+    // editor opened but is no longer in the saved text. So if a user
+    // types `#work`, saves, then deletes the `#work` text and saves
+    // again, the "work" label auto-detaches.
     const allLabels = useStore.getState().labels;
     const labelByLower = new Map(
       allLabels.map((l) => [l.name.toLowerCase(), l]),
     );
-    const tags = extractHashtagsFromNote({
+    const currentTags = extractHashtagsFromNote({
       title: d.title,
       body: d.body,
       checklist: d.checklist,
     });
+    const previousTags = ex
+      ? extractHashtagsFromNote({
+          title: ex.title,
+          body: ex.body,
+          checklist: ex.checklist,
+        })
+      : [];
+    const currentTagSet = new Set(currentTags.map((t) => t.toLowerCase()));
+    const removedTagSet = new Set(
+      previousTags
+        .map((t) => t.toLowerCase())
+        .filter((t) => !currentTagSet.has(t)),
+    );
     const mergedLabelIds = new Set(d.labels);
-    for (const tag of tags) {
+    // Auto-add labels for current tags.
+    for (const tag of currentTags) {
       const existing = labelByLower.get(tag.toLowerCase());
       if (existing) {
         mergedLabelIds.add(existing.id);
@@ -298,6 +313,11 @@ export function NoteEditor() {
           // simply miss the label until the next save.
         }
       }
+    }
+    // Auto-remove labels whose hashtag disappeared from the text.
+    for (const removed of removedTagSet) {
+      const lbl = labelByLower.get(removed);
+      if (lbl) mergedLabelIds.delete(lbl.id);
     }
 
     const payload: NoteInput = {

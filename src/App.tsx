@@ -63,11 +63,22 @@ export default function App() {
             /* ignore */
           }
         });
+        // EI-V0.5-7 — surface global-hotkey registration failure (most
+        // commonly: another app already owns Ctrl+Alt+N).
+        const u3 = await listen<string>("keepr://hotkey-status", (e) => {
+          if (e.payload && e.payload !== "ok") {
+            useStore.getState().showToast(
+              "Ctrl+Alt+N quick-capture is unavailable — another app may already use that shortcut.",
+              { durationMs: 8000 },
+            );
+          }
+        });
         if (cancelled) {
           u1();
           u2();
+          u3();
         } else {
-          unlisteners.push(u1, u2);
+          unlisteners.push(u1, u2, u3);
         }
       } catch {
         // listen() fails outside Tauri (browser preview, vitest).

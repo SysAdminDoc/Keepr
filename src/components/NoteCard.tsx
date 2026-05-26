@@ -267,7 +267,7 @@ export function NoteCard({ note }: Props) {
       <div className="px-4 pt-3 pb-2 pr-10">
         {note.title && (
           <div className="font-medium text-base leading-snug break-words">
-            {note.title}
+            <HighlightHashtags text={note.title} />
           </div>
         )}
       </div>

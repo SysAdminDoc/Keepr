@@ -351,12 +351,25 @@ export const useStore = create<UIState>((set, get) => ({
       return { notes: sortNotes(next, s.sortMode) };
     }),
   patchNote: (id, patch) =>
-    set((s) => ({
-      notes: sortNotes(
-        s.notes.map((n) => (n.id === id ? { ...n, ...patch } : n)),
-        s.sortMode,
-      ),
-    })),
+    set((s) => {
+      const next = s.notes.map((n) => (n.id === id ? { ...n, ...patch } : n));
+      // EI-V0.5-8 — skip the O(n log n) re-sort when the patch can't
+      // possibly affect ordering. Sort keys for each mode:
+      //   modified: updated_at
+      //   created:  created_at
+      //   title:    title
+      //   custom:   position
+      // Pinned always wins, so any pin change must re-sort.
+      const affectsSort =
+        "pinned" in patch ||
+        "updated_at" in patch ||
+        "position" in patch ||
+        ("title" in patch && s.sortMode === "title") ||
+        ("created_at" in patch && s.sortMode === "created");
+      return {
+        notes: affectsSort ? sortNotes(next, s.sortMode) : next,
+      };
+    }),
   removeNote: (id) =>
     set((s) => ({ notes: s.notes.filter((n) => n.id !== id) })),
   removeNotesWhere: (predicate) =>
