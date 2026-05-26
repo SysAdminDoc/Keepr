@@ -38,6 +38,7 @@ import { api } from "../api";
 import { bgFor, borderFor } from "../colors";
 import { ColorPicker } from "./ColorPicker";
 import { IconBtn } from "./IconBtn";
+import { extractHashtagsFromNote } from "../lib/hashtags";
 import type { ChecklistItemInput, ColorKey, Note, NoteKind, NoteInput } from "../types";
 
 interface ChecklistRowProps {
@@ -248,6 +249,38 @@ export function NoteEditor() {
     closingRef.current = true;
     const d = draftRef.current;
     const ex = existingRef.current;
+
+    // NF-07 — extract inline #hashtags from title/body/checklist, create
+    // any missing labels, and union them with the draft's manually-picked
+    // labels. Case-insensitive matching against existing labels avoids
+    // creating duplicates (the Rust create_label already de-dupes, but
+    // we want the merged label id to land on the saved note).
+    const allLabels = useStore.getState().labels;
+    const labelByLower = new Map(
+      allLabels.map((l) => [l.name.toLowerCase(), l]),
+    );
+    const tags = extractHashtagsFromNote({
+      title: d.title,
+      body: d.body,
+      checklist: d.checklist,
+    });
+    const mergedLabelIds = new Set(d.labels);
+    for (const tag of tags) {
+      const existing = labelByLower.get(tag.toLowerCase());
+      if (existing) {
+        mergedLabelIds.add(existing.id);
+      } else {
+        try {
+          const created = await api.createLabel(tag);
+          useStore.getState().upsertLabel(created);
+          mergedLabelIds.add(created.id);
+        } catch {
+          // Ignore failures (e.g. UNIQUE collision races) — note will
+          // simply miss the label until the next save.
+        }
+      }
+    }
+
     const payload: NoteInput = {
       kind: d.kind,
       title: d.title,
@@ -257,7 +290,7 @@ export function NoteEditor() {
       checklist: d.checklist
         .filter((c) => c.text.trim().length > 0)
         .map((c, i) => ({ ...c, position: i })),
-      labels: d.labels,
+      labels: [...mergedLabelIds],
     };
     const isEmptyNow =
       !d.title.trim() &&

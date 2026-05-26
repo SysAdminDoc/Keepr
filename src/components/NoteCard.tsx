@@ -266,7 +266,7 @@ export function NoteCard({ note }: Props) {
       {note.kind === "text" ? (
         note.body && (
           <div className="px-4 pb-3 text-[14px] leading-snug whitespace-pre-wrap break-words max-h-[16rem] overflow-hidden">
-            {note.body}
+            <HighlightHashtags text={note.body} />
           </div>
         )
       ) : (
@@ -366,6 +366,39 @@ export function NoteCard({ note }: Props) {
       </div>
     </div>
   );
+}
+
+/**
+ * NF-07 — render `#hashtag` tokens in a slightly different color so the
+ * inline-tag pattern is visible in the card preview. Mirrors the parser
+ * in src/lib/hashtags.ts; this is read-only (text remains text in
+ * SQLite) so renderer drift doesn't lose data.
+ */
+function HighlightHashtags({ text }: { text: string }) {
+  // Same regex as src/lib/hashtags.ts but expressed as a split so we get
+  // the surrounding text segments back.
+  const parts: React.ReactNode[] = [];
+  const re = /(^|\s)#([\p{L}_][\p{L}\p{N}_-]*)/gu;
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+  let key = 0;
+  while ((match = re.exec(text)) !== null) {
+    const [whole, lead, tag] = match;
+    const start = match.index;
+    if (start > lastIndex) parts.push(text.slice(lastIndex, start));
+    if (lead) parts.push(lead);
+    parts.push(
+      <span
+        key={key++}
+        className="text-[#1a73e8] dark:text-[#8ab4f8] font-medium"
+      >
+        #{tag}
+      </span>,
+    );
+    lastIndex = start + whole.length;
+  }
+  if (lastIndex < text.length) parts.push(text.slice(lastIndex));
+  return <>{parts}</>;
 }
 
 function ChipsRow({ noteLabelIds }: { noteLabelIds: string[] }) {
