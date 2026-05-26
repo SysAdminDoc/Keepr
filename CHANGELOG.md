@@ -6,6 +6,27 @@ All notable changes to Keepr are documented here. Format loosely follows [Keep a
 
 (See [ROADMAP.md](ROADMAP.md) for the live task list.)
 
+## [0.12.0] — 2026-05-26 — "Plumbing pass"
+
+Infrastructure-level cleanup that doesn't change UX but tightens the operational story. Three Phase C deferrals close in one shot: structured logging via `tauri-plugin-log`, reminder schema cleanup, and clean scheduler shutdown on app exit.
+
+### Added
+
+- **NF-V0.5-J** `tauri-plugin-log` wired up. Writes to `<app_log_dir>/Keepr.log` (e.g. `%LOCALAPPDATA%\com.sysadmindoc.keepr\logs\Keepr.log` on Windows, `~/Library/Logs/com.sysadmindoc.keepr/` on macOS, `$XDG_DATA_HOME/com.sysadmindoc.keepr/logs/` on Linux). Rotates at 1 MiB, keeps one `.old`. Mirrors to stdout in `tauri dev`. Reminder scheduler and notification failures now use `log::warn!` / `log::info!` instead of `eprintln!`.
+- New `get_log_dir` Tauri command. Settings → new "Log folder" row shows the resolved path with a Copy-path button (avoids pulling in the shell/opener plugin for a one-click reveal).
+
+### Changed
+
+- **EI-V0.5-14** Reminder schema cleanup. Schema v8 rebuilds the `reminders` table to use `note_id` as the primary key directly (one reminder per note made the separate `id` column redundant since v0.4). Adds a `CHECK (length(fire_at) > 0)` so a future bug can't land an empty timestamp. Migration uses the SQLite table-rebuild pattern (CREATE → INSERT … SELECT → DROP → RENAME); idempotent like every prior migration.
+  - `Reminder.id` removed from both the Rust struct and the TypeScript interface. Callers use `noteId` (the only identity that ever made sense).
+  - `mark_reminder_fired(state, note_id, fired_at)` — renamed parameter; all SQL `WHERE id = ?1` clauses become `WHERE note_id = ?1`. Scheduler thread emits `keepr://reminder-fired` with the note id payload as before.
+- **EI-V0.5-12** Scheduler shutdown via cancellation flag. `AppState` gains `shutdown: Arc<AtomicBool>`. The reminder thread checks it at the top of every iteration and between 1-second sleep slices (so exit takes ≤ 1 second to propagate instead of waiting up to 30). `tauri::RunEvent::ExitRequested` sets the flag — Tauri's run loop now uses `.build().run(|app, event| …)` instead of the inline `.run(generate_context!())` to install the handler.
+
+### Tests
+
+- **44 cargo tests** (up from 43): 1 schema v8 migration test verifies the rebuilt `reminders` table has `note_id` as PK + no `id` column + the `fire_at` CHECK rejects empty strings. Six existing reminder integration tests updated to drop the `id` column from their seed INSERTs.
+- **80 vitest cases** unchanged — `Reminder.id` removal landed without any test churn beyond the existing reminders.test.ts factory.
+
 ## [0.11.0] — 2026-05-26 — "Drawing notes"
 
 Final roadmap item from the v0.5 research pass. The Paintbrush button on NewNoteBar — disabled since v0.2 with the "coming v0.5" tooltip — now opens a real drawing canvas. Strokes are tracked vector-side for proper hi-DPR rendering + undo, then flattened to a PNG attachment on save (matching the same attachment pipeline image-paste uses).

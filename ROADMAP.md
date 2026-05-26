@@ -1,116 +1,84 @@
 # Keepr Roadmap
 
-> Single source of truth for outstanding work. Completed items move to [CHANGELOG.md](CHANGELOG.md). Long-form rationale lives in [RESEARCH_FEATURE_PLAN_v0.5.md](RESEARCH_FEATURE_PLAN_v0.5.md). The original [RESEARCH_FEATURE_PLAN.md](RESEARCH_FEATURE_PLAN.md) is kept as historical reference for the v0.1 → v0.2 transition.
+> Single source of truth for **outstanding work only**. Shipped batches and per-release notes live in [CHANGELOG.md](CHANGELOG.md). Long-form rationale for the v0.5+ items lives in [RESEARCH_FEATURE_PLAN_v0.5.md](RESEARCH_FEATURE_PLAN_v0.5.md); the original v0.1→v0.2 research is in [RESEARCH_FEATURE_PLAN.md](RESEARCH_FEATURE_PLAN.md). Both research files are historical reference — when they disagree with this roadmap, this roadmap wins.
 
 Priority legend: **P0** = data loss / crash / security · **P1** = visible bug / high user value · **P2** = polish / nice-to-have · **P3** = future / experimental.
 
----
-
-## Shipped
-
-- **v0.2 "Trust & Foundations"** — 2026-05-25 — every P0 audit finding closed
-- **v0.3 "Power & Parity"** — 2026-05-25 — Keep canonical parity + power-user
-- **v0.4 "Multimodal"** — 2026-05-25 — image attachments, reminders, hashtags, vault/Takeout I/O
-
-Full notes per release in [CHANGELOG.md](CHANGELOG.md).
+Releases shipped 2026-05-25 → 2026-05-26: **v0.2** → **v0.11.0** (twelve milestones, every NF-V0.5-* roadmap item closed). See [CHANGELOG.md](CHANGELOG.md).
 
 ---
 
-## Phase A — v0.4.1 hotfix — SHIPPED 2026-05-26
+## Open — actively planned
 
-All four P0s from the v0.5 audit closed. Full notes in [CHANGELOG.md](CHANGELOG.md).
+These are the items still on deck. They batch into the next handful of minor releases below.
 
-- [x] **EI-V0.5-2** — Reminder lost-toast fix (two-phase fire + retry on failure)
-- [x] **EI-V0.5-3** — Empty-note + reminder orphan
-- [x] **EI-V0.5-1 (drag)** — Refuse drag in non-Notes sections + position backfill migration (schema v4)
-- [x] **EI-V0.5-4** — `tauri-plugin-single-instance`
+### v0.12.0 "Plumbing pass" — SHIPPED 2026-05-26
 
----
+- [x] **NF-V0.5-J** — `tauri-plugin-log` wired up + Settings → "Log folder" row with Copy-path button
+- [x] **EI-V0.5-14** — Reminder schema cleanup (schema v8 drops `reminders.id`, makes `note_id` the PK, adds CHECK on `fire_at`)
+- [x] **EI-V0.5-12** — Scheduler shutdown via `AtomicBool` checked between 1-second sleep slices; wired to `RunEvent::ExitRequested`
 
-## Phase B — v0.5.0 "Polish & Reliability" — SHIPPED 2026-05-26
+### v0.13.0 "Search depth"
 
-Audit P1 batch + first bundled-release pipeline. Full notes in [CHANGELOG.md](CHANGELOG.md).
+- [ ] **EI-18** — SQLite FTS5 backend for search (currently every keystroke runs `filterNotes` over the full note set with `toLowerCase().includes(…)`). Adds `notes_fts` virtual table + triggers; moves search to a Rust command. 150 ms debounce on the input.
 
-- [x] **NF-V0.5-F** — Bundled release pipeline (`tauri-action`, unsigned MSI + NSIS + portable zip)
-- [x] **NF-V0.5-B** — Image thumbnail pipeline (480 px `<id>.thumb.jpg`, served via protocol with `onError` fallback)
-- [x] **EI-V0.5-5** — Selection/Esc/filter interactions tightened
-- [x] **EI-V0.5-6** — Vault + Takeout correctness (per-run subfolder; Takeout timestamps + reminders preserved)
-- [x] **EI-V0.5-7** — Global-hotkey failure surfaces as toast
-- [x] **EI-V0.5-8** — `patchNote` skip-sort when patch doesn't touch sort keys
-- [x] **EI-V0.5-9** — Hashtag auto-detach on text removal + title-hashtag highlighting
-- [x] **Test coverage** — 89 automated checks (20 cargo + 69 vitest)
-- [ ] *Auto-updater scaffold deferred to v0.5.1 — needs published Releases manifest first*
-- [ ] *EI-V0.5-8 list_notes payload trim deferred — couldn't quantify visible win at current scale*
+### v0.14.0 "Checklist & textures"
 
----
+- [ ] **NF-21** — Indent sub-items in checklists (1 level only, Keep parity). Tab/Shift+Tab. Adds `parent_id` to `checklist_items`.
+- [ ] **NF-22** — Background image patterns (Keep's 9 textures, syncs everywhere). New `background_pattern` column; 9 SVG patterns.
+- [ ] **NF-20 polish** — FLIP animation on Move-checked-to-bottom (the data behavior shipped in v0.3; only the animation is left).
 
-## Phase C — v0.5.1 polish nice-to-haves — SHIPPED 2026-05-26
+### v0.15.0 "Frontend polish"
 
-Selective; the items most visible to users landed, the heavier refactors slip to v0.5.2+. Full notes in [CHANGELOG.md](CHANGELOG.md).
+- [ ] **EI-10** — Replace `react-masonry-css` (unmaintained since Aug 2022; no virtualization). Adopt `masonic` or roll a CSS-Grid `grid-template-rows: masonry` component with a `ResizeObserver` shim for non-Firefox.
+- [ ] **EI-V0.5-17** — Code-split secondary modals via `React.lazy` (SettingsModal, LabelsManager, HistoryDrawer, ReminderPicker, VaultSection, AppLockSection, DrawingCanvasModal); tree-shake `lucide-react` to per-icon imports.
+- [ ] **EI-V0.5-15** (rest) — Kebab "More" overflow on the editor toolbar (current toolbar is wide; collapse non-essential actions into a dropdown when window narrows).
 
-- [x] **EI-V0.5-11** — Drop unused capability permissions
-- [x] **EI-V0.5-13** — Backup pipeline polish (stream files into zip, mirror import caps to export, insert-then-write order on Takeout)
-- [x] **EI-V0.5-15** (partial) — `aria-pressed` audit across `IconBtn` callsites (kebab overflow deferred)
-- [x] **EI-V0.5-16** — Docs catch-up (README features list, SECURITY threat model, CONTRIBUTING project-layout)
-- [x] **EI-V0.5-18** — Nits batch (rename `nextWeek` → `nextMonday`, delete `_UnusedX` + `void useStore`, BulkActionBar Restore icon, etc.)
-- [x] **NF-V0.5-H** — Per-label note counts in sidebar
-- [x] **NF-V0.5-I** — Paste image from clipboard + drag-drop onto editor
-- [ ] **EI-V0.5-10** — Refactor mega-files (`commands.rs` split; extract `<ChecklistSection>` + `<EditorToolbar>` from `NoteEditor.tsx`; sectionise `SettingsModal.tsx`) — deferred to v0.6.1
-- [ ] **EI-V0.5-12** — Scheduler shutdown via tokio task — deferred
-- [ ] **EI-V0.5-14** — Reminder schema cleanup (drop unused `reminders.id`, add CHECK on `fire_at`) — deferred
-- [ ] **EI-V0.5-15** (rest) — Kebab "More" overflow on the editor toolbar — deferred
-- [ ] **EI-V0.5-17** — Code-split secondary modals via `React.lazy`; tree-shake lucide-react — deferred
-- [ ] **NF-V0.5-J** — `tauri-plugin-log` + Settings → Open log — deferred
+### v0.16.0 "Refactor pass"
+
+- [ ] **EI-V0.5-10** — Split mega-files. `src-tauri/src/commands.rs` is ~3 k lines — split into `commands/notes.rs`, `commands/labels.rs`, `commands/reminders.rs`, `commands/vault.rs`, `commands/backup.rs`, `commands/io.rs`. `src/components/NoteEditor.tsx` (~1100 lines) — extract `<ChecklistSection>` and `<EditorToolbar>`. `src/components/SettingsModal.tsx` (~400 lines) — sectionise into a `<SettingsSection title=…>` shell.
 
 ---
 
-## Phase D — v0.6.0 "Reminders v2" — SHIPPED 2026-05-26
+## Open — backlog / not actively scheduled
 
-- [x] **NF-V0.5-A** — Reminders v2 (recurrence whitelist `FREQ=DAILY|WEEKLY|MONTHLY|YEARLY`, dedicated Reminders sidebar section, snooze panel, in-app fire toast with View-note action)
+Items kept in the roadmap so they don't get forgotten, but no current intent to ship.
 
-## Phase D — v0.7.0 "App Lock" — SHIPPED 2026-05-26
-
-NF-V0.5-C split in half: App Lock (UI-gating PIN with Argon2id) shipped first; Private Vault (per-note at-rest encryption with XChaCha20-Poly1305) shipped right after in v0.8.0. Full notes in [CHANGELOG.md](CHANGELOG.md) and the threat model in [SECURITY.md](SECURITY.md).
-
-- [x] **NF-V0.5-C (App Lock)** — Argon2id PHC + LockScreen overlay + idle auto-lock + Settings panel + lost-PIN-no-recovery policy documented
-
-## Phase D — v0.8.0 "Private Vault" — SHIPPED 2026-05-26
-
-- [x] **NF-V0.5-C (Private Vault)** — schema v6, XChaCha20-Poly1305 per-note AEAD with note-id AAD, Argon2id-derived KEK wrapping a random DEK, change-password via rewrap only, vault Settings section, NoteEditor Lock/Unlock action, NoteCard locked-placeholder + vaulted badge, App Lock idle fire also drops the DEK
+- [ ] **NF-V0.5-D follow-up** — body **diff** in HistoryDrawer (currently just a 6-line preview). Adds `diff-match-patch` or a small line-diff. Low value while the per-snapshot body cap is small.
+- [ ] **Auto-updater scaffold** — needs published Releases manifest first, which requires either an EV cert or an accepted "ship unsigned and warn users" path. Revisit when distribution scale justifies it.
 
 ---
 
-## Phase E — v0.9.0 "History & Calendar" — SHIPPED 2026-05-26
+## Won't ship (rescoped from the original research plan)
 
-- [x] **NF-V0.5-D** — Note version history with one-click restore (last 20 per note, vault snapshots store ciphertext as-is)
-- [x] **NF-V0.5-G** — ICS export of active reminders (RFC 5545 VCALENDAR/VEVENT, RRULE preserved, vault titles redacted)
+These were on the v0.1 research list but conflict with Keepr's actual design promises. Documented here so they don't keep getting re-added.
 
-## Phase E — v0.10.0 "Cross-platform CI" — SHIPPED 2026-05-26
-
-- [x] **NF-V0.5-K** — GitHub Actions release matrix expanded to macOS (aarch64+x86_64) and Linux x86_64; tauri.conf.json bundle.targets covers dmg/deb/appimage; README documents per-OS install quirks
-
-## Phase E — v0.11.0 "Drawing notes" — SHIPPED 2026-05-26
-
-- [x] **NF-V0.5-E** — Drawing notes (PointerEvents canvas, 8-color palette, three stroke sizes, eraser, undo, clear; PNG attachment on save via existing add_image_attachment_bytes path; vector replay + SVG storage deferred to a future release)
+- **NF-12 — Image OCR (Windows OCR API)**: requires per-platform OCR backends (`windows-rs::Windows::Media::Ocr` on Windows, Vision framework on macOS, Tesseract on Linux). The cross-platform CI shipped in v0.10 commits us to keeping the three platforms feature-parity; bundling a multi-MB OCR engine into every build (or shipping a Windows-only feature) both fail that bar. Users who need OCR can use the OS-side tool (Snipping Tool, macOS Live Text, GNOME OCR) and paste the extracted text into a Keepr note.
+- **NF-13 — Rich URL preview cards**: requires outbound HTTP fetches of every pasted URL. Directly contradicts the README + SECURITY promise that "Keepr does not make outbound network requests". Cannot be opt-in-only either because once an opt-in network surface exists, "is Keepr actually offline?" becomes a per-user-config question. Won't ship.
 
 ---
 
-## Roadmap status (2026-05-26)
+## Explicit non-goals
 
-Every NF-V0.5-* item from [RESEARCH_FEATURE_PLAN_v0.5.md](RESEARCH_FEATURE_PLAN_v0.5.md) has shipped. The v0.5+ Phase C deferrals (mega-file refactor EI-V0.5-10, tokio scheduler EI-V0.5-12, schema cleanup EI-V0.5-14, kebab overflow EI-V0.5-15, code-split EI-V0.5-17, tauri-plugin-log NF-V0.5-J) remain as polish work for future minor releases. Long-tail P3 items (NF-12 OCR, NF-13 URL previews, NF-21 sub-checklist indent, NF-22 background patterns) are open as future work but not actively scheduled.
-- [ ] **NF-V0.5-K** — macOS + Linux CI matrix (no platform support promise) [P3, S]
-- [ ] **NF-12** Image OCR via Windows OCR API [P3, M]
-- [ ] **NF-13** Rich URL preview cards [P3, M]
-- [ ] **NF-21** Indent sub-items in checklists [P3, M]
-- [ ] **NF-22** Background image patterns (Keep's 9 textures) [P3, S]
-- [ ] **EI-10** Replace `react-masonry-css` [P2, M]
-- [ ] **EI-18** SQLite FTS5 backend [P2, L]
-- [ ] **NF-20 polish** FLIP animation on Move-checked-to-bottom [P3, S]
+(carried forward from the original [RESEARCH_FEATURE_PLAN.md](RESEARCH_FEATURE_PLAN.md), still binding)
+
+- Collaboration / real-time co-edit — out of scope; single-user offline.
+- Location-based reminders — battery hungry; doesn't fit a desktop app.
+- Folders / hierarchy — Keep identity is flat; Labels covers it.
+- Outliner / block editing — anti-Keep.
+- AI features / RAG / autocomplete — preserves the no-network promise.
+- Account / sync server — Keepr's value is the absence.
+- Telemetry — same.
+- Feature paywall — MIT; never fragment.
+- User scripts attached to notes — sandboxing nightmare.
+- Custom protocol expansion to arbitrary file types — `keepr-resource://` stays strictly for images/audio/drawings.
+- Built-in cloud-sync without user-managed credentials — even when (if) sync ships, it should be "watch a folder you point at your existing cloud sync" rather than a Keepr-managed server.
 
 ---
 
-## Resolved open questions
+## Resolved decisions
 
-- **Code-signing strategy** — unsigned for now. README will document the SmartScreen workaround. Revisit when distribution scale justifies a cert.
-
-See [RESEARCH_FEATURE_PLAN_v0.5.md "Open Questions"](RESEARCH_FEATURE_PLAN_v0.5.md#open-questions) for the remaining undecided defaults.
+- **Code-signing (v0.5+)** — ship unsigned with the SmartScreen workaround documented in [SECURITY.md](SECURITY.md). Revisit when distribution scale justifies a cert.
+- **macOS / Linux support tier (v0.10+)** — Windows is the **supported** channel; macOS + Linux are **best-effort** binaries built by the CI matrix so the codebase stays portable. No promise to fix platform-specific bugs.
+- **App Lock + Private Vault lost-credential policy (v0.7/v0.8+)** — no recovery, documented loudly. The data on disk is recoverable for App Lock (just delete the PHC row); the data for vaulted notes is permanently inaccessible without the password.
+- **Reminder scheduler granularity (v0.4+)** — 30-second poll interval. Documented up-to-30-s lag is acceptable. Revisit if anyone files a bug.
