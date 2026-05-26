@@ -6,6 +6,26 @@ All notable changes to Keepr are documented here. Format loosely follows [Keep a
 
 (See [ROADMAP.md](ROADMAP.md) for the live task list.)
 
+## [0.16.3] — 2026-05-26 — "Takeout importer accepts any zip"
+
+The Takeout importer used to require the canonical English path `Takeout/Keep/<title>.json`. That worked for Keep-only English exports but broke on three real-world cases I kept hitting:
+
+- **Localized folder names.** Google Takeout translates the product folder for non-English accounts — `Takeout/Notizen/` (German), `Takeout/메모/` (Korean), `Takeout/Notas/` (Spanish), etc. The literal `/Keep/` substring filter dropped every note.
+- **Re-zipped exports.** When users extract a Takeout, prune the parts they don't want, and re-zip the result, the top-level `Takeout/` prefix often disappears (you get `Keep/foo.json` at the archive root). The old filter required a leading `/Keep/` which doesn't match root-level `Keep/`.
+- **Multi-product archives.** A `takeout-...-3-001.zip` containing Keep + Drive + Photos would have its non-Keep JSONs ignored cleanly by the path filter, but only by coincidence — a Drive folder that happened to be named `Keep` would slip through.
+
+### Changed
+
+- **Importer detects notes by JSON shape, not path.** `import_takeout` now reads every `.json` entry in the archive and treats it as a Keep note if `is_keep_note_shape(v)` returns true: presence of `isPinned` (bool), at least one of `createdTimestampUsec`/`userEditedTimestampUsec`, and at least one of `textContent`/`listContent`. This rejects Takeout's `Labels.json` (a top-level array — `as_object()` returns `None`), Drive/Photos metadata in multi-product exports, and any other non-Keep JSON that shares the archive. The user's actual zip (89 notes, 23 trashed → 66 imported, 15 pinned) still imports identically — but a German export with `Takeout/Notizen/...` now works too.
+
+### Verified
+
+- Pinning was already preserved end-to-end (`isPinned` → `NoteInput.pinned` → `INSERT INTO notes (..., pinned, ...)` in `create_note`). Added a unit test asserting `is_keep_note_shape` recognizes the canonical 2026 Takeout note shape (which includes `isPinned: true`).
+
+### Tests
+
+- New: `is_keep_note_shape_{accepts_canonical_takeout_note, accepts_list_only_note, rejects_takeout_labels_array, rejects_other_product_json, rejects_partial_match}`.
+
 ## [0.16.2] — 2026-05-26 — "Editor open crash fix"
 
 P0 — the editor failed to open at all on a fresh v0.16.1 install. Clicking "Take a note" (or any of the new-note affordances, including the global hotkey + tray quick-capture) blanked the entire window with no recovery.

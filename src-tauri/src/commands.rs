@@ -1173,11 +1173,18 @@ fn mime_to_ext(mime: &str) -> &'static str {
 }
 
 /// NF-08 — Google Keep Takeout importer. The Takeout export is a ZIP
-/// where each note lives at `Takeout/Keep/<title>.json` (+ a sibling
-/// HTML rendering we ignore + binary attachments alongside the JSON).
-/// We iterate every `.json` entry, parse with serde_json's untyped
-/// `Value` to be forgiving of schema drift, and call the existing
-/// `create_note` path to insert.
+/// where each note lives next to a sibling HTML rendering (which we
+/// ignore) and any binary attachments. The canonical path is
+/// `Takeout/Keep/<title>.json`, but Google localizes the folder name
+/// for non-English accounts (`Takeout/Notizen/...` in German,
+/// `Takeout/메모/...` in Korean) and users sometimes re-zip the
+/// extracted tree without the `Takeout/` prefix. So we read every
+/// `.json` in the archive and detect Keep notes by JSON shape
+/// (`is_keep_note_shape`) rather than path — that way any zip that
+/// contains a Keep export will import, regardless of folder naming.
+///
+/// Non-image attachments (audio voice notes) are skipped — we only
+/// surface the image attachments Keepr knows how to render.
 ///
 /// Returns the number of notes successfully imported.
 #[tauri::command]
@@ -1206,12 +1213,13 @@ pub fn import_takeout(
         if entry.is_dir() {
             continue;
         }
-        if name.ends_with(".json") && name.contains("/Keep/") {
+        if name.to_lowercase().ends_with(".json") {
             let mut text = String::new();
-            entry
-                .read_to_string(&mut text)
-                .map_err(err)?;
-            // Folder for resolving sibling attachments.
+            if entry.read_to_string(&mut text).is_err() {
+                continue; // binary file with .json extension — skip rather than abort
+            }
+            // Folder for resolving sibling attachments. Shape check
+            // happens in pass 2 so we don't double-parse.
             let folder = name.rsplit_once('/').map(|(d, _)| d.to_string()).unwrap_or_default();
             note_entries.push((folder, text));
         } else if entry.size() > 0 && entry.size() <= MAX_ATTACHMENT_BYTES {
@@ -1229,6 +1237,12 @@ pub fn import_takeout(
             Ok(v) => v,
             Err(_) => continue,
         };
+        if !is_keep_note_shape(&v) {
+            // Filters out Takeout's `Labels.json` (an array), Drive/
+            // Photos metadata in multi-product exports, and any other
+            // non-Keep JSON that happens to share the archive.
+            continue;
+        }
         let title = v.get("title").and_then(|x| x.as_str()).unwrap_or("").to_string();
         let text_body = v
             .get("textContent")
@@ -1416,6 +1430,24 @@ pub fn import_takeout(
         imported += 1;
     }
     Ok(imported)
+}
+
+/// Detect a Google Keep note by JSON shape so we don't depend on the
+/// archive path (Takeout localizes the `Keep` folder name and users
+/// sometimes re-zip without the `Takeout/` prefix). A Keep note has
+/// an `isPinned` boolean, at least one canonical timestamp, and at
+/// least one content field (text body or checklist).
+fn is_keep_note_shape(v: &serde_json::Value) -> bool {
+    let obj = match v.as_object() {
+        Some(o) => o,
+        None => return false,
+    };
+    let has_pinned = obj.get("isPinned").map(|x| x.is_boolean()).unwrap_or(false);
+    let has_ts = obj.contains_key("createdTimestampUsec")
+        || obj.contains_key("userEditedTimestampUsec");
+    let has_content = obj.contains_key("textContent")
+        || obj.contains_key("listContent");
+    has_pinned && has_ts && has_content
 }
 
 fn map_keep_color(c: &str) -> String {
@@ -3454,6 +3486,67 @@ mod tests {
         // Garbage timestamp → None
         let garbage = serde_json::json!({ "fireOn": "not-a-date" });
         assert_eq!(takeout_reminder_fire_at(&garbage), None);
+    }
+
+    #[test]
+    fn is_keep_note_shape_accepts_canonical_takeout_note() {
+        // Exact field set seen in a 2026 Google Takeout (Keep-only export).
+        let note = serde_json::json!({
+            "color": "DEFAULT",
+            "isTrashed": false,
+            "isPinned": true,
+            "isArchived": false,
+            "textContent": "Hello world",
+            "title": "Test",
+            "userEditedTimestampUsec": 1704067200000000u64,
+            "createdTimestampUsec": 1704067200000000u64,
+            "textContentHtml": "<p>Hello world</p>",
+        });
+        assert!(is_keep_note_shape(&note));
+    }
+
+    #[test]
+    fn is_keep_note_shape_accepts_list_only_note() {
+        // Checklist note without textContent — still a Keep note.
+        let list = serde_json::json!({
+            "isPinned": false,
+            "isTrashed": false,
+            "listContent": [{"text": "buy milk", "isChecked": false}],
+            "createdTimestampUsec": 1u64,
+        });
+        assert!(is_keep_note_shape(&list));
+    }
+
+    #[test]
+    fn is_keep_note_shape_rejects_takeout_labels_array() {
+        // Takeout's `Labels.json` is a top-level array, not an object.
+        let labels = serde_json::json!([{"name": "Work"}, {"name": "Personal"}]);
+        assert!(!is_keep_note_shape(&labels));
+    }
+
+    #[test]
+    fn is_keep_note_shape_rejects_other_product_json() {
+        // Drive/Photos metadata in a multi-product Takeout — has no
+        // `isPinned`, no Keep timestamps, no Keep content fields.
+        let drive = serde_json::json!({
+            "name": "Some doc",
+            "lastModifiedTime": "2024-01-01T00:00:00Z",
+            "mimeType": "application/pdf",
+        });
+        assert!(!is_keep_note_shape(&drive));
+    }
+
+    #[test]
+    fn is_keep_note_shape_rejects_partial_match() {
+        // Has `isPinned` but no content + no timestamps — not a note.
+        let partial = serde_json::json!({"isPinned": false});
+        assert!(!is_keep_note_shape(&partial));
+        // Has content but no `isPinned` — also rejected.
+        let no_pinned = serde_json::json!({
+            "textContent": "x",
+            "createdTimestampUsec": 1u64,
+        });
+        assert!(!is_keep_note_shape(&no_pinned));
     }
 
     #[test]
