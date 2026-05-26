@@ -10,8 +10,8 @@ import { ConfirmDialog } from "./ConfirmDialog";
 export function SettingsModal() {
   const settingsOpen = useStore((s) => s.settingsOpen);
   const closeSettings = useStore((s) => s.closeSettings);
-  const dark = useStore((s) => s.dark);
-  const toggleDark = useStore((s) => s.toggleDark);
+  const themeMode = useStore((s) => s.themeMode);
+  const setThemeMode = useStore((s) => s.setThemeMode);
   const load = useStore((s) => s.load);
   const showToast = useStore((s) => s.showToast);
 
@@ -111,14 +111,40 @@ export function SettingsModal() {
           <div className="px-5 py-4 space-y-5">
             <Row
               title="Theme"
-              subtitle={dark ? "Dark" : "Light"}
+              subtitle={
+                themeMode === "system"
+                  ? "Follows your operating system"
+                  : themeMode === "dark"
+                  ? "Dark"
+                  : "Light"
+              }
               action={
-                <button
-                  onClick={toggleDark}
-                  className="px-3 py-1.5 text-sm rounded border border-gray-300 dark:border-[#5f6368] hover:bg-black/5 dark:hover:bg-white/10"
+                <div
+                  role="radiogroup"
+                  aria-label="Theme"
+                  className="inline-flex rounded border border-gray-300 dark:border-[#5f6368] overflow-hidden text-sm"
                 >
-                  Switch to {dark ? "light" : "dark"}
-                </button>
+                  {(["light", "dark", "system"] as const).map((mode) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      role="radio"
+                      aria-checked={themeMode === mode}
+                      onClick={() => setThemeMode(mode)}
+                      className={
+                        themeMode === mode
+                          ? "px-3 py-1.5 bg-[#1a73e8] text-white"
+                          : "px-3 py-1.5 hover:bg-black/5 dark:hover:bg-white/10"
+                      }
+                    >
+                      {mode === "light"
+                        ? "Light"
+                        : mode === "dark"
+                        ? "Dark"
+                        : "System"}
+                    </button>
+                  ))}
+                </div>
               }
             />
 

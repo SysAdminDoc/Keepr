@@ -1,5 +1,15 @@
 import { useEffect, useRef, useState } from "react";
-import { Menu, Search, RefreshCw, Settings, Moon, Sun, X } from "lucide-react";
+import {
+  Menu,
+  Search,
+  RefreshCw,
+  Settings,
+  Moon,
+  Sun,
+  X,
+  LayoutGrid,
+  Rows3,
+} from "lucide-react";
 import clsx from "clsx";
 import { useStore } from "../store";
 
@@ -14,6 +24,8 @@ export function TopBar({ onMenu }: Props) {
   const setSearch = useStore((s) => s.setSearch);
   const dark = useStore((s) => s.dark);
   const toggleDark = useStore((s) => s.toggleDark);
+  const viewMode = useStore((s) => s.viewMode);
+  const toggleViewMode = useStore((s) => s.toggleViewMode);
   const openSettings = useStore((s) => s.openSettings);
   const load = useStore((s) => s.load);
 
@@ -110,6 +122,22 @@ export function TopBar({ onMenu }: Props) {
             aria-hidden
             className={clsx(refreshing && "animate-spin motion-reduce:animate-none")}
           />
+        </button>
+        <button
+          className="p-3 rounded-full hover:bg-gray-200 dark:hover:bg-[#3c4043]"
+          onClick={toggleViewMode}
+          aria-label={
+            viewMode === "grid"
+              ? "Switch to list view (Ctrl+G)"
+              : "Switch to grid view (Ctrl+G)"
+          }
+          title={viewMode === "grid" ? "List view" : "Grid view"}
+        >
+          {viewMode === "grid" ? (
+            <Rows3 size={20} aria-hidden />
+          ) : (
+            <LayoutGrid size={20} aria-hidden />
+          )}
         </button>
         <button
           className="p-3 rounded-full hover:bg-gray-200 dark:hover:bg-[#3c4043]"

@@ -5,6 +5,28 @@
     <link rel="icon" type="image/svg+xml" href="/keep.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Keepr</title>
+    <script>
+      // EI-37 + NF-16 — set the dark class BEFORE first paint to avoid a
+      // flash of wrong theme. Stored values are "light" | "dark" | "system"
+      // (legacy installs may have no key, which we treat as "system" so
+      // the OS preference wins on first launch).
+      (function () {
+        try {
+          var saved = localStorage.getItem("keepr:theme");
+          var mode =
+            saved === "light" || saved === "dark" || saved === "system"
+              ? saved
+              : "system";
+          var prefersDark =
+            window.matchMedia &&
+            window.matchMedia("(prefers-color-scheme: dark)").matches;
+          var dark = mode === "dark" || (mode === "system" && prefersDark);
+          if (dark) document.documentElement.classList.add("dark");
+        } catch (_e) {
+          // localStorage can throw in restricted profiles; fail open to light.
+        }
+      })();
+    </script>
   </head>
   <body class="bg-white dark:bg-[#202124]">
     <div id="root"></div>

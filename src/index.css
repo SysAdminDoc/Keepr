@@ -81,6 +81,13 @@ button {
   margin-bottom: 8px;
 }
 
+/* NF-23 — list view: clamp the masonry to a single readable column. */
+.masonry-grid-list {
+  max-width: 600px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
 .note-card {
   transition: box-shadow .15s, border-color .15s;
 }

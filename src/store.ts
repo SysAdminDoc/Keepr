@@ -14,13 +14,20 @@ export interface Toast {
   durationMs: number;
 }
 
+export type ThemeMode = "light" | "dark" | "system";
+export type ViewMode = "grid" | "list";
+
 interface UIState {
   notes: Note[];
   labels: Label[];
   loaded: boolean;
   section: Section;
   search: string;
+  /** Resolved theme — true when the effective theme is dark. */
   dark: boolean;
+  /** User preference. `system` follows prefers-color-scheme. */
+  themeMode: ThemeMode;
+  viewMode: ViewMode;
   editorOpen: boolean;
   editorNoteId: string | null;
   settingsOpen: boolean;
@@ -29,7 +36,11 @@ interface UIState {
   load: () => Promise<void>;
   setSection: (s: Section) => void;
   setSearch: (q: string) => void;
+  /** Cycle through Light → Dark → System (legacy `toggleDark` retained). */
   toggleDark: () => void;
+  setThemeMode: (mode: ThemeMode) => void;
+  setViewMode: (mode: ViewMode) => void;
+  toggleViewMode: () => void;
   openEditor: (id: string | null) => void;
   closeEditor: () => void;
   openSettings: () => void;
@@ -54,6 +65,8 @@ interface UIState {
   removeLabel: (id: string) => void;
   /** Drop every note whose predicate matches (used by Empty Trash). */
   removeNotesWhere: (predicate: (n: Note) => boolean) => void;
+  /** @internal — used by the system-theme matchMedia listener. */
+  _setDarkFromSystem: (dark: boolean) => void;
 }
 
 let toastSeq = 0;
@@ -61,7 +74,8 @@ function nextToastId(): number {
   return ++toastSeq;
 }
 
-const THEME_KEY = "keepr:theme";
+const THEME_KEY = "keepr:theme"; // values: "light" | "dark" | "system" | (legacy: undefined)
+const VIEW_MODE_KEY = "keepr:view-mode"; // values: "grid" | "list"
 
 // EI-37 — the inline boot script in `index.html` toggles the `.dark` class on
 // <html> BEFORE the first React paint, so there's no flash of wrong theme.
@@ -69,6 +83,51 @@ const THEME_KEY = "keepr:theme";
 function readInitialDark(): boolean {
   if (typeof document === "undefined") return false;
   return document.documentElement.classList.contains("dark");
+}
+
+function readInitialThemeMode(): ThemeMode {
+  if (typeof localStorage === "undefined") return "system";
+  const stored = localStorage.getItem(THEME_KEY);
+  if (stored === "light" || stored === "dark" || stored === "system") return stored;
+  // No stored preference → System default (NF-16). Migrates v0.2 users who
+  // had no key set (we previously inferred from prefers-color-scheme).
+  return "system";
+}
+
+function readInitialViewMode(): ViewMode {
+  if (typeof localStorage === "undefined") return "grid";
+  return localStorage.getItem(VIEW_MODE_KEY) === "list" ? "list" : "grid";
+}
+
+function effectiveDark(mode: ThemeMode): boolean {
+  if (mode === "dark") return true;
+  if (mode === "light") return false;
+  if (typeof window === "undefined" || !window.matchMedia) return false;
+  return window.matchMedia("(prefers-color-scheme: dark)").matches;
+}
+
+function applyDarkClass(dark: boolean) {
+  if (typeof document === "undefined") return;
+  document.documentElement.classList.toggle("dark", dark);
+}
+
+// Forward declaration so the matchMedia listener below can reach the store
+// without creating an import cycle. Assigned at the bottom of this module.
+let useStoreRef: typeof useStore | null = null;
+
+// Watch system theme so a `themeMode === "system"` user follows OS-level
+// changes live. Registered once on module load.
+if (typeof window !== "undefined" && window.matchMedia) {
+  const mql = window.matchMedia("(prefers-color-scheme: dark)");
+  const onSystemChange = () => {
+    const s = useStoreRef?.getState?.();
+    if (s && s.themeMode === "system") {
+      const dark = effectiveDark("system");
+      applyDarkClass(dark);
+      s._setDarkFromSystem(dark);
+    }
+  };
+  mql.addEventListener?.("change", onSystemChange);
 }
 
 export const useStore = create<UIState>((set, get) => ({
@@ -82,6 +141,8 @@ export const useStore = create<UIState>((set, get) => ({
   editorNoteId: null,
   settingsOpen: false,
   labelsManagerOpen: false,
+  themeMode: readInitialThemeMode(),
+  viewMode: readInitialViewMode(),
   toasts: [],
   load: async () => {
     try {
@@ -101,16 +162,27 @@ export const useStore = create<UIState>((set, get) => ({
   setSection: (s) => set({ section: s }),
   setSearch: (q) => set({ search: q }),
   toggleDark: () => {
+    // Two-state toggle off the resolved `dark` value. Sets an explicit
+    // light/dark preference (loses the "system" choice — use setThemeMode
+    // from Settings if you want to go back).
     const next = !get().dark;
-    if (next) {
-      document.documentElement.classList.add("dark");
-      localStorage.setItem(THEME_KEY, "dark");
-    } else {
-      document.documentElement.classList.remove("dark");
-      localStorage.setItem(THEME_KEY, "light");
-    }
-    set({ dark: next });
+    get().setThemeMode(next ? "dark" : "light");
   },
+  setThemeMode: (mode) => {
+    localStorage.setItem(THEME_KEY, mode);
+    const dark = effectiveDark(mode);
+    applyDarkClass(dark);
+    set({ themeMode: mode, dark });
+  },
+  setViewMode: (mode) => {
+    localStorage.setItem(VIEW_MODE_KEY, mode);
+    set({ viewMode: mode });
+  },
+  toggleViewMode: () => {
+    const next: ViewMode = get().viewMode === "grid" ? "list" : "grid";
+    get().setViewMode(next);
+  },
+  _setDarkFromSystem: (dark) => set({ dark }),
   openEditor: (id) => set({ editorOpen: true, editorNoteId: id }),
   closeEditor: () => set({ editorOpen: false, editorNoteId: null }),
   openSettings: () => set({ settingsOpen: true }),
@@ -175,6 +247,11 @@ export const useStore = create<UIState>((set, get) => ({
       })),
     })),
 }));
+
+// Wire the forward-declared ref now that useStore exists. The
+// system-theme matchMedia listener above uses this to reach the store
+// without creating an import cycle.
+useStoreRef = useStore;
 
 // --- sort helpers (mirror Rust's list_notes ORDER BY) ---
 

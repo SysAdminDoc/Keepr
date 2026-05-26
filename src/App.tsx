@@ -10,6 +10,7 @@ import { ConfirmDialog } from "./components/ConfirmDialog";
 import { useStore } from "./store";
 import { api } from "./api";
 import { filterNotes } from "./lib/filterNotes";
+import { useGlobalHotkey } from "./hooks/useGlobalHotkey";
 import { Lightbulb, Archive, Trash2, Tag, Loader2 } from "lucide-react";
 
 export default function App() {
@@ -24,8 +25,12 @@ export default function App() {
   const removeNotesWhere = useStore((s) => s.removeNotesWhere);
   const loaded = useStore((s) => s.loaded);
 
+  const toggleViewMode = useStore((s) => s.toggleViewMode);
   const [sidebarExpanded, setSidebarExpanded] = useState(true);
   const [emptyTrashOpen, setEmptyTrashOpen] = useState(false);
+
+  // NF-23 — Ctrl+G toggles between grid and list view.
+  useGlobalHotkey({ key: "g", mod: true }, toggleViewMode);
 
   const performEmptyTrash = async () => {
     setEmptyTrashOpen(false);
