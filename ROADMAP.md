@@ -60,12 +60,12 @@
 ## Phase E — Quick wins / housekeeping (rolled into above phases as fit)
 
 - [ ] **P2 — "Last backup: ..." line in Settings** *(part of v0.21.0)*
-- [ ] **P2 — First-run sample notes** *(v0.22.5)*
-- [ ] **P2 — Audit `IconBtn` `aria-label` coverage** *(v0.22.6)*
-- [ ] **P2 — `role="list"` + `role="listitem"` on note grid** *(part of v0.22.6)*
+- [x] **P2 — First-run sample notes** *(v0.21.2 — shipped)*
+- [x] **P2 — Audit `IconBtn` `aria-label` coverage** *(v0.21.2 — already clean, verified zero violations)*
+- [ ] **P2 — `role="list"` + `role="listitem"` on note grid** *(defer; risks visual layout regressions on multi-column CSS — verify against current masonry first)*
 - [x] **P2 — Settings → Vault first-run microcopy** *(part of v0.21.1 — addressed)*
-- [ ] **P3 — Default `trashRetentionDays` to 30 if currently 0** *(v0.22.7)*
-- [ ] **P2 — Verify pinned stable-grid empty-row behavior; fix if broken** *(v0.22.8)*
+- [x] **P3 — Default `trashRetentionDays` to 30 if currently 0** *(v0.21.2 — already 7, matches Keep mobile)*
+- [x] **P2 — Verify pinned stable-grid empty-row behavior; fix if broken** *(v0.21.2 — min-height: 1px guard added to placeholders)*
 - [ ] **P2 — `commands.rs` split (3866 lines monolith)** *(v0.22.9)*
   - Split into `commands/notes.rs`, `commands/io.rs`, `commands/security.rs`, `commands/attachments.rs`, `commands/reminders.rs`, `commands/history.rs`, `commands/labels.rs`. Re-exported from `commands/mod.rs`.
 

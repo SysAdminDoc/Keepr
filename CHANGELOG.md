@@ -6,6 +6,21 @@ All notable changes to Keepr are documented here. Format loosely follows [Keep a
 
 (See [ROADMAP.md](ROADMAP.md) for the live task list.)
 
+## [0.21.2] — 2026-05-26 — "Quick-win batch: first-run samples + grid guard + audit results"
+
+### Added
+
+- **First-run sample notes.** New installs land in the Notes view with 4 demo notes (welcome, checklist demo, power-user shortcuts, customization hints) instead of a blank grid. Guarded by `keepr:samples-seeded` localStorage flag set on every first launch (even when the user already has notes) so existing users who later trash everything don't get surprise samples on next launch. Only seeds when the flag was UNSET AND notes.length === 0.
+
+### Fixed
+
+- **Stable-grid empty-row collapse safety.** v0.18.1's pinned-section stable-grid renders invisible placeholders for "gap" position slots; if EVERY cell in a row was a placeholder, CSS Grid could collapse the row to 0 and cards in the row below would jump up. Added `min-height: 1px` to placeholders so the row claims at least minimal space without producing a visible gap-row band.
+
+### Audit results (no code change required)
+
+- **`DEFAULT_TRASH_RETENTION_DAYS` is 7** (matches Keep mobile) — quick-win "default to non-zero if currently 0" was already in place.
+- **ARIA-label audit on icon-only buttons:** every `<button>` in `src/components/*.tsx` has either `aria-label` or `aria-labelledby` (or visible text). Custom `IconBtn` component requires `ariaLabel` as a typed prop, so the codebase is structurally clean.
+
 ## [0.21.1] — 2026-05-26 — "Vault recovery seed (opt-in BIP39)"
 
 ### Added

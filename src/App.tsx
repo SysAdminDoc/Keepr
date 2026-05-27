@@ -197,6 +197,78 @@ export default function App() {
     return () => window.clearInterval(t);
   }, [loaded]);
 
+  // v0.21.2 — first-run sample notes. Set the seeded flag on every
+  // first launch (even if the user already has notes) so an existing
+  // user who later trashes everything doesn't suddenly see surprise
+  // samples on the next launch. Only seed when the flag wasn't set AND
+  // the user has zero notes — covers true new installs.
+  const upsertNote = useStore((s) => s.upsertNote);
+  useEffect(() => {
+    if (!loaded) return;
+    const KEY = "keepr:samples-seeded";
+    if (localStorage.getItem(KEY) === "true") return;
+    localStorage.setItem(KEY, "true");
+    if (notes.length > 0) return;
+    void (async () => {
+      const samples: { kind: "text" | "list"; title: string; body: string; color: string; pinned: boolean; checklist?: { text: string; checked: boolean }[] }[] = [
+        {
+          kind: "text",
+          title: "Welcome to Keepr",
+          body: "Click \"Take a note…\" or press the c key to write a new note. Every note can have a color, a label, a reminder, or images.\n\nNothing leaves this machine — your notes live in a local SQLite file you can back up to any folder.",
+          color: "yellow",
+          pinned: true,
+        },
+        {
+          kind: "list",
+          title: "Try a checklist",
+          body: "",
+          color: "default",
+          pinned: false,
+          checklist: [
+            { text: "Drag this row to reorder", checked: false },
+            { text: "Tick the box to mark done", checked: false },
+            { text: "Type # to add labels inline", checked: false },
+          ],
+        },
+        {
+          kind: "text",
+          title: "Power-user shortcuts",
+          body: "Press Ctrl/Cmd+K to open the command palette. Hold Ctrl + scroll over the notes to zoom card size. Press ? for the full keyboard cheat sheet.",
+          color: "blue",
+          pinned: false,
+        },
+        {
+          kind: "text",
+          title: "Make it yours",
+          body: "Settings (top-right gear) has accent color, note text size, dark/light theme, App Lock with PIN, and Private Vault for at-rest encryption with an opt-in 12-word recovery phrase.",
+          color: "green",
+          pinned: false,
+        },
+      ];
+      for (const s of samples) {
+        try {
+          const created = await api.createNote({
+            kind: s.kind,
+            title: s.title,
+            body: s.body,
+            color: s.color as never,
+            pinned: s.pinned,
+            checklist: (s.checklist ?? []).map((c, i) => ({
+              text: c.text,
+              checked: c.checked,
+              position: i,
+            })),
+            labels: [],
+            backgroundPattern: "" as never,
+          });
+          upsertNote(created);
+        } catch {
+          // Best-effort: skip on failure (e.g. importing flag set).
+        }
+      }
+    })();
+  }, [loaded, notes.length, upsertNote]);
+
   const performEmptyTrash = async () => {
     setEmptyTrashOpen(false);
     try {
