@@ -3146,6 +3146,46 @@ pub fn move_note_out_of_vault(state: State<'_, AppState>, id: String) -> Result<
         .and_then(|opt| opt.ok_or_else(|| "note vanished after unvaulting".into()))
 }
 
+/// v0.21.0 — prune auto-backup ZIPs in a folder, keeping the latest
+/// `keep` by filename order. Filenames are `keepr-autobackup-<ISO>.zip`
+/// so a lexical sort is equivalent to chronological. Only files
+/// matching that prefix are considered — other files in the folder are
+/// left alone. Returns the count deleted.
+#[tauri::command]
+pub fn prune_auto_backups(folder: String, keep: u32) -> Result<u32, String> {
+    if keep == 0 {
+        return Ok(0);
+    }
+    let path = PathBuf::from(&folder);
+    if !path.is_dir() {
+        return Err(format!("not a directory: {folder}"));
+    }
+    let mut ours: Vec<PathBuf> = std::fs::read_dir(&path)
+        .map_err(err)?
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| {
+            p.file_name()
+                .and_then(|s| s.to_str())
+                .map(|n| n.starts_with("keepr-autobackup-") && n.ends_with(".zip"))
+                .unwrap_or(false)
+        })
+        .collect();
+    ours.sort(); // ISO timestamp filenames sort chronologically.
+    let keep = keep as usize;
+    if ours.len() <= keep {
+        return Ok(0);
+    }
+    let prune_count = ours.len() - keep;
+    let mut deleted: u32 = 0;
+    for p in ours.iter().take(prune_count) {
+        if std::fs::remove_file(p).is_ok() {
+            deleted += 1;
+        }
+    }
+    Ok(deleted)
+}
+
 /// Bulk-vault wrapper for NF-V0.5-C. Calls `move_note_to_vault` per
 /// id in sequence; stops + returns on first failure (so partial state
 /// is acceptable — each per-note call commits its own transaction
