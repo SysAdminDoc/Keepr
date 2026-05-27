@@ -61,6 +61,7 @@ export const api = {
   importZip: (src: string) => invoke<void>("import_zip", { src }),
   getDataDir: () => invoke<string>("get_data_dir"),
   getLogDir: () => invoke<string>("get_log_dir"),
+  openAppDir: (kind: "data" | "log") => invoke<void>("open_app_dir", { kind }),
   getAppLockSettings: () =>
     invoke<{ enabled: boolean; lockAfterMinutes: number }>("get_app_lock_settings"),
   enableAppLock: (pin: string, lockAfterMinutes: number) =>

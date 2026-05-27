@@ -18,8 +18,8 @@
   - Add plugin + generate keypair (private in GH Actions secret, public in `tauri.conf.json`). Workflow updates `latest.json` at fixed Releases URL after each tag. App checks at startup + once/week. Settings toggle to disable.
 - [x] **P1 — Window state persistence** *(v0.19.2 — shipped)*
   - `tauri-plugin-window-state`. Two-line plugin init.
-- [ ] **P1 — "Open log folder" button** *(v0.19.3)*
-  - Add to Settings → Log folder row. New `tauri-plugin-opener`. Permission-gated to data/log dirs only.
+- [x] **P1 — "Open log folder" + "Open data folder" buttons** *(v0.19.3 — shipped)*
+  - Added to Settings → Log folder AND Data folder rows. `tauri-plugin-opener` v2.5.4. Whitelisted to Keepr's own dirs only — no generic `open_path` IPC.
 - [ ] **P1 — Search clear-button + extra filter chips** *(v0.19.4)*
   - `<X>` in search input; add `is:vault` `has:image` `has:reminder` `is:archived` chips.
 

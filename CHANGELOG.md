@@ -6,6 +6,12 @@ All notable changes to Keepr are documented here. Format loosely follows [Keep a
 
 (See [ROADMAP.md](ROADMAP.md) for the live task list.)
 
+## [0.19.3] — 2026-05-26 — "Open data / log folder buttons"
+
+### Added
+
+- **"Open" button next to Copy-path on both the Data folder and Log folder rows in Settings.** Wired `tauri-plugin-opener` v2.5.4. New Rust command `open_app_dir(kind: "data" | "log")` whitelisted to Keepr's own directories — there is no generic `open_path` IPC, callers can't pass arbitrary paths. The "Open" button creates the log dir if it doesn't exist yet (fresh installs may not have written a log line) so the file manager always has something to land on. Data folder row also picks up a Copy-path button (it had none before).
+
 ## [0.19.2] — 2026-05-26 — "Window state persistence"
 
 ### Added

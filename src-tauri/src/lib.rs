@@ -177,6 +177,7 @@ pub fn run() {
         }))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_opener::init())
         // Persist window position + size across launches. Without this
         // the window resets to the tauri.conf.json default (1280x800)
         // on every start, which is hostile on multi-monitor setups.
@@ -425,6 +426,7 @@ pub fn run() {
             commands::import_zip,
             commands::get_data_dir,
             commands::get_log_dir,
+            commands::open_app_dir,
             commands::get_app_lock_settings,
             commands::enable_app_lock,
             commands::disable_app_lock,

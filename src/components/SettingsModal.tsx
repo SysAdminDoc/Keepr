@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { X, Download, Upload, Folder, FolderOpen } from "lucide-react";
+import { X, Download, Upload, FolderOpen } from "lucide-react";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import {
   ACCENT_PRESETS,
@@ -240,32 +240,77 @@ export function SettingsModal() {
               title="Data folder"
               subtitle={dataDir || "—"}
               action={
-                <span className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1">
-                  <Folder size={14} aria-hidden /> local
-                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        await api.openAppDir("data");
+                      } catch (e) {
+                        showToast("Could not open: " + String(e));
+                      }
+                    }}
+                    disabled={!dataDir}
+                    className="text-xs px-2 py-1 rounded border border-gray-300 dark:border-[#5f6368] hover:bg-black/5 dark:hover:bg-white/10 disabled:opacity-50 flex items-center gap-1"
+                  >
+                    <FolderOpen size={12} aria-hidden /> Open
+                  </button>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      if (!dataDir) return;
+                      try {
+                        await navigator.clipboard.writeText(dataDir);
+                        showToast("Data folder path copied");
+                      } catch {
+                        showToast("Copy failed — path: " + dataDir);
+                      }
+                    }}
+                    disabled={!dataDir}
+                    className="text-xs px-2 py-1 rounded border border-gray-300 dark:border-[#5f6368] hover:bg-black/5 dark:hover:bg-white/10 disabled:opacity-50"
+                  >
+                    Copy path
+                  </button>
+                </div>
               }
             />
 
             <Row
-              title="Log folder (NF-V0.5-J)"
+              title="Log folder"
               subtitle={logDir || "—"}
               action={
-                <button
-                  type="button"
-                  onClick={async () => {
-                    if (!logDir) return;
-                    try {
-                      await navigator.clipboard.writeText(logDir);
-                      showToast("Log folder path copied");
-                    } catch {
-                      showToast("Copy failed — path: " + logDir);
-                    }
-                  }}
-                  disabled={!logDir}
-                  className="text-xs px-2 py-1 rounded border border-gray-300 dark:border-[#5f6368] hover:bg-black/5 dark:hover:bg-white/10 disabled:opacity-50"
-                >
-                  Copy path
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        await api.openAppDir("log");
+                      } catch (e) {
+                        showToast("Could not open: " + String(e));
+                      }
+                    }}
+                    disabled={!logDir}
+                    className="text-xs px-2 py-1 rounded border border-gray-300 dark:border-[#5f6368] hover:bg-black/5 dark:hover:bg-white/10 disabled:opacity-50 flex items-center gap-1"
+                  >
+                    <FolderOpen size={12} aria-hidden /> Open
+                  </button>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      if (!logDir) return;
+                      try {
+                        await navigator.clipboard.writeText(logDir);
+                        showToast("Log folder path copied");
+                      } catch {
+                        showToast("Copy failed — path: " + logDir);
+                      }
+                    }}
+                    disabled={!logDir}
+                    className="text-xs px-2 py-1 rounded border border-gray-300 dark:border-[#5f6368] hover:bg-black/5 dark:hover:bg-white/10 disabled:opacity-50"
+                  >
+                    Copy path
+                  </button>
+                </div>
               }
             />
 
