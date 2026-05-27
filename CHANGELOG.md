@@ -6,6 +6,18 @@ All notable changes to Keepr are documented here. Format loosely follows [Keep a
 
 (See [ROADMAP.md](ROADMAP.md) for the live task list.)
 
+## [0.20.0] — 2026-05-26 — "Command palette (Ctrl/Cmd+K)"
+
+### Added
+
+- **Ctrl/Cmd+K opens the command palette.** Fuzzy-matches across every note title, every section (Notes / Reminders / Archive / Trash), every label, and a fixed set of actions (Open Settings, Manage labels, Theme: Light/Dark/Follow system, Toggle grid/list view, Vault hint if initialized). Arrow keys to navigate, Enter to invoke, Esc to close, click anywhere outside to close. Empty query shows the first 30 commands ordered Actions → Sections → Labels → Notes; typing reorders by relevance (prefix match worth more than middle match, shorter labels nudged up).
+- **New `<CommandPalette>` component** lazy-loaded behind a Suspense boundary so it costs nothing until first opened. State lives on the store as `commandPaletteOpen` + `openCommandPalette()` / `closeCommandPalette()`.
+- **Global Ctrl/Cmd+K listener in `App.tsx`** wires the open trigger.
+
+### Why
+
+Per the v0.19 research, the canonical 2026 productivity-app pattern (Standard Notes, Linear, VS Code, Raycast) is fuzzy command palette via Cmd+K. Keepr already has Keep's letter-shortcuts (c / l / / / ? / j / k etc.) but discovering them required reading the `?` help overlay. The palette gives keyboard users an always-available "jump anywhere" affordance without memorizing labels or section names. Zero new IPC; zero new persisted state; ~280 lines including the renderer.
+
 ## [0.19.4] — 2026-05-26 — "Filter chips: Has image / Has reminder / In vault"
 
 ### Added

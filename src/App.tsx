@@ -21,6 +21,9 @@ const HelpOverlay = lazy(() =>
 const LockScreen = lazy(() =>
   import("./components/LockScreen").then((m) => ({ default: m.LockScreen })),
 );
+const CommandPalette = lazy(() =>
+  import("./components/CommandPalette").then((m) => ({ default: m.CommandPalette })),
+);
 import { ConfirmDialog } from "./components/ConfirmDialog";
 import { accentHoverFor, useStore } from "./store";
 import { api } from "./api";
@@ -226,6 +229,21 @@ export default function App() {
     root.style.setProperty("--keepr-note-font-size", `${noteFontSize}px`);
   }, [accentColor, noteFontSize]);
 
+  // Cmd/Ctrl+K opens the command palette. Bound globally so it works
+  // from any focused element except text inputs (the input fires the
+  // event too — we don't gate, the palette overlays anyway).
+  const openCommandPalette = useStore((s) => s.openCommandPalette);
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        openCommandPalette();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [openCommandPalette]);
+
   // Ctrl+Wheel anywhere in the app resizes the masonry cards. Up = zoom
   // in (wider), down = zoom out (narrower). Bound to the window with
   // `passive: false` so we can preventDefault and stop WebView2's
@@ -348,6 +366,7 @@ export default function App() {
         <LabelsManager />
         <HelpOverlay open={helpOpen} onClose={() => setHelpOpen(false)} />
         <LockScreen />
+        <CommandPalette />
       </Suspense>
 
       <ConfirmDialog

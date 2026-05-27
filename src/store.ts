@@ -54,6 +54,8 @@ interface UIState {
   editorNoteId: string | null;
   settingsOpen: boolean;
   labelsManagerOpen: boolean;
+  /** v0.20.0 — Ctrl/Cmd+K command palette open state. */
+  commandPaletteOpen: boolean;
   toasts: Toast[];
   /** Set of note IDs the user has currently multi-selected (NF-04). */
   selectedIds: Set<string>;
@@ -119,6 +121,8 @@ interface UIState {
   closeSettings: () => void;
   openLabelsManager: () => void;
   closeLabelsManager: () => void;
+  openCommandPalette: () => void;
+  closeCommandPalette: () => void;
   /** Backwards-compatible signature. Pass an action to surface an Undo
    *  button (5s default if action present, 2.5s default otherwise). */
   showToast: (text: string, opts?: { action?: ToastAction; durationMs?: number }) => void;
@@ -359,6 +363,7 @@ export const useStore = create<UIState>((set, get) => ({
   editorNoteId: null,
   settingsOpen: false,
   labelsManagerOpen: false,
+  commandPaletteOpen: false,
   themeMode: readInitialThemeMode(),
   viewMode: readInitialViewMode(),
   sortMode: readInitialSortMode(),
@@ -497,6 +502,8 @@ export const useStore = create<UIState>((set, get) => ({
   closeSettings: () => set({ settingsOpen: false }),
   openLabelsManager: () => set({ labelsManagerOpen: true }),
   closeLabelsManager: () => set({ labelsManagerOpen: false }),
+  openCommandPalette: () => set({ commandPaletteOpen: true }),
+  closeCommandPalette: () => set({ commandPaletteOpen: false }),
   showToast: (text, opts) => {
     const id = nextToastId();
     const durationMs =
