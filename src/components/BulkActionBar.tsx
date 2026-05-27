@@ -16,6 +16,7 @@ import { useStore } from "../store";
 import { api } from "../api";
 import { IconBtn } from "./IconBtn";
 import { ColorPicker } from "./ColorPicker";
+import { ConfirmDialog } from "./ConfirmDialog";
 import { useClickOutside } from "../hooks/useClickOutside";
 import type { ColorKey } from "../types";
 
@@ -137,11 +138,15 @@ export function BulkActionBar({ visibleIds }: Props) {
       });
     });
 
-  const bulkDeleteForever = () =>
-    runBulk("Deleted", async (id) => {
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const requestBulkDeleteForever = () => setDeleteConfirmOpen(true);
+  const confirmBulkDeleteForever = () => {
+    setDeleteConfirmOpen(false);
+    void runBulk("Deleted", async (id) => {
       await api.deleteNotePermanent(id);
       removeNote(id);
     });
+  };
 
   const bulkColor = (color: ColorKey) => {
     setColorOpen(false);
@@ -322,11 +327,29 @@ export function BulkActionBar({ visibleIds }: Props) {
           <IconBtn ariaLabel="Restore from Trash" onClick={bulkRestore}>
             <RotateCcw size={20} aria-hidden />
           </IconBtn>
-          <IconBtn ariaLabel="Delete forever" onClick={bulkDeleteForever}>
+          <IconBtn ariaLabel="Delete forever" onClick={requestBulkDeleteForever}>
             <Trash2 size={20} aria-hidden />
           </IconBtn>
         </>
       )}
+      <ConfirmDialog
+        open={deleteConfirmOpen}
+        title={
+          visibleSelectedCount === 1
+            ? "Delete this note forever?"
+            : `Delete ${visibleSelectedCount} notes forever?`
+        }
+        body={
+          visibleSelectedCount === 1
+            ? "The note and any attachments will be permanently deleted. This cannot be undone."
+            : `These ${visibleSelectedCount} notes and their attachments will be permanently deleted. This cannot be undone.`
+        }
+        confirmLabel="Delete forever"
+        cancelLabel="Cancel"
+        destructive
+        onConfirm={confirmBulkDeleteForever}
+        onCancel={() => setDeleteConfirmOpen(false)}
+      />
     </header>
   );
 }

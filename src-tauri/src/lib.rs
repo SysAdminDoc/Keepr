@@ -100,16 +100,28 @@ fn build_resource_response<R: tauri::Runtime>(
     };
 
     let id_part = req.uri().path().trim_start_matches('/').to_string();
-    if id_part.is_empty()
-        || id_part.contains("..")
-        || id_part.contains('/')
-        || id_part.contains('\\')
-    {
+    // Reject anything that smells like a traversal attempt. We check the
+    // raw, the percent-decoded, and the canonicalized form to defeat
+    // bypasses via `%2e%2e%2f`, `%5c` (encoded backslash), or NUL bytes.
+    if !is_safe_resource_id(&id_part) {
         return make(StatusCode::BAD_REQUEST, b"bad resource id".to_vec(), "text/plain");
     }
 
     let state: tauri::State<'_, AppState> = ctx.app_handle().state();
-    let target: PathBuf = state.data_dir.join(RESOURCES_SUBDIR).join(&id_part);
+    let resources_dir = state.data_dir.join(RESOURCES_SUBDIR);
+    let target: PathBuf = resources_dir.join(&id_part);
+
+    // Defense-in-depth: even after `is_safe_resource_id`, verify the
+    // resolved path is still inside the resources directory. We compare
+    // the parent (since the file may not exist yet) rather than the full
+    // canonical path. PathBuf::join with a leading `/` or absolute path
+    // would replace the prefix; the safety check above blocks that, this
+    // check catches anything we missed.
+    match target.parent() {
+        Some(p) if p == resources_dir.as_path() => {}
+        _ => return make(StatusCode::BAD_REQUEST, b"bad resource id".to_vec(), "text/plain"),
+    }
+
     let bytes = match std::fs::read(&target) {
         Ok(b) => b,
         Err(_) => return make(StatusCode::NOT_FOUND, b"not found".to_vec(), "text/plain"),
@@ -141,6 +153,48 @@ fn build_resource_response<R: tauri::Runtime>(
     let len = total.to_string();
     if let Ok(v) = len.parse() { resp.headers_mut().insert("Content-Length", v); }
     resp
+}
+
+/// Validate a `keepr-resource://` path component before joining it onto the
+/// resources directory. Rejects path-traversal attempts (literal `..`, `/`,
+/// `\\`, NUL bytes), URL-encoded equivalents (`%2e%2e`, `%2f`, `%5c`, `%00`),
+/// and anything that looks absolute or drive-prefixed on Windows (`C:`,
+/// `\\?\`). The renderer-side `convertFileSrc(<id>.<ext>, "keepr-resource")`
+/// only ever produces filenames of the form `<uuid>.<ext>` or `<uuid>.thumb.jpg`,
+/// so a strict allow-list (alphanumeric + `-`, `_`, `.`) would also work; we
+/// stay slightly looser to tolerate future filename schemes while still
+/// rejecting traversal vectors.
+fn is_safe_resource_id(s: &str) -> bool {
+    if s.is_empty() || s.len() > 1024 {
+        return false;
+    }
+    if s.contains('\0') || s.contains('/') || s.contains('\\') || s.contains("..") {
+        return false;
+    }
+    // Reject ANY percent-encoded character. Filenames Keepr writes never
+    // contain percent signs, so this only blocks attacker payloads.
+    if s.contains('%') {
+        return false;
+    }
+    // Reject Windows reserved device names: CON, PRN, AUX, NUL, COM1-9,
+    // LPT1-9. Opening any of these as a file resolves to the actual
+    // device on Windows even from non-Windows-aware code paths.
+    let lower = s.to_ascii_lowercase();
+    let stem: &str = lower.split('.').next().unwrap_or(&lower);
+    let stem = stem.split(':').next().unwrap_or(stem);
+    let is_reserved = matches!(stem, "con" | "prn" | "aux" | "nul")
+        || (stem.len() == 4
+            && (stem.starts_with("com") || stem.starts_with("lpt"))
+            && stem.as_bytes()[3].is_ascii_digit()
+            && stem.as_bytes()[3] != b'0');
+    if is_reserved {
+        return false;
+    }
+    if s.len() >= 2 && s.as_bytes()[1] == b':' {
+        // `C:foo` would resolve to "current dir on C:" — reject.
+        return false;
+    }
+    true
 }
 
 /// Parse an HTTP `Range: bytes=...` header. Returns `(start, end)` inclusive
@@ -548,7 +602,83 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_byte_range;
+    use super::{is_safe_resource_id, parse_byte_range};
+
+    // is_safe_resource_id —
+
+    #[test]
+    fn safe_id_accepts_uuid_filename() {
+        assert!(is_safe_resource_id("550e8400-e29b-41d4-a716-446655440000.png"));
+        assert!(is_safe_resource_id("550e8400-e29b-41d4-a716-446655440000.thumb.jpg"));
+        assert!(is_safe_resource_id("550e8400-e29b-41d4-a716-446655440000.wav"));
+    }
+
+    #[test]
+    fn safe_id_rejects_empty() {
+        assert!(!is_safe_resource_id(""));
+    }
+
+    #[test]
+    fn safe_id_rejects_dot_dot() {
+        assert!(!is_safe_resource_id(".."));
+        assert!(!is_safe_resource_id("..foo"));
+        assert!(!is_safe_resource_id("foo..bar"));
+    }
+
+    #[test]
+    fn safe_id_rejects_separators() {
+        assert!(!is_safe_resource_id("a/b"));
+        assert!(!is_safe_resource_id("a\\b"));
+    }
+
+    #[test]
+    fn safe_id_rejects_nul_byte() {
+        assert!(!is_safe_resource_id("foo\0bar"));
+    }
+
+    #[test]
+    fn safe_id_rejects_percent_encoded_traversal() {
+        // The previous handler accepted these because the literal-string
+        // checks for `..`/`/`/`\\` don't catch the encoded forms; the
+        // filesystem also doesn't decode them, so they'd land as weird
+        // filenames — but defense-in-depth: reject outright.
+        assert!(!is_safe_resource_id("%2e%2e%2fkeepr.db"));
+        assert!(!is_safe_resource_id("%2E%2E%5Ckeepr.db"));
+        assert!(!is_safe_resource_id("foo%00.png"));
+    }
+
+    #[test]
+    fn safe_id_rejects_windows_drive_prefix() {
+        assert!(!is_safe_resource_id("C:keepr.db"));
+        assert!(!is_safe_resource_id("Z:\\absolute"));
+    }
+
+    #[test]
+    fn safe_id_rejects_windows_reserved_names() {
+        assert!(!is_safe_resource_id("con"));
+        assert!(!is_safe_resource_id("con.png"));
+        assert!(!is_safe_resource_id("CON.png"));
+        assert!(!is_safe_resource_id("nul"));
+        assert!(!is_safe_resource_id("com1.txt"));
+    }
+
+    #[test]
+    fn safe_id_allows_legitimate_names_starting_with_reserved_prefix() {
+        // "container.png" starts with "con" but isn't the CON reserved
+        // device — should be allowed.
+        assert!(is_safe_resource_id("container.png"));
+        assert!(is_safe_resource_id("computer-keys.jpg"));
+        assert!(is_safe_resource_id("lptable-photo.png"));
+    }
+
+    #[test]
+    fn safe_id_rejects_overly_long_input() {
+        let too_long = "a".repeat(2000);
+        assert!(!is_safe_resource_id(&too_long));
+    }
+
+    // parse_byte_range —
+
 
     #[test]
     fn parse_full_range() {

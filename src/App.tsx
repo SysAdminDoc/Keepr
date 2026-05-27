@@ -462,7 +462,14 @@ export default function App() {
       <ConfirmDialog
         open={emptyTrashOpen}
         title="Empty Trash?"
-        body="All notes in Trash will be permanently deleted. This cannot be undone."
+        body={
+          (() => {
+            const count = notes.filter((n) => n.trashed).length;
+            if (count === 0) return "Trash is already empty.";
+            if (count === 1) return "This will permanently delete 1 note and its attachments. This cannot be undone.";
+            return `This will permanently delete ${count} notes and their attachments. This cannot be undone.`;
+          })()
+        }
         confirmLabel="Empty Trash"
         cancelLabel="Cancel"
         destructive
