@@ -84,6 +84,10 @@ export const api = {
     invoke<Note>("move_note_to_vault", { id }),
   moveNoteOutOfVault: (id: string) =>
     invoke<Note>("move_note_out_of_vault", { id }),
+  moveNotesToVault: (ids: string[]) =>
+    invoke<number>("move_notes_to_vault", { ids }),
+  moveNotesOutOfVault: (ids: string[]) =>
+    invoke<number>("move_notes_out_of_vault", { ids }),
   listSnapshots: (noteId: string) =>
     invoke<NoteSnapshot[]>("list_snapshots", { noteId }),
   restoreSnapshot: (snapshotId: string) =>

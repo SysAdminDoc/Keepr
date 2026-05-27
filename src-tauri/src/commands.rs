@@ -3037,6 +3037,37 @@ pub fn move_note_out_of_vault(state: State<'_, AppState>, id: String) -> Result<
         .and_then(|opt| opt.ok_or_else(|| "note vanished after unvaulting".into()))
 }
 
+/// Bulk-vault wrapper for NF-V0.5-C. Calls `move_note_to_vault` per
+/// id in sequence; stops + returns on first failure (so partial state
+/// is acceptable — each per-note call commits its own transaction
+/// already). Returns the count successfully moved. v0.20.2.
+#[tauri::command]
+pub fn move_notes_to_vault(
+    state: State<'_, AppState>,
+    ids: Vec<String>,
+) -> Result<u32, String> {
+    let mut moved: u32 = 0;
+    for id in ids {
+        move_note_to_vault(state.clone(), id)?;
+        moved += 1;
+    }
+    Ok(moved)
+}
+
+/// Bulk-unvault wrapper. Mirrors `move_notes_to_vault` semantics. v0.20.2.
+#[tauri::command]
+pub fn move_notes_out_of_vault(
+    state: State<'_, AppState>,
+    ids: Vec<String>,
+) -> Result<u32, String> {
+    let mut moved: u32 = 0;
+    for id in ids {
+        move_note_out_of_vault(state.clone(), id)?;
+        moved += 1;
+    }
+    Ok(moved)
+}
+
 // --- Backup / restore -------------------------------------------------------
 //
 // EI-01: Validate every zip entry before writing it. Even though zip's
