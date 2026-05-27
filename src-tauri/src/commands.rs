@@ -2380,6 +2380,37 @@ pub fn get_log_dir(app: tauri::AppHandle) -> Result<String, String> {
     Ok(dir.to_string_lossy().to_string())
 }
 
+/// Open one of Keepr's own directories (data or log) in the OS file
+/// manager. Whitelisted — callers can't pass arbitrary paths — so we
+/// don't add a generic `open_path` to the IPC surface. Uses
+/// tauri-plugin-opener under the hood; on Windows that's `explorer.exe
+/// <path>`, on macOS `open <path>`, on Linux `xdg-open <path>`.
+#[tauri::command]
+pub fn open_app_dir(
+    state: State<'_, AppState>,
+    app: tauri::AppHandle,
+    kind: String,
+) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    let path = match kind.as_str() {
+        "data" => state.data_dir.clone(),
+        "log" => app
+            .path()
+            .app_log_dir()
+            .map_err(|e| format!("could not resolve log dir: {e}"))?,
+        other => return Err(format!("unknown app dir kind: {other}")),
+    };
+    if !path.exists() {
+        // Log dir may not exist yet on a fresh install with no logs
+        // written. Create it so the explorer window has something to
+        // land on rather than failing with "path not found".
+        let _ = std::fs::create_dir_all(&path);
+    }
+    app.opener()
+        .open_path(path.to_string_lossy().to_string(), None::<&str>)
+        .map_err(|e| format!("could not open path: {e}"))
+}
+
 // --- App Lock (NF-V0.5-C) ---------------------------------------------------
 //
 // Stores the Argon2id PHC string in `app_settings.app_lock_pin_phc` and

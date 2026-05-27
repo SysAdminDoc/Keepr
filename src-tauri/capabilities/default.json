@@ -11,6 +11,8 @@
     "global-shortcut:allow-register",
     "global-shortcut:allow-unregister",
     "notification:default",
-    "notification:allow-notify"
+    "notification:allow-notify",
+    "opener:default",
+    "opener:allow-open-path"
   ]
 }
