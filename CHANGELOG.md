@@ -6,6 +6,22 @@ All notable changes to Keepr are documented here. Format loosely follows [Keep a
 
 (See [ROADMAP.md](ROADMAP.md) for the live task list.)
 
+## [0.22.9] — 2026-05-26 — "MediaRecorder + decode → WAV"
+
+### Fixed
+
+- **Voice notes actually capture audio in WebView2 now.** v0.22.8's switch to `AudioContext + ScriptProcessorNode → encode WAV directly` looked correct on paper but silently failed in user testing: the level meter (AnalyserNode) saw audio, but ScriptProcessorNode's `onaudioprocess` callback never fired with real samples. ScriptProcessorNode is deprecated, and the browser is allowed to no-op it.
+
+### Changed
+
+- **Capture pipeline reverted to MediaRecorder** (the only thing we've confirmed delivers bytes on this WebView2 build), with the v0.22.7 `start(1000)` timeslice + final `requestData()` flush still in place.
+- **On stop, the recorded webm/opus blob is decoded via `AudioContext.decodeAudioData`** — uses the browser's built-in Opus decoder, which doesn't care about the Infinity-duration in the EBML header that breaks `<audio src=>` direct-load playback. The resulting AudioBuffer is downmixed to mono and re-encoded as 16-bit PCM WAV using the v0.22.8 encoder.
+- **The saved file is still WAV**, so the v0.22.8 Range-supporting protocol handler and the v0.23.0 whisper.cpp transcription path don't change.
+
+### Notes
+
+The AudioContext used for the level meter is separate from the one used for decoding — the modal's main context gets closed in cleanup, so decoding spins up a fresh short-lived AudioContext.
+
 ## [0.22.8] — 2026-05-26 — "WAV encoder + HTTP Range support"
 
 ### Changed

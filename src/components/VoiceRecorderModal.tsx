@@ -2,45 +2,42 @@ import { useEffect, useRef, useState } from "react";
 import { Mic, Square, X } from "lucide-react";
 
 /**
- * v0.22.8 — voice note recorder.
+ * v0.22.9 — voice note recorder. Final shape after the
+ * v0.22.5–v0.22.8 debugging cycle:
  *
- * Records via AudioContext + ScriptProcessorNode and encodes a real PCM
- * WAV file inline. We tried MediaRecorder (audio/webm;codecs=opus) up
- * through v0.22.7 — recording worked, the file was saved with audio
- * data, but Chrome's `<audio src=>` element refused to play it back.
- * Root cause: MediaRecorder writes the WebM EBML header with
- * Duration=Infinity because it doesn't know the recording length in
- * advance; even with the trailing element written on stop(), Chrome's
- * direct-load audio path can't determine the playable range without
- * an explicit duration in the header.
+ *   capture: MediaRecorder (audio/webm;codecs=opus) — proven to deliver
+ *            bytes on this WebView2 build.
+ *   transcode: on stop, decode the recorded blob via
+ *              AudioContext.decodeAudioData (uses the browser's built-in
+ *              Opus decoder, which doesn't care about the Infinity
+ *              duration that breaks `<audio src=>` playback).
+ *   output:  encode the resulting AudioBuffer as 16-bit mono PCM WAV
+ *            with a real sample count in the header. Plays everywhere
+ *            (Chrome, Firefox, VLC, Windows Media Player) AND is the
+ *            format whisper.cpp wants for v0.23.0 transcription.
  *
- * WAV avoids all of it: the 44-byte header carries the sample count
- * (= explicit duration), 16-bit PCM mono plays in every browser and
- * media player, and it's exactly the format whisper.cpp wants for the
- * v0.23.0 transcription work — so we're not paying a switching cost
- * later. Trade-off is file size: ~96 KB/sec at 48 kHz mono 16-bit, so
- * a 1-minute voice note is ~5.5 MB. That's acceptable for personal
- * notes (and tiny vs. the rest of a typical attachment-bearing note).
+ * What failed along the way and why we landed here:
+ *   v0.22.7 — MediaRecorder → save webm directly: bytes captured, but
+ *             Chrome's `<audio src=>` refused to play (Infinity duration
+ *             in the EBML header).
+ *   v0.22.8 — AudioContext + ScriptProcessorNode → encode WAV directly:
+ *             AnalyserNode received audio (level meter worked), but
+ *             ScriptProcessorNode.onaudioprocess never fired with real
+ *             samples in this WebView2 build. ScriptProcessorNode is
+ *             deprecated and the browser is allowed to no-op it.
  *
- * Stack:
- *   stream → MediaStreamSource → splits to:
- *     - AnalyserNode  → byte-time-domain RMS → level meter (60fps)
- *     - ScriptProcessor → captures Float32 PCM into samplesRef
- *   on stop → flatten samples → encode WAV → onSave bytes + audio/wav
+ * The v0.22.9 path uses only well-supported APIs: MediaRecorder for
+ * capture, decodeAudioData for the codec work, and a hand-rolled 50-line
+ * WAV encoder. AudioWorklet would be the modern replacement for the
+ * v0.22.8 path but requires a separately-served worklet module — not
+ * worth setting up when this works.
  *
- * ScriptProcessorNode is deprecated in favor of AudioWorklet, but is
- * still present in every Chromium build (including WebView2). We can
- * migrate later; for now this avoids the worklet's module-loading
- * setup. The processor MUST be connected to ctx.destination for its
- * onaudioprocess to fire in Chrome — even though we don't want
- * playback. We compensate by zeroing the output buffer.
- *
- * Three earlier-cycle fixes still in force:
+ * Cross-cycle fixes still in force:
  *   v0.22.5 — additionalBrowserArgs `--use-fake-ui-for-media-stream`
  *             keeps WebView2 from auto-denying mic without prompting.
- *   v0.22.6 — `ready` state mirrors the imperative ref so the Record
- *             button actually enables after acquisition.
- *   v0.22.7 — live mic-level meter (kept; powered by AnalyserNode).
+ *   v0.22.6 — `ready` state mirrors the recorder ref so the Record
+ *             button enables after acquisition (refs don't re-render).
+ *   v0.22.7 — live mic-level meter (kept; AnalyserNode is reliable).
  */
 
 interface Props {
@@ -49,8 +46,47 @@ interface Props {
   onClose: () => void;
 }
 
-/** Encode interleaved Float32 PCM as a 16-bit mono WAV. */
-function encodeWav(samples: Float32Array, sampleRate: number): ArrayBuffer {
+const CODEC_PREFERENCES = [
+  "audio/webm;codecs=opus",
+  "audio/webm",
+  "audio/mp4",
+  "audio/ogg",
+];
+
+function pickMime(): string | null {
+  if (typeof MediaRecorder === "undefined") return null;
+  for (const m of CODEC_PREFERENCES) {
+    if (MediaRecorder.isTypeSupported(m)) return m;
+  }
+  return null;
+}
+
+/** Encode a Web Audio AudioBuffer as a 16-bit mono PCM WAV. Multi-channel
+ *  input is downmixed by averaging channels — voice notes don't need
+ *  stereo and mono is what whisper.cpp expects anyway. */
+function encodeWavFromAudioBuffer(buffer: AudioBuffer): ArrayBuffer {
+  const sampleRate = buffer.sampleRate;
+  const length = buffer.length;
+  // Downmix to mono.
+  let mono: Float32Array;
+  if (buffer.numberOfChannels === 1) {
+    mono = buffer.getChannelData(0);
+  } else {
+    mono = new Float32Array(length);
+    const channels: Float32Array[] = [];
+    for (let c = 0; c < buffer.numberOfChannels; c++) {
+      channels.push(buffer.getChannelData(c));
+    }
+    for (let i = 0; i < length; i++) {
+      let sum = 0;
+      for (let c = 0; c < channels.length; c++) sum += channels[c][i];
+      mono[i] = sum / channels.length;
+    }
+  }
+  return encodePcmWav(mono, sampleRate);
+}
+
+function encodePcmWav(samples: Float32Array, sampleRate: number): ArrayBuffer {
   const byteLength = 44 + samples.length * 2;
   const buf = new ArrayBuffer(byteLength);
   const view = new DataView(buf);
@@ -58,26 +94,22 @@ function encodeWav(samples: Float32Array, sampleRate: number): ArrayBuffer {
     for (let i = 0; i < s.length; i++) view.setUint8(offset + i, s.charCodeAt(i));
   };
 
-  // RIFF / WAVE header
   writeAscii(0, "RIFF");
-  view.setUint32(4, byteLength - 8, true); // file size minus "RIFF" + size
+  view.setUint32(4, byteLength - 8, true);
   writeAscii(8, "WAVE");
 
-  // fmt sub-chunk
   writeAscii(12, "fmt ");
-  view.setUint32(16, 16, true); // PCM fmt chunk size
-  view.setUint16(20, 1, true);  // format = PCM (uncompressed)
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);  // PCM
   view.setUint16(22, 1, true);  // mono
   view.setUint32(24, sampleRate, true);
-  view.setUint32(28, sampleRate * 2, true); // byte rate (sampleRate * channels * bytesPerSample)
-  view.setUint16(32, 2, true);  // block align (channels * bytesPerSample)
+  view.setUint32(28, sampleRate * 2, true); // byte rate (mono, 2 bytes/sample)
+  view.setUint16(32, 2, true);  // block align
   view.setUint16(34, 16, true); // bits per sample
 
-  // data sub-chunk
   writeAscii(36, "data");
   view.setUint32(40, samples.length * 2, true);
 
-  // PCM samples — clamp Float32 [-1, 1] and convert to little-endian Int16.
   let offset = 44;
   for (let i = 0; i < samples.length; i++) {
     const s = Math.max(-1, Math.min(1, samples[i]));
@@ -99,13 +131,8 @@ export function VoiceRecorderModal({ open, onSave, onClose }: Props) {
   const audioCtxRef = useRef<AudioContext | null>(null);
   const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
-  const processorRef = useRef<ScriptProcessorNode | null>(null);
-  // Float32 sample chunks accumulated by ScriptProcessor while recording.
-  const samplesRef = useRef<Float32Array[]>([]);
-  // Mirror of `recording` for the audio thread — onaudioprocess fires
-  // on a non-React thread and can't read state directly without going
-  // stale; this ref is updated synchronously by start/stop.
-  const recordingFlagRef = useRef(false);
+  const recRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
   const elapsedTimer = useRef<number | null>(null);
   const rafRef = useRef<number | null>(null);
 
@@ -117,8 +144,7 @@ export function VoiceRecorderModal({ open, onSave, onClose }: Props) {
     setSaving(false);
     setReady(false);
     setLevel(0);
-    samplesRef.current = [];
-    recordingFlagRef.current = false;
+    chunksRef.current = [];
 
     (async () => {
       if (!navigator.mediaDevices || typeof navigator.mediaDevices.getUserMedia !== "function") {
@@ -148,15 +174,14 @@ export function VoiceRecorderModal({ open, onSave, onClose }: Props) {
         const ctx = new Ctx();
         if (ctx.state === "suspended") await ctx.resume();
         audioCtxRef.current = ctx;
-        console.log("[voice] AudioContext sampleRate:", ctx.sampleRate, "state:", ctx.state);
 
+        // Level meter only — capture happens via MediaRecorder, not via
+        // this AudioContext. The AnalyserNode is purely for the UI.
         const source = ctx.createMediaStreamSource(stream);
-        sourceRef.current = source;
-
-        // Level meter branch.
         const analyser = ctx.createAnalyser();
         analyser.fftSize = 512;
         source.connect(analyser);
+        sourceRef.current = source;
         analyserRef.current = analyser;
         const meterBuf = new Uint8Array(analyser.fftSize);
         const tick = () => {
@@ -173,25 +198,25 @@ export function VoiceRecorderModal({ open, onSave, onClose }: Props) {
         };
         rafRef.current = requestAnimationFrame(tick);
 
-        // PCM capture branch via ScriptProcessor. Buffer size 4096 ≈ 85ms
-        // at 48 kHz — good latency/efficiency balance. Mono in/out.
-        const processor = ctx.createScriptProcessor(4096, 1, 1);
-        processor.onaudioprocess = (e) => {
-          // Zero the output so the connection-to-destination requirement
-          // doesn't leak audio back to the speakers.
-          const out = e.outputBuffer.getChannelData(0);
-          for (let i = 0; i < out.length; i++) out[i] = 0;
-          if (!recordingFlagRef.current) return;
-          const input = e.inputBuffer.getChannelData(0);
-          // Clone — ScriptProcessor reuses the buffer for the next tick.
-          samplesRef.current.push(new Float32Array(input));
+        const mime = pickMime();
+        if (!mime) {
+          setError("Audio recording is not supported in this build.");
+          return;
+        }
+        const rec = new MediaRecorder(stream, { mimeType: mime });
+        rec.ondataavailable = (e) => {
+          if (e.data && e.data.size > 0) {
+            chunksRef.current.push(e.data);
+            console.log("[voice] chunk:", e.data.size, "bytes (chunks:", chunksRef.current.length, ")");
+          }
         };
-        source.connect(processor);
-        processor.connect(ctx.destination); // required for onaudioprocess to fire
-        processorRef.current = processor;
-
+        rec.onerror = (ev) => {
+          console.error("[voice] MediaRecorder error:", ev);
+          setError("Recording failed mid-capture. See dev console for details.");
+        };
+        recRef.current = rec;
         setReady(true);
-        console.log("[voice] ready — PCM capture armed");
+        console.log("[voice] MediaRecorder ready, mime:", mime, "ctx sampleRate:", ctx.sampleRate);
       } catch (e) {
         const name = e instanceof DOMException ? e.name : "";
         let msg: string;
@@ -209,18 +234,19 @@ export function VoiceRecorderModal({ open, onSave, onClose }: Props) {
     })();
 
     return () => {
-      recordingFlagRef.current = false;
+      if (recRef.current && recRef.current.state !== "inactive") {
+        try { recRef.current.stop(); } catch { /* ignore */ }
+      }
+      recRef.current = null;
       if (rafRef.current != null) {
         cancelAnimationFrame(rafRef.current);
         rafRef.current = null;
       }
-      try { processorRef.current?.disconnect(); } catch { /* ignore */ }
       try { sourceRef.current?.disconnect(); } catch { /* ignore */ }
       try { analyserRef.current?.disconnect(); } catch { /* ignore */ }
       if (audioCtxRef.current && audioCtxRef.current.state !== "closed") {
         audioCtxRef.current.close().catch(() => {});
       }
-      processorRef.current = null;
       sourceRef.current = null;
       analyserRef.current = null;
       audioCtxRef.current = null;
@@ -237,58 +263,71 @@ export function VoiceRecorderModal({ open, onSave, onClose }: Props) {
 
   const start = () => {
     if (!ready || recording) return;
-    samplesRef.current = [];
-    recordingFlagRef.current = true;
+    if (!recRef.current) return;
+    chunksRef.current = [];
+    // 1000 ms timeslice: ondataavailable fires every second so chunks
+    // accumulate progressively instead of one big chunk on stop.
+    recRef.current.start(1000);
     setRecording(true);
     setElapsed(0);
     elapsedTimer.current = window.setInterval(() => {
       setElapsed((e) => e + 1);
     }, 1000);
-    console.log("[voice] recording started");
+    console.log("[voice] recording started, state=", recRef.current.state);
   };
 
   const stop = async () => {
-    if (!recording) return;
-    recordingFlagRef.current = false;
+    if (!recording || !recRef.current) return;
+    const rec = recRef.current;
+    const mime = rec.mimeType || "audio/webm";
+    // Flush any data buffered since the last timeslice tick.
+    try { if (rec.state === "recording") rec.requestData(); } catch { /* ignore */ }
+    await new Promise<void>((resolve) => {
+      rec.onstop = () => resolve();
+      try { rec.stop(); } catch { resolve(); }
+    });
     setRecording(false);
     if (elapsedTimer.current) {
       window.clearInterval(elapsedTimer.current);
       elapsedTimer.current = null;
     }
-    // Wait one audio tick so any in-flight processor callback completes
-    // before we flatten the buffer.
-    await new Promise((r) => setTimeout(r, 100));
 
-    const ctx = audioCtxRef.current;
-    if (!ctx) {
-      setError("Audio context disappeared mid-recording.");
-      return;
-    }
-    const totalSamples = samplesRef.current.reduce((acc, s) => acc + s.length, 0);
-    console.log("[voice] stopped. chunks=", samplesRef.current.length, "samples=", totalSamples, "≈", (totalSamples / ctx.sampleRate).toFixed(2), "s");
-    if (totalSamples === 0) {
+    const totalBytes = chunksRef.current.reduce((acc, c) => acc + c.size, 0);
+    console.log("[voice] stopped. chunks=", chunksRef.current.length, "totalBytes=", totalBytes, "mime=", mime);
+    if (totalBytes === 0) {
       setError(
-        "Recording captured 0 samples — your microphone may be muted or set to a different default device. Check the mic-level bar above; it should move when you speak.",
+        "Recording captured 0 bytes. Check the mic-level bar — it should move when you speak.",
       );
       return;
     }
 
-    // Flatten Float32 chunks into one continuous buffer.
-    const merged = new Float32Array(totalSamples);
-    let offset = 0;
-    for (const chunk of samplesRef.current) {
-      merged.set(chunk, offset);
-      offset += chunk.length;
-    }
-
     setSaving(true);
     try {
-      const wav = encodeWav(merged, ctx.sampleRate);
-      console.log("[voice] WAV encoded, bytes=", wav.byteLength);
-      await onSave(new Uint8Array(wav), "audio/wav");
+      const recordedBlob = new Blob(chunksRef.current, { type: mime });
+      const arrayBuf = await recordedBlob.arrayBuffer();
+      console.log("[voice] decoding", arrayBuf.byteLength, "bytes...");
+
+      // Decode the recorded webm/opus into PCM via the browser's built-in
+      // codec — sidesteps the Infinity-duration problem that breaks
+      // `<audio src=>` playback. We create a fresh AudioContext for the
+      // decode since the modal's main context will be closed in cleanup.
+      const decodeCtx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
+      let audioBuffer: AudioBuffer;
+      try {
+        audioBuffer = await decodeCtx.decodeAudioData(arrayBuf);
+      } finally {
+        await decodeCtx.close().catch(() => {});
+      }
+      console.log("[voice] decoded:", audioBuffer.duration.toFixed(2), "s,", audioBuffer.sampleRate, "Hz,", audioBuffer.numberOfChannels, "ch");
+
+      const wavBytes = encodeWavFromAudioBuffer(audioBuffer);
+      console.log("[voice] encoded WAV:", wavBytes.byteLength, "bytes");
+
+      await onSave(new Uint8Array(wavBytes), "audio/wav");
       onClose();
     } catch (e) {
-      setError("Save failed: " + String(e));
+      console.error("[voice] transcode/save failed:", e);
+      setError("Could not finalize the recording: " + String(e));
     } finally {
       setSaving(false);
     }
@@ -389,7 +428,7 @@ export function VoiceRecorderModal({ open, onSave, onClose }: Props) {
         </div>
         {saving && (
           <p className="text-xs text-center mt-3 text-gray-500 dark:text-gray-400">
-            Saving…
+            Transcoding to WAV…
           </p>
         )}
       </div>
