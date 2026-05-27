@@ -6,6 +6,12 @@ All notable changes to Keepr are documented here. Format loosely follows [Keep a
 
 (See [ROADMAP.md](ROADMAP.md) for the live task list.)
 
+## [0.19.0] — 2026-05-26 — "Cross-platform CI"
+
+### Changed
+
+- **CI now runs the Rust + frontend job matrix on Windows, macOS, and Linux.** Previously `.github/workflows/ci.yml` only built on `windows-latest`, even though `release.yml` ships macOS-13/macOS-14/ubuntu-22.04 artifacts at every tag. First Linux/macOS regression would have landed at tag time. New matrix: `windows-latest` + `macos-14` + `ubuntu-22.04`, `fail-fast: false`. Linux job picks up the WebKitGTK + GTK + AppIndicator apt-install step from `release.yml` so cargo check / test can compile against Tauri 2's GTK bindings.
+
 ## [0.18.1] — 2026-05-26 — "Pinned notes don't shuffle on unpin"
 
 ### Fixed
