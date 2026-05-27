@@ -6,6 +6,26 @@ All notable changes to Keepr are documented here. Format loosely follows [Keep a
 
 (See [ROADMAP.md](ROADMAP.md) for the live task list.)
 
+## [0.20.3] — 2026-05-26 — "Voice notes"
+
+### Added
+
+- **Voice note recording in the editor.** New microphone icon in the editor toolbar opens `VoiceRecorderModal`. Click Record → speak → Stop & save. The clip attaches to the current note as an `audio/webm` (opus codec) blob and shows up as an `<audio controls>` row at the top of the attachment grid both in the editor and in the note card preview. Microphone permission prompt is the OS default; the modal shows a clear error if access was denied, with instructions to enable in Windows Settings → Privacy → Microphone.
+- **Codec fallback chain** `webm;codecs=opus` → `webm` → `mp4` → `ogg`. WebView2 supports the opus variant; the fallback is defensive cross-platform code.
+- **`AttachmentGrid` renders audio attachments above images.** Audio rows use the browser's native `<audio controls>` element so seek/play UX is consistent with every other web audio player.
+
+### Added (Rust)
+
+- **`add_audio_attachment_bytes(note_id, bytes, mime, filename_hint)` Tauri command.** Bypasses the image-attachment path (which would try to thumbnail the bytes through the `image` crate and fail on audio). Writes the bytes directly to `<data_dir>/resources/<id>.<ext>` with `kind: "audio"`. Accepts `audio/webm`, `audio/ogg`, `audio/mp4`, `audio/mpeg`, `audio/wav`. Per-attachment cap is the same 32 MiB as images. `delete_attachment` extended to know audio extensions.
+
+### Changed
+
+- **CSP gained `media-src 'self' blob: keepr-resource:`.** Required for the in-editor MediaRecorder blob URL preview and the `<audio src="keepr-resource://...">` playback.
+
+### Not verified
+
+- Could not exercise recording end-to-end during this session (no microphone test rig). The build compiles + lints clean; manual smoke test on Windows expected to confirm record → save → playback works.
+
 ## [0.20.2] — 2026-05-26 — "Bulk Move to/from Vault"
 
 ### Added

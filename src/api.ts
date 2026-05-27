@@ -88,6 +88,18 @@ export const api = {
     invoke<number>("move_notes_to_vault", { ids }),
   moveNotesOutOfVault: (ids: string[]) =>
     invoke<number>("move_notes_out_of_vault", { ids }),
+  addAudioAttachmentBytes: (
+    noteId: string,
+    bytes: number[],
+    mime: string,
+    filenameHint?: string,
+  ) =>
+    invoke<Attachment>("add_audio_attachment_bytes", {
+      noteId,
+      bytes,
+      mime,
+      filenameHint,
+    }),
   listSnapshots: (noteId: string) =>
     invoke<NoteSnapshot[]>("list_snapshots", { noteId }),
   restoreSnapshot: (snapshotId: string) =>

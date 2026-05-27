@@ -37,8 +37,14 @@ export function AttachmentGrid({
   preferThumb = false,
 }: Props) {
   if (attachments.length === 0) return null;
-  const visible = attachments.slice(0, maxVisible);
-  const overflow = Math.max(0, attachments.length - visible.length);
+  // v0.20.3 — split audio (rendered as <audio> rows) from images (kept
+  // in the existing mosaic). Audio renders ABOVE images so the controls
+  // stay reachable when an image grid grows tall.
+  const audios = attachments.filter((a) => a.kind === "audio");
+  const images = attachments.filter((a) => a.kind !== "audio");
+
+  const visible = images.slice(0, maxVisible);
+  const overflow = Math.max(0, images.length - visible.length);
   const n = visible.length;
 
   // Tailwind classes per count to mirror Keep's mosaic.
@@ -51,24 +57,80 @@ export function AttachmentGrid({
   );
 
   return (
-    <div className={clsx("relative bg-black/5 dark:bg-white/5", gridClass)}>
-      {visible.map((a, i) => {
-        // For 3-image layout the first image spans both columns.
-        const spanFull = n === 3 && i === 0;
-        return (
-          <AttachmentTile
-            key={a.id}
-            attachment={a}
-            spanFull={spanFull}
-            singleton={n === 1}
-            inMosaic={n >= 2}
-            editable={editable}
-            overflow={overflow > 0 && i === visible.length - 1 ? overflow : 0}
-            onRemove={onRemove}
-            preferThumb={preferThumb}
-          />
-        );
-      })}
+    <div>
+      {audios.length > 0 && (
+        <div className="flex flex-col gap-2 px-3 py-2 bg-black/5 dark:bg-white/5">
+          {audios.map((a) => (
+            <AudioRow
+              key={a.id}
+              attachment={a}
+              editable={editable}
+              onRemove={onRemove}
+            />
+          ))}
+        </div>
+      )}
+      {n > 0 && (
+        <div className={clsx("relative bg-black/5 dark:bg-white/5", gridClass)}>
+          {visible.map((a, i) => {
+            // For 3-image layout the first image spans both columns.
+            const spanFull = n === 3 && i === 0;
+            return (
+              <AttachmentTile
+                key={a.id}
+                attachment={a}
+                spanFull={spanFull}
+                singleton={n === 1}
+                inMosaic={n >= 2}
+                editable={editable}
+                overflow={overflow > 0 && i === visible.length - 1 ? overflow : 0}
+                onRemove={onRemove}
+                preferThumb={preferThumb}
+              />
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AudioRow({
+  attachment,
+  editable,
+  onRemove,
+}: {
+  attachment: Attachment;
+  editable?: boolean;
+  onRemove?: (a: Attachment) => void;
+}) {
+  const src = useMemo(
+    () => convertFileSrc(srcForAttachment(attachment), "keepr-resource"),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [attachment.id, attachment.mime],
+  );
+  return (
+    <div className="flex items-center gap-2">
+      <audio
+        controls
+        src={src}
+        className="flex-1 h-10"
+        aria-label={attachment.filename}
+      />
+      {editable && onRemove && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onRemove(attachment);
+          }}
+          aria-label={`Remove ${attachment.filename}`}
+          title="Remove voice note"
+          className="p-1 rounded-full bg-black/60 text-white hover:bg-black/80"
+        >
+          <X size={14} aria-hidden />
+        </button>
+      )}
     </div>
   );
 }
@@ -183,6 +245,16 @@ function mimeToExt(mime: string): string {
       return "webp";
     case "image/svg+xml":
       return "svg";
+    case "audio/webm":
+      return "webm";
+    case "audio/ogg":
+      return "ogg";
+    case "audio/mp4":
+      return "m4a";
+    case "audio/mpeg":
+      return "mp3";
+    case "audio/wav":
+      return "wav";
     default:
       return "bin";
   }

@@ -31,8 +31,8 @@
   - `#X` triggers an inline chip-strip suggesting up to 5 matching labels; Tab/Enter completes top match; click any chip to pick. New `findPartialHashtag` pure helper + 7 tests.
 - [x] **P1 — Bulk "Move to/from Vault"** *(v0.20.2 — shipped)*
   - `BulkActionBar` Lock + Unlock buttons gated on vault init+unlocked. New `move_notes_to_vault` / `move_notes_out_of_vault` Rust commands loop the per-note path (not atomic across batch — accepted trade-off; each per-note commits its own tx).
-- [ ] **P1 — Audio voice notes** *(v0.20.3)*
-  - Editor mic icon → MediaRecorder → save via generalized `add_blob_attachment`. Audio chip preview. `<audio>` in editor. CSP `media-src` updated.
+- [x] **P1 — Audio voice notes** *(v0.20.3 — shipped, end-to-end not mic-tested in CI)*
+  - Mic icon in editor → MediaRecorder (opus/webm) → `add_audio_attachment_bytes` Rust command. AttachmentGrid renders `<audio controls>` for audio mimes. CSP `media-src` opened.
 
 ## Phase C — Trust + recovery (v0.21.x)
 
