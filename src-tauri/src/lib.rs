@@ -177,6 +177,13 @@ pub fn run() {
         }))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
+        // Persist window position + size across launches. Without this
+        // the window resets to the tauri.conf.json default (1280x800)
+        // on every start, which is hostile on multi-monitor setups.
+        // State file lives next to keepr.db in the app data dir (or
+        // next to keepr.exe in portable mode — the plugin uses the
+        // same path::app_config_dir resolution).
+        .plugin(tauri_plugin_window_state::Builder::default().build())
         // NF-V0.5-J — file + stdout logging via tauri-plugin-log. Writes
         // to <app_log_dir>/Keepr.log (per OS convention). Rotation kicks
         // in at 1 MiB and keeps the previous file around as .old; stderr

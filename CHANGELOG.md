@@ -6,6 +6,14 @@ All notable changes to Keepr are documented here. Format loosely follows [Keep a
 
 (See [ROADMAP.md](ROADMAP.md) for the live task list.)
 
+## [0.19.2] — 2026-05-26 — "Window state persistence"
+
+### Added
+
+- **Window position + size now persist across launches.** Wired `tauri-plugin-window-state` v2.4.1. Move/resize the window, quit, relaunch → it comes back to the same spot on the same monitor. Previously the window reset to the `tauri.conf.json` default (1280×800 centered) every time, which was painful on multi-monitor setups. State file lives in the app config dir (or next to `keepr.exe` in portable mode — the plugin uses the same `path::app_config_dir` resolution).
+
+(v0.19.1 reserved for the deferred auto-updater scaffolding — blocked on the signing-key decision, see ROADMAP.)
+
 ## [0.19.0] — 2026-05-26 — "Cross-platform CI"
 
 ### Changed
