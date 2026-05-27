@@ -49,7 +49,7 @@
 ## Open: Larger bets (v0.25.x and later)
 - [ ] **P3 — MSIX packaging + Microsoft Store** — free signing, Windows Share Target contract, auto-update via Store.
 - [ ] **P3 — macOS notarization** (Apple Developer $99/yr) — when distribution scale justifies.
-- [ ] **P3 — `--data-dir <path>` CLI flag** for non-portable explicit relocation.
+- [x] **P3 — `--data-dir <path>` CLI flag** *(v0.24.1 — shipped)*
 - [ ] **P3 — Document scanner** (OpenCV WASM, ~7 MB renderer payload) — Apple Notes parity, lower-priority capture path.
 - [ ] **P3 — Optional LAN-only P2P sync** (mDNS + Yjs CRDT, Anytype model) — only sync model compatible with "no cloud server" non-goal.
 
