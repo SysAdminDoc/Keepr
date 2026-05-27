@@ -4,6 +4,10 @@ version = "0.22.3"
 description = "Offline-first Google Keep clone"
 authors = ["Matthew Ashton"]
 edition = "2021"
+# Explicit primary binary so the Tauri bundler doesn't pick up
+# `keepr-verify` (src/bin/keepr-verify.rs) as the main app. The
+# verifier remains a separate `cargo build --bin keepr-verify` target.
+default-run = "keepr"
 
 [lib]
 name = "keepr_lib"
