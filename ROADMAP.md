@@ -46,8 +46,8 @@
 
 ## Phase D — Power user (v0.22.x)
 
-- [ ] **P2 — HistoryDrawer body diff** *(v0.22.0)*
-  - Bundle `diff-match-patch` or hand-roll a line-diff. Render added lines accent / removed lines red between selected snapshots.
+- [x] **P2 — HistoryDrawer body diff** *(v0.22.0 — shipped)*
+  - Expand arrow per snapshot → inline LCS line-diff vs current. Hand-rolled (no diff-match-patch), 7 vitest cases. Vault snapshots excluded (ciphertext).
 - [ ] **P2 — Per-note re-lock with biometric** *(v0.22.1)*
   - `tauri-plugin-biometric`. New `notes.note_locked` column. Per-note Lock button when vault initialized.
 - [ ] **P2 — Two-way `[[Note Title]]` links + Linked-from panel** *(v0.22.2)*

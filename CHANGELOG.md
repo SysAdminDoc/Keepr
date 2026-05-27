@@ -6,6 +6,14 @@ All notable changes to Keepr are documented here. Format loosely follows [Keep a
 
 (See [ROADMAP.md](ROADMAP.md) for the live task list.)
 
+## [0.22.0] — 2026-05-26 — "History drawer body diff"
+
+### Added
+
+- **Expand/collapse arrow per snapshot in the History drawer.** Click a snapshot row to expand it; an inline diff appears comparing this snapshot's body against the current note body. Removed lines render in red with strikethrough, added lines in green, unchanged lines in neutral. Vault snapshots (ciphertext) don't get the diff (nothing to compare). "No change between this snapshot and the current note" is shown when the bodies are identical.
+- **`lineDiff(a, b)` exported pure helper** in `HistoryDrawer.tsx`. Classic LCS-walk diff (O(n*m) time/space) — fine for the per-snapshot ~10 KB body cap. Tie-breaking prefers "removed before added" for inline edits, which reads naturally ("the old line went, the new one came"). Zero new dependencies — bundling `diff-match-patch` would have added 17 KB+ for a polish feature run once per snapshot expand.
+- **7 vitest cases** covering identical, single-line add, single-line remove, full replace, empty-old, empty-new, middle-edit.
+
 ## [0.21.2] — 2026-05-26 — "Quick-win batch: first-run samples + grid guard + audit results"
 
 ### Added
