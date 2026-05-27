@@ -25,9 +25,19 @@ use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut,
 /// stick alongside `keepr.exe` and the whole app travels with the drive.
 const PORTABLE_SENTINEL: &str = "portable.flag";
 
-/// Resolve the directory Keepr will store `keepr.db` in. Portable when the
-/// sentinel file exists, per-user otherwise.
+/// Resolve the directory Keepr will store `keepr.db` in. Precedence:
+///   1. `--data-dir <path>` CLI flag (v0.24.1+) — wins over everything.
+///      Path is created if absent. Used for explicit relocation without
+///      having to drop a portable.flag (CI test rigs, multi-profile
+///      power users, BYO-cloud-folder workflows).
+///   2. `portable.flag` next to the running EXE — portable mode (USB
+///      stick, network share). DB lives next to the EXE.
+///   3. Tauri's per-user `app_data_dir()` — the default.
 fn resolve_data_dir(app: &tauri::AppHandle) -> std::io::Result<PathBuf> {
+    if let Some(override_path) = data_dir_override_from_args() {
+        std::fs::create_dir_all(&override_path)?;
+        return Ok(override_path);
+    }
     if let Ok(exe) = std::env::current_exe() {
         if let Some(parent) = exe.parent() {
             if parent.join(PORTABLE_SENTINEL).exists() {
@@ -38,6 +48,36 @@ fn resolve_data_dir(app: &tauri::AppHandle) -> std::io::Result<PathBuf> {
     app.path()
         .app_data_dir()
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::NotFound, e.to_string()))
+}
+
+/// Parse `std::env::args()` looking for `--data-dir <path>` or
+/// `--data-dir=<path>`. Returns the path if found and non-empty. Quiet
+/// on every form of malformed input (no panics during startup); the
+/// caller falls through to the default resolution if `None` is
+/// returned.
+fn data_dir_override_from_args() -> Option<PathBuf> {
+    parse_data_dir_arg(std::env::args().skip(1).collect::<Vec<_>>().as_slice())
+}
+
+fn parse_data_dir_arg(args: &[String]) -> Option<PathBuf> {
+    let mut iter = args.iter();
+    while let Some(arg) = iter.next() {
+        if let Some(rest) = arg.strip_prefix("--data-dir=") {
+            if !rest.is_empty() {
+                return Some(PathBuf::from(rest));
+            }
+            return None;
+        }
+        if arg == "--data-dir" {
+            if let Some(next) = iter.next() {
+                if !next.is_empty() {
+                    return Some(PathBuf::from(next));
+                }
+            }
+            return None;
+        }
+    }
+    None
 }
 
 pub struct AppState {
@@ -654,7 +694,8 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_safe_resource_id, parse_byte_range};
+    use super::{is_safe_resource_id, parse_byte_range, parse_data_dir_arg};
+    use std::path::PathBuf;
 
     // is_safe_resource_id —
 
@@ -727,6 +768,50 @@ mod tests {
     fn safe_id_rejects_overly_long_input() {
         let too_long = "a".repeat(2000);
         assert!(!is_safe_resource_id(&too_long));
+    }
+
+    // parse_data_dir_arg — v0.24.1 CLI flag
+
+    fn s(args: &[&str]) -> Vec<String> {
+        args.iter().map(|a| a.to_string()).collect()
+    }
+
+    #[test]
+    fn data_dir_arg_none_when_unset() {
+        assert_eq!(parse_data_dir_arg(&s(&[])), None);
+        assert_eq!(parse_data_dir_arg(&s(&["--other", "foo"])), None);
+    }
+
+    #[test]
+    fn data_dir_arg_space_form() {
+        assert_eq!(
+            parse_data_dir_arg(&s(&["--data-dir", "C:/Notes/Keepr"])),
+            Some(PathBuf::from("C:/Notes/Keepr"))
+        );
+    }
+
+    #[test]
+    fn data_dir_arg_equals_form() {
+        assert_eq!(
+            parse_data_dir_arg(&s(&["--data-dir=/var/lib/keepr"])),
+            Some(PathBuf::from("/var/lib/keepr"))
+        );
+    }
+
+    #[test]
+    fn data_dir_arg_ignores_unrelated_args() {
+        assert_eq!(
+            parse_data_dir_arg(&s(&["--quiet", "--data-dir", "x", "--later"])),
+            Some(PathBuf::from("x"))
+        );
+    }
+
+    #[test]
+    fn data_dir_arg_returns_none_when_flag_has_no_value() {
+        // --data-dir at end of argv with no value -> None, NOT a panic.
+        assert_eq!(parse_data_dir_arg(&s(&["--data-dir"])), None);
+        // --data-dir= with empty value -> None.
+        assert_eq!(parse_data_dir_arg(&s(&["--data-dir="])), None);
     }
 
     // parse_byte_range —

@@ -6,6 +6,13 @@ All notable changes to Keepr are documented here. Format loosely follows [Keep a
 
 (See [ROADMAP.md](ROADMAP.md) for the live task list.)
 
+## [0.24.1] — 2026-05-27 — "`--data-dir` CLI flag"
+
+### Added
+
+- **`keepr.exe --data-dir <path>`** (and `--data-dir=<path>` form) overrides the default data-dir resolution at startup. Precedence: CLI flag > `portable.flag` sentinel > Tauri's per-user `app_data_dir()`. The path is created if absent. Useful for CI test rigs, multi-profile power users, and BYO-cloud-folder workflows that want explicit relocation without having to drop a portable.flag next to the EXE.
+- **5 new tests** for `parse_data_dir_arg` (empty/missing/space/equals/end-of-argv forms).
+
 ## [0.24.0] — 2026-05-27 — "Web Clipper (browser extension + localhost server)"
 
 Save what you're reading straight into Keepr from your browser. Localhost-only — no internet roundtrip.
