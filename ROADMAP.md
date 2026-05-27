@@ -10,7 +10,7 @@
 
 ## Phase A — Distribution credibility (v0.19.x)
 
-- [ ] **P0 — Cross-platform CI matrix** *(v0.19.0)*
+- [x] **P0 — Cross-platform CI matrix** *(v0.19.0 — shipped)*
   - Extend `.github/workflows/ci.yml` from `windows-latest` only to also run `macos-14` + `ubuntu-22.04`. Add the Linux build-dep apt-install step from release.yml. Same four steps everywhere (cargo check + test, npm lint + test + build).
 - [ ] **P0 — Azure Trusted Signing for Windows builds** *(BLOCKED — needs paid subscription)*
   - Subscribe to Azure Trusted Signing ($9.99/mo basic). Add sign step to release.yml. Update SECURITY.md.
