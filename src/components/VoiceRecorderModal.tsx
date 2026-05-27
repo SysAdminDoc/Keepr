@@ -2,20 +2,24 @@ import { useEffect, useRef, useState } from "react";
 import { Mic, Square, X } from "lucide-react";
 
 /**
- * v0.20.3 — voice note recorder. WebView2 supports MediaRecorder; we
- * record straight to `audio/webm;codecs=opus` (Opus is the smallest
- * sane codec; ~12-32kbps for speech). The blob bytes get sent to
- * `add_audio_attachment_bytes` on the Rust side which writes them
- * unchanged to `<data_dir>/resources/<id>.webm`.
+ * v0.22.5 — voice note recorder. WebView2 supports MediaRecorder; we
+ * record straight to `audio/webm;codecs=opus` (~12-32kbps for speech).
+ * Blob bytes go to `add_audio_attachment_bytes` on the Rust side.
  *
- * On platforms where `audio/webm` isn't available (Safari/macOS in
- * theory; not relevant for our WebView2 target but we still fall back)
- * we try `audio/mp4` then `audio/ogg`. If nothing works, the modal
- * shows an error and dismisses on Close.
+ * v0.20.3 → v0.22.5 fix: WebView2's default `PermissionRequested`
+ * handler silently *denies* mic access without showing a prompt — so
+ * users saw "recording doesn't work" with no error path. Two-part fix:
+ *   1. `additionalBrowserArgs: "--use-fake-ui-for-media-stream"` in
+ *      tauri.conf.json auto-allows mic/camera inside our embedded
+ *      WebView2 (no effect on the user's regular Edge browser).
+ *   2. Defensive guards below for `navigator.mediaDevices` being
+ *      undefined (some locked-down corporate WebView2 builds), and
+ *      explicit `NotAllowedError` / `NotFoundError` / `OverconstrainedError`
+ *      messaging so the user knows *why* it failed.
  *
- * Permission prompt is the browser's default — Tauri WebView2 inherits
- * the OS microphone permission. We make a best-effort to acknowledge
- * the failure in the toast instead of leaving the modal stuck.
+ * Codec fallback chain (webm/opus → webm → mp4 → ogg) covers any
+ * non-WebView2 host that might run this code (browser preview, future
+ * macOS/Linux builds).
  */
 
 interface Props {
@@ -61,6 +65,16 @@ export function VoiceRecorderModal({ open, onSave, onClose }: Props) {
     // common case ("user already approved the mic earlier") goes
     // straight to ready.
     (async () => {
+      // Defensive: `navigator.mediaDevices` is undefined in WebView2
+      // builds with media APIs disabled, or when the page is loaded
+      // over an insecure origin. Surface a clear error instead of a
+      // TypeError on the next line.
+      if (!navigator.mediaDevices || typeof navigator.mediaDevices.getUserMedia !== "function") {
+        setError(
+          "Microphone API unavailable in this WebView2 build. Update Microsoft Edge WebView2 Runtime from https://go.microsoft.com/fwlink/p/?LinkId=2124703 and relaunch Keepr.",
+        );
+        return;
+      }
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         streamRef.current = stream;
@@ -75,10 +89,21 @@ export function VoiceRecorderModal({ open, onSave, onClose }: Props) {
         };
         recRef.current = rec;
       } catch (e) {
-        setError(
-          "Microphone access was denied. Enable it in Windows Settings → Privacy → Microphone, then try again."
-            + " (" + String(e) + ")",
-        );
+        // Map well-known DOMException names to actionable text. This is
+        // what users actually see when WebView2 PermissionRequested is
+        // auto-denying, no physical mic exists, etc.
+        const name = e instanceof DOMException ? e.name : "";
+        let msg: string;
+        if (name === "NotAllowedError" || name === "SecurityError") {
+          msg = "Microphone access was denied. Check Windows Settings → Privacy → Microphone, ensure Keepr is allowed, then close + reopen Keepr.";
+        } else if (name === "NotFoundError" || name === "OverconstrainedError") {
+          msg = "No microphone was found. Plug in or enable a recording device, then try again.";
+        } else if (name === "NotReadableError") {
+          msg = "Microphone is in use by another app (Zoom, Teams, etc.). Close it and try again.";
+        } else {
+          msg = "Could not start the microphone: " + String(e);
+        }
+        setError(msg);
       }
     })();
     return () => {
