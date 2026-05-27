@@ -71,6 +71,18 @@ export function filterNotes(
     if (filters.pinnedOnly) {
       pool = pool.filter((n) => n.pinned);
     }
+    if (filters.hasImage) {
+      pool = pool.filter((n) => (n.attachments?.length ?? 0) > 0);
+    }
+    if (filters.hasReminder) {
+      const active = new Set(
+        (reminders ?? []).filter(isActive).map((r) => r.noteId),
+      );
+      pool = pool.filter((n) => active.has(n.id));
+    }
+    if (filters.inVault) {
+      pool = pool.filter((n) => n.vault === "vault");
+    }
   }
 
   const q = search.trim().toLowerCase();

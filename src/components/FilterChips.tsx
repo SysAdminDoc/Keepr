@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Pin, Tag, ChevronDown } from "lucide-react";
+import { Pin, Tag, ChevronDown, Image as ImageIcon, Bell, Lock } from "lucide-react";
 import clsx from "clsx";
 import { useStore } from "../store";
 import { COLOR_KEYS, COLOR_LABELS, LIGHT_HEX } from "../colors";
@@ -21,16 +21,25 @@ export function FilterChips() {
   const clearFilters = useStore((s) => s.clearFilters);
   const labels = useStore((s) => s.labels);
   const section = useStore((s) => s.section);
+  const vaultInitialized = useStore((s) => s.vaultInitialized);
+  const vaultUnlocked = useStore((s) => s.vaultUnlocked);
   // EI-V0.5-5 — Pinned filter is always empty in Trash (set_trashed
   // clears pinned). Hide the chip there to avoid a "click does nothing"
   // experience.
   const showPinnedChip = section.kind !== "trash";
+  // Vault chip only meaningful when the vault is both initialized AND
+  // unlocked — locked-vault notes look empty so a filter for them
+  // returns nothing useful.
+  const showVaultChip = vaultInitialized && vaultUnlocked;
 
   const totalFacets =
     filters.kinds.length +
     filters.colors.length +
     filters.labelIds.length +
-    (filters.pinnedOnly ? 1 : 0);
+    (filters.pinnedOnly ? 1 : 0) +
+    (filters.hasImage ? 1 : 0) +
+    (filters.hasReminder ? 1 : 0) +
+    (filters.inVault ? 1 : 0);
 
   // Don't render if nothing to show and no menus to open — defer to the
   // small "Filters" entry in the search bar's adjacent slot.
@@ -65,6 +74,12 @@ export function FilterChips() {
   };
   const togglePinned = () =>
     setFilters({ ...filters, pinnedOnly: !filters.pinnedOnly });
+  const toggleHasImage = () =>
+    setFilters({ ...filters, hasImage: !filters.hasImage });
+  const toggleHasReminder = () =>
+    setFilters({ ...filters, hasReminder: !filters.hasReminder });
+  const toggleInVault = () =>
+    setFilters({ ...filters, inVault: !filters.inVault });
 
   return (
     <div className="flex flex-wrap items-center gap-2 max-w-5xl mx-auto px-4 sm:px-8 pt-2 pb-1">
@@ -90,6 +105,32 @@ export function FilterChips() {
           <Pin size={14} aria-hidden /> Pinned
         </button>
       )}
+      <button
+        type="button"
+        onClick={toggleHasImage}
+        aria-pressed={filters.hasImage}
+        className={clsx(chipBase, filters.hasImage ? chipActive : chipInactive)}
+      >
+        <ImageIcon size={14} aria-hidden /> Has image
+      </button>
+      <button
+        type="button"
+        onClick={toggleHasReminder}
+        aria-pressed={filters.hasReminder}
+        className={clsx(chipBase, filters.hasReminder ? chipActive : chipInactive)}
+      >
+        <Bell size={14} aria-hidden /> Has reminder
+      </button>
+      {showVaultChip && (
+        <button
+          type="button"
+          onClick={toggleInVault}
+          aria-pressed={filters.inVault}
+          className={clsx(chipBase, filters.inVault ? chipActive : chipInactive)}
+        >
+          <Lock size={14} aria-hidden /> In vault
+        </button>
+      )}
       {hasAny && (
         <button
           type="button"
@@ -104,7 +145,7 @@ export function FilterChips() {
 }
 
 const chipBase =
-  "inline-flex items-center gap-1 px-3 py-1 text-xs rounded-full border transition-colors";
+  "inline-flex items-center gap-1 px-3 py-1 text-xs rounded border transition-colors";
 const chipActive =
   "bg-[#feefc3] dark:bg-[#41331c] border-[#fbbc04] text-[#202124] dark:text-[#fdd663]";
 const chipInactive =

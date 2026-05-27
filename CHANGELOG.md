@@ -6,6 +6,26 @@ All notable changes to Keepr are documented here. Format loosely follows [Keep a
 
 (See [ROADMAP.md](ROADMAP.md) for the live task list.)
 
+## [0.19.4] — 2026-05-26 — "Filter chips: Has image / Has reminder / In vault"
+
+### Added
+
+- **Three new filter chips** in the chip row under the search bar:
+  - **Has image** — narrows to notes with at least one image attachment
+  - **Has reminder** — narrows to notes with an active (non-fired, non-dismissed) reminder
+  - **In vault** — narrows to notes inside the Private Vault. Chip is only rendered when the vault is initialized AND unlocked (locked vault notes look empty so the filter would return nothing useful).
+  - All three combine with the existing kind/color/label/pinned chips via AND across facets.
+- **89 vitest tests** (+3 covering each new filter facet).
+
+### Changed
+
+- **`SearchFilters` schema gained `hasImage`, `hasReminder`, `inVault` boolean fields.** `EMPTY_FILTERS` extended with `false` defaults. `filterNotes` honours each.
+- **Filter chips switched from `rounded-full` to `rounded`** per the global no-pill-backdrops rule. Same chip metric; less amateur shape.
+
+### Already shipped (not new in this release)
+
+- The "X to clear search" affordance has been in `TopBar.tsx:131-143` since before this release — verified during this work and kept as-is.
+
 ## [0.19.3] — 2026-05-26 — "Open data / log folder buttons"
 
 ### Added

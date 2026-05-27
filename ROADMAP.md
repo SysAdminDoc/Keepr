@@ -20,8 +20,8 @@
   - `tauri-plugin-window-state`. Two-line plugin init.
 - [x] **P1 — "Open log folder" + "Open data folder" buttons** *(v0.19.3 — shipped)*
   - Added to Settings → Log folder AND Data folder rows. `tauri-plugin-opener` v2.5.4. Whitelisted to Keepr's own dirs only — no generic `open_path` IPC.
-- [ ] **P1 — Search clear-button + extra filter chips** *(v0.19.4)*
-  - `<X>` in search input; add `is:vault` `has:image` `has:reminder` `is:archived` chips.
+- [x] **P1 — Search clear-button + extra filter chips** *(v0.19.4 — shipped)*
+  - Search clear button already existed (TopBar.tsx:131-143); kept. Added 3 new chips: Has image / Has reminder / In vault (vault chip only when initialized + unlocked). Dropped `is:archived` — redundant with Archive section. Pill chip shape fixed (rounded-full → rounded).
 
 ## Phase B — Core capture surface (v0.20.x)
 
