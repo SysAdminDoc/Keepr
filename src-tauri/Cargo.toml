@@ -1,6 +1,6 @@
 [package]
 name = "keepr"
-version = "0.22.6"
+version = "0.22.7"
 description = "Offline-first Google Keep clone"
 authors = ["Matthew Ashton"]
 edition = "2021"

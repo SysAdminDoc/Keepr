@@ -6,6 +6,26 @@ All notable changes to Keepr are documented here. Format loosely follows [Keep a
 
 (See [ROADMAP.md](ROADMAP.md) for the live task list.)
 
+## [0.22.7] — 2026-05-26 — "Live mic-level meter + chunk flush"
+
+### Added
+
+- **Live microphone level meter** in the voice-note modal — 20-bar bar graph (green → amber → red) driven by `AudioContext` + `AnalyserNode` RMS at 60 fps. Lets users *see* whether their mic is picking up audio before they commit to recording, plus surfaces "No input detected", "Low — speak up", "Clipping — back off", or "Good input" copy below the bars.
+- **getUserMedia constraints** now explicitly request `echoCancellation`, `noiseSuppression`, and `autoGainControl` (sensible defaults for voice notes; previously was a bare `{ audio: true }` that left these to the driver/browser).
+- **MediaRecorder timeslice (`rec.start(1000)`)** so `ondataavailable` fires every second instead of only on stop. Some Chromium / WebView2 builds buffer everything until stop and emit one giant chunk that can drop silently if the page hits a memory wall. One-second chunks are cheap, safer, and progress-bar-friendly.
+- **Final `rec.requestData()` flush** before `stop()` to push anything buffered since the last timeslice tick.
+- **Track-count sanity check** after getUserMedia — some WebView2 builds resolve with a stream that has zero audio tracks (driver issue / mic unplugged mid-request). Now surfaces a clear "Microphone returned no audio tracks" error.
+- **MediaRecorder `onerror` handler** so mid-capture failures show up instead of silently producing an empty blob.
+
+### Changed
+
+- The "Recording captured 0 bytes" error message now lists actionable next steps (check mic-level bar, Windows Sound → Input default device, OS-level mic privacy).
+- Diagnostic `console.log` lines for mic acquisition, chunk arrivals, and stop-state — invisible to users but invaluable when triaging "no audio" reports.
+
+### Notes
+
+If the bars don't move when you speak, the OS isn't passing audio through to Keepr — try Windows Settings → Sound → Input and confirm the right device is set as default + its level isn't muted. If the bars move but Stop & save says "0 bytes", the MediaRecorder codec failed mid-capture (a dev-console message will show why).
+
 ## [0.22.6] — 2026-05-26 — "Record button actually enables"
 
 ### Fixed
