@@ -1,7 +1,11 @@
 mod db;
 mod commands;
 mod lock;
-mod vault;
+// v0.22.1 — vault module is `pub` so the standalone `keepr-verify`
+// binary in src/bin/keepr-verify.rs can re-derive the KEK and decrypt
+// vault notes from outside the Tauri runtime. No private fields are
+// exposed beyond what was already accessible to commands.rs.
+pub mod vault;
 
 use parking_lot::Mutex;
 use std::path::{Path, PathBuf};

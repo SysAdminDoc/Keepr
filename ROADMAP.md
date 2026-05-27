@@ -54,8 +54,8 @@
   - Regex extract on save into `note_links` table. Editor renders `[[Foo]]` as clickable span. Editor footer "Linked from N notes" panel. Title autocomplete on `[[`.
 - [ ] **P2 — Saved searches / Smart Labels** *(v0.22.3)*
   - `smart_labels(name, query_json)` table. "Save as Smart Label" button when filter active. Sidebar renders below labels.
-- [ ] **P2 — Vault verifier CLI (`keepr-verify`)** *(v0.22.4)*
-  - Separate Rust binary `src-tauri/src/bin/keepr-verify.rs`. Reads DB → re-derives Argon2id KEK from passphrase → decrypts sample vault note. Open-source credibility multiplier.
+- [x] **P2 — Vault verifier CLI (`keepr-verify`)** *(v0.22.1 — shipped)*
+  - Standalone Rust binary at `src-tauri/src/bin/keepr-verify.rs`. Supports `--db`, `--note-id`, `--seed`, `--help`. Reads stdin for passphrase. Builds independently of Tauri runtime.
 
 ## Phase E — Quick wins / housekeeping (rolled into above phases as fit)
 

@@ -6,6 +6,28 @@ All notable changes to Keepr are documented here. Format loosely follows [Keep a
 
 (See [ROADMAP.md](ROADMAP.md) for the live task list.)
 
+## [0.22.1] — 2026-05-26 — "Vault verifier CLI"
+
+### Added
+
+- **`keepr-verify` standalone Rust binary** at `src-tauri/src/bin/keepr-verify.rs`. Reads a Keepr `keepr.db` SQLite file directly (no Tauri, no IPC), prompts for the vault password (or 12-word recovery seed with `--seed`), re-derives the KEK via Argon2id, unwraps the DEK, and decrypts a sample vault note — printing the plaintext if it works.
+- **Independently auditable.** ~260 LOC of Rust. The vault module is exported as `pub mod vault` so the binary can call the same crypto functions the main app uses without duplicating code. Build with `cargo build --release --bin keepr-verify --manifest-path src-tauri/Cargo.toml`.
+
+### Usage
+
+```sh
+keepr-verify --db %APPDATA%\com.sysadmindoc.keepr\keepr.db
+keepr-verify --db <path> --note-id <uuid>   # specific note
+keepr-verify --db <path> --seed             # recover via BIP39 phrase
+keepr-verify --help
+```
+
+Passphrase is read from stdin (one line) so it doesn't appear in shell history. The binary can be copied to an air-gapped machine alongside `keepr.db` for offline verification — no network, no Tauri runtime, no dependency on a running Keepr install.
+
+### Why
+
+Per the v0.19 research — modeled on Notesnook's Vericrypt pattern. Closes the "users have to trust SECURITY.md prose" gap by giving anyone a way to verify the crypto stack works as documented.
+
 ## [0.22.0] — 2026-05-26 — "History drawer body diff"
 
 ### Added
