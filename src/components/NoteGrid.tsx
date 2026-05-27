@@ -177,8 +177,16 @@ export function NoteGrid({ notes, layout = "masonry" }: Props) {
             // Invisible placeholder — keeps the grid cell occupied so
             // surrounding cards stay put. aria-hidden so screen readers
             // skip it; visibility:hidden so the cell still claims space
-            // in row-height calculations.
-            <div key={`gap-${i}`} aria-hidden style={{ visibility: "hidden" }} />
+            // in row-height calculations. v0.21.2 — `min-height: 1px`
+            // guards against the all-placeholders-in-a-row case where
+            // CSS Grid would otherwise collapse the row to zero and
+            // cards below would jump up. 1px is enough to keep the
+            // row claimed without producing a visible gap-row band.
+            <div
+              key={`gap-${i}`}
+              aria-hidden
+              style={{ visibility: "hidden", minHeight: "1px" }}
+            />
           ),
         )}
       </div>
