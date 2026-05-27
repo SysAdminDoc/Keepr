@@ -78,43 +78,112 @@ fn handle_resource_request<R: tauri::Runtime>(
     req: Request<Vec<u8>>,
     responder: UriSchemeResponder,
 ) {
-    let respond = |status: StatusCode, body: Vec<u8>, content_type: &str| {
+    // v0.22.8 fix: without Range support, Chromium's `<audio>` element
+    // loads but can't determine the playable range and refuses to play
+    // media files. Build the response in one place so the move-only
+    // `responder` is consumed exactly once.
+    let resp = build_resource_response(&ctx, &req);
+    responder.respond(resp);
+}
+
+fn build_resource_response<R: tauri::Runtime>(
+    ctx: &UriSchemeContext<'_, R>,
+    req: &Request<Vec<u8>>,
+) -> Response<Vec<u8>> {
+    let make = |status: StatusCode, body: Vec<u8>, content_type: &str| -> Response<Vec<u8>> {
         let mut resp = Response::new(body);
         *resp.status_mut() = status;
-        if let Ok(value) = content_type.parse() {
-            resp.headers_mut().insert("Content-Type", value);
-        }
-        // Allow the renderer's CSP to consume the response.
-        if let Ok(value) = "*".parse() {
-            resp.headers_mut().insert("Access-Control-Allow-Origin", value);
-        }
-        responder.respond(resp);
+        if let Ok(v) = content_type.parse() { resp.headers_mut().insert("Content-Type", v); }
+        if let Ok(v) = "*".parse() { resp.headers_mut().insert("Access-Control-Allow-Origin", v); }
+        if let Ok(v) = "bytes".parse() { resp.headers_mut().insert("Accept-Ranges", v); }
+        resp
     };
 
-    let id_part = req
-        .uri()
-        .path()
-        .trim_start_matches('/')
-        .to_string();
-
+    let id_part = req.uri().path().trim_start_matches('/').to_string();
     if id_part.is_empty()
         || id_part.contains("..")
         || id_part.contains('/')
         || id_part.contains('\\')
     {
-        respond(StatusCode::BAD_REQUEST, b"bad resource id".to_vec(), "text/plain");
-        return;
+        return make(StatusCode::BAD_REQUEST, b"bad resource id".to_vec(), "text/plain");
     }
 
     let state: tauri::State<'_, AppState> = ctx.app_handle().state();
     let target: PathBuf = state.data_dir.join(RESOURCES_SUBDIR).join(&id_part);
-    match std::fs::read(&target) {
-        Ok(bytes) => {
-            let ct = guess_content_type(&target);
-            respond(StatusCode::OK, bytes, ct);
+    let bytes = match std::fs::read(&target) {
+        Ok(b) => b,
+        Err(_) => return make(StatusCode::NOT_FOUND, b"not found".to_vec(), "text/plain"),
+    };
+    let ct = guess_content_type(&target);
+    let total = bytes.len();
+
+    // Range header: `bytes=START-END` (END inclusive; either side may be empty).
+    let range_header = req
+        .headers()
+        .get("range")
+        .or_else(|| req.headers().get("Range"))
+        .and_then(|v| v.to_str().ok());
+
+    if let Some(raw) = range_header {
+        if let Some((start, end)) = parse_byte_range(raw, total) {
+            let slice = bytes[start..=end].to_vec();
+            let mut resp = make(StatusCode::PARTIAL_CONTENT, slice, ct);
+            let cr = format!("bytes {start}-{end}/{total}");
+            if let Ok(v) = cr.parse() { resp.headers_mut().insert("Content-Range", v); }
+            let len = (end - start + 1).to_string();
+            if let Ok(v) = len.parse() { resp.headers_mut().insert("Content-Length", v); }
+            return resp;
         }
-        Err(_) => respond(StatusCode::NOT_FOUND, b"not found".to_vec(), "text/plain"),
+        // Malformed range header — fall through to a full 200 response.
     }
+
+    let mut resp = make(StatusCode::OK, bytes, ct);
+    let len = total.to_string();
+    if let Ok(v) = len.parse() { resp.headers_mut().insert("Content-Length", v); }
+    resp
+}
+
+/// Parse an HTTP `Range: bytes=...` header. Returns `(start, end)` inclusive
+/// bounds clamped to `[0, total - 1]`. Returns `None` for the unsupported
+/// multi-range form (`bytes=0-99,200-299`) and for any malformed input.
+fn parse_byte_range(raw: &str, total: usize) -> Option<(usize, usize)> {
+    if total == 0 {
+        return None;
+    }
+    let raw = raw.trim();
+    let spec = raw.strip_prefix("bytes=")?;
+    // Reject multi-range — we don't bother implementing the multipart
+    // boundary response.
+    if spec.contains(',') {
+        return None;
+    }
+    let (lo, hi) = spec.split_once('-')?;
+    let lo = lo.trim();
+    let hi = hi.trim();
+    let max_idx = total - 1;
+    if lo.is_empty() {
+        // Suffix range: `bytes=-500` → last 500 bytes.
+        let n: usize = hi.parse().ok()?;
+        if n == 0 {
+            return None;
+        }
+        let n = n.min(total);
+        return Some((total - n, max_idx));
+    }
+    let start: usize = lo.parse().ok()?;
+    if start > max_idx {
+        return None;
+    }
+    let end = if hi.is_empty() {
+        max_idx
+    } else {
+        let e: usize = hi.parse().ok()?;
+        e.min(max_idx)
+    };
+    if end < start {
+        return None;
+    }
+    Some((start, end))
 }
 
 fn guess_content_type(path: &Path) -> &'static str {
@@ -475,4 +544,63 @@ pub fn run() {
                 }
             }
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_byte_range;
+
+    #[test]
+    fn parse_full_range() {
+        assert_eq!(parse_byte_range("bytes=0-99", 1000), Some((0, 99)));
+    }
+
+    #[test]
+    fn parse_open_ended_range() {
+        // `bytes=500-` → from 500 to EOF.
+        assert_eq!(parse_byte_range("bytes=500-", 1000), Some((500, 999)));
+    }
+
+    #[test]
+    fn parse_suffix_range() {
+        // `bytes=-100` → last 100 bytes.
+        assert_eq!(parse_byte_range("bytes=-100", 1000), Some((900, 999)));
+    }
+
+    #[test]
+    fn parse_suffix_range_larger_than_file() {
+        // Suffix larger than file → entire file.
+        assert_eq!(parse_byte_range("bytes=-5000", 1000), Some((0, 999)));
+    }
+
+    #[test]
+    fn parse_clamps_end_to_eof() {
+        assert_eq!(parse_byte_range("bytes=900-9999", 1000), Some((900, 999)));
+    }
+
+    #[test]
+    fn parse_rejects_start_past_eof() {
+        assert_eq!(parse_byte_range("bytes=2000-3000", 1000), None);
+    }
+
+    #[test]
+    fn parse_rejects_inverted_range() {
+        assert_eq!(parse_byte_range("bytes=500-100", 1000), None);
+    }
+
+    #[test]
+    fn parse_rejects_multi_range() {
+        // We don't support `multipart/byteranges` responses.
+        assert_eq!(parse_byte_range("bytes=0-99,200-299", 1000), None);
+    }
+
+    #[test]
+    fn parse_rejects_missing_prefix() {
+        assert_eq!(parse_byte_range("0-99", 1000), None);
+    }
+
+    #[test]
+    fn parse_rejects_empty_file() {
+        assert_eq!(parse_byte_range("bytes=0-99", 0), None);
+    }
 }
