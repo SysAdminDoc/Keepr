@@ -234,6 +234,92 @@ pub fn decrypt_note(dek: &Dek, note_id: &str, bundle: &[u8]) -> Result<VaultPayl
     Ok(payload)
 }
 
+// --- v0.21.1 recovery seed (BIP39 12-word, opt-in) -------------------------
+//
+// Same envelope shape as the password-wrap, but the KEK is derived from
+// the BIP39 seed bytes (128 bits = 12 words) instead of a user password.
+// Wrap is stored under a separate set of app_settings keys
+// (vault_seed_salt / vault_seed_nonce / vault_seed_dek_wrapped) so the
+// password wrap remains the authoritative path; the seed wrap is purely
+// a recovery escape hatch and is OPT-IN.
+//
+// Threat note: a BIP39 seed has 128 bits of entropy, much higher than a
+// typical password — so we keep the same Argon2id cost params (no
+// brute-force attack is faster than 2^128 against the seed-derived KEK).
+// Identical KDF cost also means the recovery flow takes the same wall
+// time as a normal unlock, which is a useful signal for users.
+
+const SEED_BYTES: usize = 16; // 128 bits → 12 BIP39 words
+
+/// Generate a fresh recovery seed + wrap the supplied DEK with it.
+/// Returns the 12-word mnemonic AND the wrap envelope to persist.
+/// Caller is responsible for showing the mnemonic to the user once and
+/// then dropping it — there's no second chance.
+pub fn seed_init(dek: &Dek) -> Result<(String, VaultInit)> {
+    let mut entropy = [0u8; SEED_BYTES];
+    fill_random(&mut entropy)?;
+    let mnemonic = bip39::Mnemonic::from_entropy(&entropy)
+        .map_err(|e| anyhow!("bip39 generate failed: {e}"))?;
+    let phrase = mnemonic.to_string();
+    let envelope = wrap_dek_with_seed(dek, &entropy)?;
+    // Best-effort scrub of the in-memory entropy after we've encoded it.
+    entropy.zeroize();
+    Ok((phrase, envelope))
+}
+
+fn wrap_dek_with_seed(dek: &Dek, entropy: &[u8]) -> Result<VaultInit> {
+    let mut salt = [0u8; SALT_LEN];
+    fill_random(&mut salt)?;
+    let mut nonce = [0u8; NONCE_LEN];
+    fill_random(&mut nonce)?;
+    let kek = derive_kek(&hex_for_kdf(entropy), &salt)?;
+    let cipher = XChaCha20Poly1305::new((&kek).into());
+    let wrapped = cipher
+        .encrypt(XNonce::from_slice(&nonce), dek.as_bytes().as_ref())
+        .map_err(|e| anyhow!("DEK seed-wrap failed: {e}"))?;
+    drop_kek(kek);
+    Ok(VaultInit {
+        salt,
+        dek_nonce: nonce,
+        dek_wrapped: wrapped,
+    })
+}
+
+/// Try to unlock with a recovery phrase. Returns the unlocked DEK on
+/// success, None on wrong phrase (or a phrase that doesn't match the
+/// wrapped envelope), Err on malformed inputs.
+pub fn unlock_with_seed(
+    mnemonic_phrase: &str,
+    salt: &[u8; SALT_LEN],
+    nonce: &[u8; NONCE_LEN],
+    wrapped: &[u8],
+) -> Result<Option<Dek>> {
+    let m = bip39::Mnemonic::parse(mnemonic_phrase.trim())
+        .map_err(|e| anyhow!("invalid recovery phrase: {e}"))?;
+    let entropy = m.to_entropy();
+    let kek = derive_kek(&hex_for_kdf(&entropy), salt)?;
+    let cipher = XChaCha20Poly1305::new((&kek).into());
+    let result = cipher.decrypt(XNonce::from_slice(nonce), wrapped);
+    drop_kek(kek);
+    match result {
+        Ok(bytes) => {
+            let dek = Dek::from_slice(&bytes)?;
+            let mut leftover = bytes;
+            leftover.zeroize();
+            Ok(Some(dek))
+        }
+        Err(_) => Ok(None),
+    }
+}
+
+/// The `argon2` crate's `hash_password_into` takes a &[u8] password.
+/// We feed it the hex-encoded entropy so the Argon2id input is plain
+/// ASCII (same shape as a user password) — avoids any edge case around
+/// non-UTF8 bytes confusing future audits or tooling.
+fn hex_for_kdf(entropy: &[u8]) -> String {
+    to_hex(entropy)
+}
+
 /// Hex-encode bytes for storage in TEXT columns. The DEK never goes
 /// through this path; only the wrap blob + salt + nonces do.
 pub fn to_hex(bytes: &[u8]) -> String {
@@ -375,5 +461,60 @@ mod tests {
     fn hex_rejects_odd_length_and_bad_chars() {
         assert!(from_hex("abc").is_err());
         assert!(from_hex("zz").is_err());
+    }
+
+    // v0.21.1 — recovery seed round-trip.
+    #[test]
+    fn seed_init_generates_12_words_and_unlocks_dek() {
+        let (_pw_init, dek) = init("pw").unwrap();
+        let dek_bytes = *dek.as_bytes();
+        let (phrase, envelope) = seed_init(&dek).unwrap();
+        // BIP39 12 words from 128 bits of entropy.
+        assert_eq!(phrase.split_whitespace().count(), 12);
+        // Round-trip the phrase through unlock and verify we recover
+        // the same DEK bytes.
+        let recovered = unlock_with_seed(
+            &phrase,
+            &envelope.salt,
+            &envelope.dek_nonce,
+            &envelope.dek_wrapped,
+        )
+        .unwrap()
+        .expect("seed unlock should succeed");
+        assert_eq!(recovered.as_bytes(), &dek_bytes);
+    }
+
+    #[test]
+    fn seed_unlock_with_wrong_phrase_returns_none() {
+        let (_pw_init, dek) = init("pw").unwrap();
+        let (_phrase, envelope) = seed_init(&dek).unwrap();
+        // 12 valid BIP39 words but not the right ones — should silently
+        // return None, not Err.
+        let bad = "abandon abandon abandon abandon abandon abandon \
+                   abandon abandon abandon abandon abandon about";
+        let out = unlock_with_seed(
+            bad,
+            &envelope.salt,
+            &envelope.dek_nonce,
+            &envelope.dek_wrapped,
+        )
+        .unwrap();
+        assert!(out.is_none());
+    }
+
+    #[test]
+    fn seed_unlock_with_malformed_phrase_errors() {
+        let (_pw_init, dek) = init("pw").unwrap();
+        let (_phrase, envelope) = seed_init(&dek).unwrap();
+        // Not a valid BIP39 phrase at all.
+        let result = unlock_with_seed(
+            "not a real phrase at all",
+            &envelope.salt,
+            &envelope.dek_nonce,
+            &envelope.dek_wrapped,
+        );
+        assert!(result.is_err());
+        let msg = format!("{}", result.err().unwrap());
+        assert!(msg.to_lowercase().contains("invalid"), "got: {msg}");
     }
 }

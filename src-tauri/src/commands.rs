@@ -2653,6 +2653,11 @@ pub fn set_app_lock_minutes(
 const KEY_VAULT_SALT: &str = "vault_kdf_salt";
 const KEY_VAULT_NONCE: &str = "vault_dek_nonce";
 const KEY_VAULT_WRAPPED: &str = "vault_dek_wrapped";
+// v0.21.1 — opt-in BIP39 recovery seed envelope. Wraps the SAME DEK,
+// just derived from the seed entropy instead of a user password.
+const KEY_VAULT_SEED_SALT: &str = "vault_seed_salt";
+const KEY_VAULT_SEED_NONCE: &str = "vault_seed_nonce";
+const KEY_VAULT_SEED_WRAPPED: &str = "vault_seed_dek_wrapped";
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -2667,6 +2672,24 @@ fn read_vault_material(
     let salt = read_app_setting(conn, KEY_VAULT_SALT)?;
     let nonce = read_app_setting(conn, KEY_VAULT_NONCE)?;
     let wrapped = read_app_setting(conn, KEY_VAULT_WRAPPED)?;
+    match (salt, nonce, wrapped) {
+        (Some(s), Some(n), Some(w)) => {
+            let s = crate::vault::from_hex(&s).map_err(|e| e.to_string())?;
+            let n = crate::vault::from_hex(&n).map_err(|e| e.to_string())?;
+            let w = crate::vault::from_hex(&w).map_err(|e| e.to_string())?;
+            Ok(Some((s, n, w)))
+        }
+        _ => Ok(None),
+    }
+}
+
+/// v0.21.1 — opt-in seed envelope. Same shape as the password envelope.
+fn read_vault_seed_material(
+    conn: &rusqlite::Connection,
+) -> Result<Option<(Vec<u8>, Vec<u8>, Vec<u8>)>, String> {
+    let salt = read_app_setting(conn, KEY_VAULT_SEED_SALT)?;
+    let nonce = read_app_setting(conn, KEY_VAULT_SEED_NONCE)?;
+    let wrapped = read_app_setting(conn, KEY_VAULT_SEED_WRAPPED)?;
     match (salt, nonce, wrapped) {
         (Some(s), Some(n), Some(w)) => {
             let s = crate::vault::from_hex(&s).map_err(|e| e.to_string())?;
@@ -2788,6 +2811,135 @@ pub fn change_vault_password(
     )?;
     // Keep vault unlocked with the same DEK so the user doesn't have to
     // re-enter the new password right after changing it.
+    *state.vault_dek.lock() = Some(dek);
+    Ok(())
+}
+
+// --- v0.21.1 vault recovery seed (opt-in BIP39) ----------------------------
+
+/// Returns true if the vault has an opt-in BIP39 recovery seed envelope
+/// stored. The password envelope is independent and remains the primary
+/// unlock path even when a seed exists.
+#[tauri::command]
+pub fn vault_has_recovery_seed(state: State<'_, AppState>) -> Result<bool, String> {
+    let conn = state.db.lock();
+    Ok(read_vault_seed_material(&conn)?.is_some())
+}
+
+/// Generate a fresh BIP39 12-word recovery seed for the vault. The
+/// caller must supply the current password so we can unlock the DEK
+/// first; we wrap the same DEK with a seed-derived KEK and persist the
+/// envelope. Returns the 12-word phrase exactly ONCE — Keepr never
+/// stores it in plaintext and there's no way to retrieve it again.
+///
+/// Opt-in: this is the trade-off between "no recovery possible ever"
+/// (the original Vault promise) and "recoverable if the user writes
+/// down the seed". The UI MUST make this choice explicit.
+#[tauri::command]
+pub fn setup_vault_recovery_seed(
+    state: State<'_, AppState>,
+    current_password: String,
+) -> Result<String, String> {
+    let conn = state.db.lock();
+    if read_vault_seed_material(&conn)?.is_some() {
+        return Err("vault already has a recovery seed".into());
+    }
+    let Some((salt, nonce, wrapped)) = read_vault_material(&conn)? else {
+        return Err("vault is not initialized".into());
+    };
+    let salt_arr: [u8; 16] = salt
+        .as_slice()
+        .try_into()
+        .map_err(|_| "vault salt has wrong length".to_string())?;
+    let nonce_arr: [u8; 24] = nonce
+        .as_slice()
+        .try_into()
+        .map_err(|_| "vault dek nonce has wrong length".to_string())?;
+    let dek_opt = crate::vault::unlock(&current_password, &salt_arr, &nonce_arr, &wrapped)
+        .map_err(|e| e.to_string())?;
+    let dek = dek_opt.ok_or_else(|| "incorrect current vault password".to_string())?;
+    let (phrase, envelope) = crate::vault::seed_init(&dek).map_err(|e| e.to_string())?;
+    write_app_setting(&conn, KEY_VAULT_SEED_SALT, &crate::vault::to_hex(&envelope.salt))?;
+    write_app_setting(
+        &conn,
+        KEY_VAULT_SEED_NONCE,
+        &crate::vault::to_hex(&envelope.dek_nonce),
+    )?;
+    write_app_setting(
+        &conn,
+        KEY_VAULT_SEED_WRAPPED,
+        &crate::vault::to_hex(&envelope.dek_wrapped),
+    )?;
+    drop(conn);
+    // Keep the vault unlocked.
+    *state.vault_dek.lock() = Some(dek);
+    Ok(phrase)
+}
+
+/// Remove the seed envelope. Used when the user wants to take back the
+/// recovery-possible trade-off (e.g. they couldn't store the phrase
+/// safely after all). The password envelope is untouched.
+#[tauri::command]
+pub fn remove_vault_recovery_seed(state: State<'_, AppState>) -> Result<(), String> {
+    let conn = state.db.lock();
+    write_app_setting(&conn, KEY_VAULT_SEED_SALT, "")?;
+    write_app_setting(&conn, KEY_VAULT_SEED_NONCE, "")?;
+    write_app_setting(&conn, KEY_VAULT_SEED_WRAPPED, "")?;
+    // Empty strings count as "no material" in read_vault_seed_material
+    // via from_hex returning an empty Vec, which fails the salt-length
+    // try_into in unlock — better to just delete the rows. Use DELETE
+    // here directly so the column is truly absent.
+    conn.execute(
+        "DELETE FROM app_settings WHERE key IN (?1, ?2, ?3)",
+        params![KEY_VAULT_SEED_SALT, KEY_VAULT_SEED_NONCE, KEY_VAULT_SEED_WRAPPED],
+    )
+    .map_err(err)?;
+    Ok(())
+}
+
+/// Recover access to the vault using the recovery seed. Unlocks the
+/// DEK with the seed-derived KEK, then re-wraps the (unchanged) DEK
+/// with the supplied new password's KEK so the user has a working
+/// password again. Existing vault notes don't need to be re-encrypted
+/// since the DEK is unchanged. Returns Ok on success; the vault is
+/// left UNLOCKED in memory so the user can immediately access notes.
+#[tauri::command]
+pub fn recover_vault_with_seed(
+    state: State<'_, AppState>,
+    mnemonic: String,
+    new_password: String,
+) -> Result<(), String> {
+    if new_password.is_empty() {
+        return Err("new vault password must not be empty".into());
+    }
+    let conn = state.db.lock();
+    let Some((salt, nonce, wrapped)) = read_vault_seed_material(&conn)? else {
+        return Err("vault has no recovery seed; recovery is not possible".into());
+    };
+    let salt_arr: [u8; 16] = salt
+        .as_slice()
+        .try_into()
+        .map_err(|_| "vault seed salt has wrong length".to_string())?;
+    let nonce_arr: [u8; 24] = nonce
+        .as_slice()
+        .try_into()
+        .map_err(|_| "vault seed nonce has wrong length".to_string())?;
+    let dek_opt = crate::vault::unlock_with_seed(&mnemonic, &salt_arr, &nonce_arr, &wrapped)
+        .map_err(|e| e.to_string())?;
+    let dek = dek_opt.ok_or_else(|| "recovery phrase did not match this vault".to_string())?;
+    let rewrapped = crate::vault::rewrap(&dek, &new_password).map_err(|e| e.to_string())?;
+    write_app_setting(&conn, KEY_VAULT_SALT, &crate::vault::to_hex(&rewrapped.salt))?;
+    write_app_setting(
+        &conn,
+        KEY_VAULT_NONCE,
+        &crate::vault::to_hex(&rewrapped.dek_nonce),
+    )?;
+    write_app_setting(
+        &conn,
+        KEY_VAULT_WRAPPED,
+        &crate::vault::to_hex(&rewrapped.dek_wrapped),
+    )?;
+    drop(conn);
     *state.vault_dek.lock() = Some(dek);
     Ok(())
 }

@@ -84,6 +84,12 @@ export const api = {
     invoke<Note>("move_note_to_vault", { id }),
   moveNoteOutOfVault: (id: string) =>
     invoke<Note>("move_note_out_of_vault", { id }),
+  vaultHasRecoverySeed: () => invoke<boolean>("vault_has_recovery_seed"),
+  setupVaultRecoverySeed: (currentPassword: string) =>
+    invoke<string>("setup_vault_recovery_seed", { currentPassword }),
+  removeVaultRecoverySeed: () => invoke<void>("remove_vault_recovery_seed"),
+  recoverVaultWithSeed: (mnemonic: string, newPassword: string) =>
+    invoke<void>("recover_vault_with_seed", { mnemonic, newPassword }),
   moveNotesToVault: (ids: string[]) =>
     invoke<number>("move_notes_to_vault", { ids }),
   moveNotesOutOfVault: (ids: string[]) =>

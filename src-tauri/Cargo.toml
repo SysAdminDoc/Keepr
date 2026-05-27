@@ -1,6 +1,6 @@
 [package]
 name = "keepr"
-version = "0.21.0"
+version = "0.21.1"
 description = "Offline-first Google Keep clone"
 authors = ["Matthew Ashton"]
 edition = "2021"
@@ -45,6 +45,7 @@ getrandom = "0.2"
 zeroize = { version = "1", features = ["zeroize_derive"] }
 tauri-plugin-window-state = "2.4.1"
 tauri-plugin-opener = "2.5.4"
+bip39 = "2"
 
 [dev-dependencies]
 tempfile = "3"

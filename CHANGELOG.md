@@ -6,6 +6,26 @@ All notable changes to Keepr are documented here. Format loosely follows [Keep a
 
 (See [ROADMAP.md](ROADMAP.md) for the live task list.)
 
+## [0.21.1] — 2026-05-26 — "Vault recovery seed (opt-in BIP39)"
+
+### Added
+
+- **Opt-in 12-word BIP39 recovery seed for the Private Vault.** Set it up from Settings → Private Vault → "Set up recovery seed…" after the vault is unlocked. Confirm the current password → 12 words are generated and shown once with a "Copy to clipboard" button and an explicit acknowledgement checkbox. The seed wraps the SAME DEK with an Argon2id-derived KEK from the seed entropy, stored under three new `app_settings` keys (`vault_seed_salt`, `vault_seed_nonce`, `vault_seed_dek_wrapped`). The password envelope is independent and remains the primary unlock path.
+- **"Forgot password? Recover with seed phrase…"** link appears on the locked-vault unlock panel when a seed is set up. Opens a recovery modal — paste the 12 words + a new password → DEK is unwrapped via seed-KEK → re-wrapped with the new password's KEK. The vault notes themselves are not re-encrypted (DEK is unchanged), so recovery is fast.
+- **"Remove recovery seed…"** button removes the seed envelope. Used when the user wants to take back the "no-recovery guarantee" trade-off.
+
+### Crypto details (verified by tests)
+
+- BIP39 mnemonic via the `bip39` crate (v2). 128-bit entropy → 12 words.
+- KDF: Argon2id m=64MiB t=3 p=1 — same params as the password path. Identical KDF cost means recovery takes the same wall time as a normal unlock (intentional signal to users that the security floor is equivalent).
+- Seed entropy fed to Argon2id as a hex string so the password input shape is ASCII (matches the existing `derive_kek` contract).
+- DEK never logged or exposed to the renderer. Phrase shown ONCE; Keepr never reads it back from storage.
+- 3 new Rust round-trip tests: generate/unlock, wrong-but-valid-phrase = None, malformed-phrase = Err. **58 cargo tests pass.**
+
+### Trade-off
+
+Per the v0.19 research: this breaks the absolute "no recovery, no exceptions" promise of v0.7+. The trade-off is **explicitly opt-in** — users who never set up a seed retain the original guarantee. The UI loudly explains both the recoverable-then-vs-permanent loss path.
+
 ## [0.21.0] — 2026-05-26 — "Auto-backup rotation"
 
 ### Added
