@@ -6,6 +6,19 @@ All notable changes to Keepr are documented here. Format loosely follows [Keep a
 
 (See [ROADMAP.md](ROADMAP.md) for the live task list.)
 
+## [0.22.5] — 2026-05-26 — "Voice notes actually record"
+
+### Fixed
+
+- **Voice-note recording no longer silently fails.** Root cause: WebView2's default `PermissionRequested` handler auto-*denies* microphone access without firing any user prompt, so `getUserMedia` rejected with `NotAllowedError` and the modal showed a vague "denied" message even though the user had never been asked.
+- **`additionalBrowserArgs: "--use-fake-ui-for-media-stream"`** added to `app.windows[0]` in `tauri.conf.json`. Chromium flag that auto-allows mic + camera prompts *inside the embedded WebView2 only* — no effect on the user's regular Edge browser. Also disables msWebOOUI / msPdfOOUI / msSmartScreenProtection which can interfere with the recorder modal lifecycle.
+- **Defensive guard for `navigator.mediaDevices` being undefined** in `VoiceRecorderModal.tsx`. Older / locked-down WebView2 Runtimes (and insecure-origin loads) leave `mediaDevices` undefined; the old code threw a TypeError. Now shows a clear "update WebView2 Runtime" message with the official download link.
+- **DOMException name → actionable error mapping** in the modal. `NotAllowedError` / `SecurityError` → "check Windows Privacy → Microphone". `NotFoundError` / `OverconstrainedError` → "no microphone found". `NotReadableError` → "mic is in use by another app". Anything else → raw error message instead of a vague one.
+
+### Notes
+
+If the modal still reports denied after this fix, the WebView2 user-data store may have a stale deny cached. Delete `%LOCALAPPDATA%\com.sysadmindoc.keepr\EBWebView\Default\Preferences` and relaunch.
+
 ## [0.22.4] — 2026-05-26 — "Installer shortcuts + taskbar README"
 
 ### Added
