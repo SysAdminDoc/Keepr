@@ -362,7 +362,7 @@ export function NoteCard({ note }: Props) {
 
       {reminder && isActive(reminder) && !lockedVault && (
         <div className="flex flex-wrap gap-1 px-3 pb-1">
-          <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-black/5 dark:bg-white/10">
+          <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded bg-black/5 dark:bg-white/10">
             <Bell size={11} aria-hidden /> {formatReminder(effectiveFireAt(reminder))}
             {reminder.rrule && (
               <span className="opacity-70">· {recurrenceLabel(reminder.rrule)}</span>
@@ -372,7 +372,7 @@ export function NoteCard({ note }: Props) {
       )}
       {note.vault === "vault" && vaultUnlocked && (
         <div className="flex flex-wrap gap-1 px-3 pb-1">
-          <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-[#fdd663]/30 text-[#594300] dark:bg-[#41331c] dark:text-[#fdd663]">
+          <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded bg-[#fdd663]/30 text-[#594300] dark:bg-[#41331c] dark:text-[#fdd663]">
             <Lock size={11} aria-hidden /> Vaulted
           </span>
         </div>
@@ -530,7 +530,7 @@ function ChipsRow({ noteLabelIds }: { noteLabelIds: string[] }) {
       {visible.map((l) => (
         <span
           key={l.id}
-          className="text-xs px-2 py-0.5 rounded-full bg-black/5 dark:bg-white/10"
+          className="text-xs px-2 py-0.5 rounded bg-black/5 dark:bg-white/10"
         >
           {l.name}
         </span>
