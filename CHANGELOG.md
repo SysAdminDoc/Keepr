@@ -6,6 +6,19 @@ All notable changes to Keepr are documented here. Format loosely follows [Keep a
 
 (See [ROADMAP.md](ROADMAP.md) for the live task list.)
 
+## [0.22.3] — 2026-05-26 — "Two-way `[[Note Title]]` links"
+
+### Added
+
+- **`[[Note Title]]` syntax in note bodies now resolves to clickable cross-references.** Type `[[Foo]]` in a body; when the note is open, the editor footer shows a **Mentions** row with a chip per `[[Title]]`. Click a chip to jump to that note. Unresolved titles (no note with that name yet) show as struck-through chips so dangling links are visible.
+- **Linked-from panel.** The footer also shows a **Linked from N** row listing every other note whose body mentions THIS note's title via `[[Title]]`. Click to jump.
+- **`src/lib/wikiLinks.ts` pure helpers**: `extractWikiLinks(body)`, `resolveTitle(notes, title)`, `findBacklinks(notes, title, excludeId)`. All case-insensitive on the trimmed title. Don't span newlines. Skip trashed notes both as sources and as targets.
+- **12 new vitest cases** covering extraction, resolution, dedup, trash-exclusion, self-exclusion.
+
+### Design
+
+Renderer-only — no schema migration, no Tauri command. Computes on every editor render; bounded by N notes × mentions-per-note which is sub-millisecond at any realistic note count (<2000). Title collisions (two notes with the same title) all show as candidates; whichever resolveTitle finds first wins. Bear's lightweight pattern, NOT Roam/Obsidian's block-IDs-plus-graph — fits Keepr's flat-labels identity.
+
 ## [0.22.2] — 2026-05-26 — "Smart Labels (saved searches)"
 
 ### Added

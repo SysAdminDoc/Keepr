@@ -50,8 +50,8 @@
   - Expand arrow per snapshot → inline LCS line-diff vs current. Hand-rolled (no diff-match-patch), 7 vitest cases. Vault snapshots excluded (ciphertext).
 - [ ] **P2 — Per-note re-lock with biometric** *(v0.22.1)*
   - `tauri-plugin-biometric`. New `notes.note_locked` column. Per-note Lock button when vault initialized.
-- [ ] **P2 — Two-way `[[Note Title]]` links + Linked-from panel** *(v0.22.2)*
-  - Regex extract on save into `note_links` table. Editor renders `[[Foo]]` as clickable span. Editor footer "Linked from N notes" panel. Title autocomplete on `[[`.
+- [x] **P2 — Two-way `[[Note Title]]` links + Linked-from panel** *(v0.22.3 — shipped, partial)*
+  - Editor footer shows "Mentions" + "Linked from N" panels. Click chips to jump. Renderer-only (no schema, no IPC) — `src/lib/wikiLinks.ts` + 12 tests. Inline `[[Foo]]` rendering as clickable span in the body and `[[` autocomplete dropdown intentionally deferred (would require contenteditable rewrite of the body textarea; not worth it for the gain).
 - [x] **P2 — Saved searches / Smart Labels** *(v0.22.2 — shipped)*
   - Schema v12 `smart_labels` table; 4 new Tauri commands; sidebar entries below regular labels; "Save as Smart Label" button when filter active; click to re-apply; X / right-click to delete.
 - [x] **P2 — Vault verifier CLI (`keepr-verify`)** *(v0.22.1 — shipped)*
