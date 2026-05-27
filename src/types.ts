@@ -158,6 +158,13 @@ export interface SearchFilters {
   labelIds: string[];
   /** Only pinned notes if true. */
   pinnedOnly: boolean;
+  /** Only notes with at least one image attachment if true (v0.19.4). */
+  hasImage: boolean;
+  /** Only notes with an active (non-fired, non-dismissed) reminder if true (v0.19.4). */
+  hasReminder: boolean;
+  /** Only notes in the Private Vault if true (v0.19.4). Chip is only
+   *  rendered when the vault is initialized + unlocked. */
+  inVault: boolean;
 }
 
 export const EMPTY_FILTERS: SearchFilters = {
@@ -165,4 +172,7 @@ export const EMPTY_FILTERS: SearchFilters = {
   colors: [],
   labelIds: [],
   pinnedOnly: false,
+  hasImage: false,
+  hasReminder: false,
+  inVault: false,
 };

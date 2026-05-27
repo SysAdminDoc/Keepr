@@ -23,6 +23,8 @@ function makeNote(over: Partial<Note> = {}): Note {
     checklist: over.checklist ?? [],
     labels: over.labels ?? [],
     attachments: over.attachments ?? [],
+    vault: over.vault,
+    backgroundPattern: over.backgroundPattern,
   };
 }
 
@@ -124,5 +126,84 @@ describe("filterNotes", () => {
       new Set(["tra", "active"]),
     );
     expect(out.map((n) => n.id)).toEqual(["tra"]);
+  });
+
+  it("v0.19.4 — hasImage filter narrows to notes with attachments", () => {
+    const withImg = makeNote({
+      id: "img",
+      title: "has image",
+      attachments: [
+        {
+          id: "a",
+          noteId: "img",
+          kind: "image",
+          mime: "image/png",
+          filename: "x.png",
+          byteSize: 100,
+          width: null,
+          height: null,
+          position: 0,
+          createdAt: "2026-01-01T00:00:00Z",
+        },
+      ],
+    });
+    const noImg = makeNote({ id: "noimg", title: "no image" });
+    const out = filterNotes([withImg, noImg], section({ kind: "notes" }), "", {
+      kinds: [],
+      colors: [],
+      labelIds: [],
+      pinnedOnly: false,
+      hasImage: true,
+      hasReminder: false,
+      inVault: false,
+    });
+    expect(out.map((n) => n.id)).toEqual(["img"]);
+  });
+
+  it("v0.19.4 — hasReminder filter narrows to notes with active reminders", () => {
+    const withRem = makeNote({ id: "rem", title: "has reminder" });
+    const noRem = makeNote({ id: "norem", title: "no reminder" });
+    const reminders = [
+      {
+        noteId: "rem",
+        fireAt: "2099-01-01T00:00:00Z",
+        rrule: null,
+        snoozeUntil: null,
+        firedAt: null,
+        dismissedAt: null,
+        createdAt: "2026-01-01T00:00:00Z",
+      },
+    ];
+    const out = filterNotes(
+      [withRem, noRem],
+      section({ kind: "notes" }),
+      "",
+      {
+        kinds: [],
+        colors: [],
+        labelIds: [],
+        pinnedOnly: false,
+        hasImage: false,
+        hasReminder: true,
+        inVault: false,
+      },
+      reminders,
+    );
+    expect(out.map((n) => n.id)).toEqual(["rem"]);
+  });
+
+  it("v0.19.4 — inVault filter narrows to vault notes", () => {
+    const vaulted = makeNote({ id: "v", title: "vaulted", vault: "vault" });
+    const plain = makeNote({ id: "p", title: "plain" });
+    const out = filterNotes([vaulted, plain], section({ kind: "notes" }), "", {
+      kinds: [],
+      colors: [],
+      labelIds: [],
+      pinnedOnly: false,
+      hasImage: false,
+      hasReminder: false,
+      inVault: true,
+    });
+    expect(out.map((n) => n.id)).toEqual(["v"]);
   });
 });
