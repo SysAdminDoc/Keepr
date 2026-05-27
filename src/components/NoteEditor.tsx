@@ -55,6 +55,7 @@ import type {
   NoteInput,
 } from "../types";
 import { BACKGROUND_PATTERNS, normalizePattern } from "../lib/backgroundPatterns";
+import { extractWikiLinks, findBacklinks, resolveTitle } from "../lib/wikiLinks";
 
 /** Given the body text and caret position, find a partial `#hashtag`
  *  that the user is in the middle of typing — i.e. a `#` followed by
@@ -917,6 +918,12 @@ export function NoteEditor() {
           </div>
         )}
 
+        <WikiLinkPanels
+          body={draft.body}
+          title={draft.title}
+          noteId={existing?.id ?? null}
+        />
+
         </div>{/* end scroll wrapper */}
 
         <div className="flex items-center px-1 pb-1 pt-1 relative shrink-0 border-t border-black/5 dark:border-white/5">
@@ -1174,6 +1181,77 @@ export function NoteEditor() {
             }}
           />
         </Suspense>
+      )}
+    </div>
+  );
+}
+
+/** v0.22.3 — `[[Note Title]]` wiki-link panels for the editor footer.
+ *  Two rows:
+ *    - "Mentions" — every `[[Title]]` in this note's body resolved
+ *      against the in-memory note list. Click to open that note.
+ *    - "Linked from" — every other note whose body mentions THIS
+ *      note's title. Click to open.
+ *  Both rows are hidden when empty. Pure renderer; no IPC. */
+function WikiLinkPanels({
+  body,
+  title,
+  noteId,
+}: {
+  body: string;
+  title: string;
+  noteId: string | null;
+}) {
+  const notes = useStore((s) => s.notes);
+  const openEditor = useStore((s) => s.openEditor);
+  // Recompute on every render — bounded by N notes; cheap.
+  const mentioned = extractWikiLinks(body)
+    .map((t) => ({ t, n: resolveTitle(notes, t) }));
+  const backlinks = title.trim().length > 0 && noteId
+    ? findBacklinks(notes, title, noteId)
+    : [];
+  if (mentioned.length === 0 && backlinks.length === 0) return null;
+  return (
+    <div className="px-3 pb-2 space-y-1 text-xs">
+      {mentioned.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1">
+          <span className="opacity-60">Mentions:</span>
+          {mentioned.map(({ t, n }) =>
+            n ? (
+              <button
+                key={t}
+                type="button"
+                onClick={() => openEditor(n.id)}
+                className="px-2 py-0.5 rounded bg-black/5 dark:bg-white/10 hover:bg-black/10 dark:hover:bg-white/20 text-[var(--keepr-accent)]"
+              >
+                [[{n.title || "Untitled"}]]
+              </button>
+            ) : (
+              <span
+                key={t}
+                title="No note with that title yet"
+                className="px-2 py-0.5 rounded bg-black/5 dark:bg-white/10 opacity-60 line-through"
+              >
+                [[{t}]]
+              </span>
+            ),
+          )}
+        </div>
+      )}
+      {backlinks.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1">
+          <span className="opacity-60">Linked from {backlinks.length}:</span>
+          {backlinks.map((b) => (
+            <button
+              key={b.id}
+              type="button"
+              onClick={() => openEditor(b.id)}
+              className="px-2 py-0.5 rounded bg-black/5 dark:bg-white/10 hover:bg-black/10 dark:hover:bg-white/20"
+            >
+              {b.title || (b.body.slice(0, 30) || "Untitled")}
+            </button>
+          ))}
+        </div>
       )}
     </div>
   );
