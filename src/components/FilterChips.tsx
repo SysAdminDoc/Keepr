@@ -1,7 +1,8 @@
 import { useState } from "react";
-import { Pin, Tag, ChevronDown, Image as ImageIcon, Bell, Lock } from "lucide-react";
+import { Pin, Tag, ChevronDown, Image as ImageIcon, Bell, Lock, Sparkles } from "lucide-react";
 import clsx from "clsx";
 import { useStore } from "../store";
+import { api } from "../api";
 import { COLOR_KEYS, COLOR_LABELS, LIGHT_HEX } from "../colors";
 import type { ColorKey, NoteKind, SearchFilters } from "../types";
 
@@ -140,7 +141,36 @@ export function FilterChips() {
           Clear filters
         </button>
       )}
+      {hasAny && <SaveAsSmartLabelButton filters={filters} />}
     </div>
+  );
+}
+
+/** v0.22.2 — appears next to "Clear filters" when any facet is active.
+ *  Prompts for a name and persists the current filters as a sidebar
+ *  Smart Label that re-applies them on click. */
+function SaveAsSmartLabelButton({ filters }: { filters: SearchFilters }) {
+  const showToast = useStore((s) => s.showToast);
+  const load = useStore((s) => s.load);
+  const onClick = async () => {
+    const name = window.prompt("Name this Smart Label:")?.trim();
+    if (!name) return;
+    try {
+      await api.createSmartLabel(name, JSON.stringify(filters));
+      await load();
+      showToast(`Saved as Smart Label "${name}"`);
+    } catch (e) {
+      showToast("Could not save: " + String(e));
+    }
+  };
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="ml-1 inline-flex items-center gap-1 text-xs text-[var(--keepr-accent)] hover:underline"
+    >
+      <Sparkles size={12} aria-hidden /> Save as Smart Label
+    </button>
   );
 }
 

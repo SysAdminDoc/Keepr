@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { Note, Label, Section, SearchFilters, Reminder } from "./types";
+import type { Note, Label, Section, SearchFilters, Reminder, SmartLabel } from "./types";
 import { EMPTY_FILTERS } from "./types";
 import { api } from "./api";
 
@@ -24,6 +24,7 @@ interface UIState {
   notes: Note[];
   labels: Label[];
   reminders: Reminder[];
+  smartLabels: SmartLabel[];
   loaded: boolean;
   section: Section;
   search: string;
@@ -370,6 +371,7 @@ export const useStore = create<UIState>((set, get) => ({
   notes: [],
   labels: [],
   reminders: [],
+  smartLabels: [],
   loaded: false,
   section: { kind: "notes" },
   search: "",
@@ -403,16 +405,18 @@ export const useStore = create<UIState>((set, get) => ({
   vaultUnlocked: false,
   load: async () => {
     try {
-      const [notes, labels, reminders] = await Promise.all([
+      const [notes, labels, reminders, smartLabels] = await Promise.all([
         api.listNotes(),
         api.listLabels(),
         api.listReminders().catch(() => []),
+        api.listSmartLabels().catch(() => []),
       ]);
       // Apply the user's preferred sort over the SQL-default order.
       set((s) => ({
         notes: sortNotes(notes, s.sortMode),
         labels,
         reminders,
+        smartLabels,
         loaded: true,
       }));
     } catch (e) {

@@ -1,9 +1,11 @@
 import { useMemo } from "react";
-import { Lightbulb, Tag, Archive, Trash2, Pencil, Bell } from "lucide-react";
+import { Lightbulb, Tag, Archive, Trash2, Pencil, Bell, Sparkles, X } from "lucide-react";
 import { isActive as isReminderActive } from "../lib/reminders";
 import clsx from "clsx";
 import { useStore } from "../store";
-import type { Section } from "../types";
+import { api } from "../api";
+import type { Section, SearchFilters } from "../types";
+import { EMPTY_FILTERS } from "../types";
 
 interface Props {
   expanded: boolean;
@@ -15,9 +17,13 @@ const navItem =
 export function Sidebar({ expanded }: Props) {
   const section = useStore((s) => s.section);
   const setSection = useStore((s) => s.setSection);
+  const setFilters = useStore((s) => s.setFilters);
   const labels = useStore((s) => s.labels);
   const notes = useStore((s) => s.notes);
   const reminders = useStore((s) => s.reminders);
+  const smartLabels = useStore((s) => s.smartLabels);
+  const showToast = useStore((s) => s.showToast);
+  const load = useStore((s) => s.load);
   const openLabelsManager = useStore((s) => s.openLabelsManager);
 
   // NF-V0.5-A — badge count of active (non-fired, non-dismissed) reminders.
@@ -45,7 +51,37 @@ export function Sidebar({ expanded }: Props) {
   const isActive = (s: Section): boolean => {
     if (section.kind === "label" && s.kind === "label")
       return section.labelId === s.labelId;
+    if (section.kind === "smart" && s.kind === "smart")
+      return section.smartLabelId === s.smartLabelId;
     return section.kind === s.kind;
+  };
+
+  const activateSmart = (id: string, queryJson: string) => {
+    setSection({ kind: "smart", smartLabelId: id });
+    try {
+      const parsed = JSON.parse(queryJson) as Partial<SearchFilters>;
+      setFilters({ ...EMPTY_FILTERS, ...parsed });
+    } catch {
+      // Bad payload: clear filters but still navigate so the user can
+      // see the empty results and decide to delete the smart label.
+      setFilters(EMPTY_FILTERS);
+      showToast("Smart Label payload was unreadable — filters cleared.");
+    }
+  };
+
+  const removeSmart = async (id: string, name: string) => {
+    if (!confirm(`Delete Smart Label "${name}"?`)) return;
+    try {
+      await api.deleteSmartLabel(id);
+      if (section.kind === "smart" && section.smartLabelId === id) {
+        setSection({ kind: "notes" });
+        setFilters(EMPTY_FILTERS);
+      }
+      await load();
+      showToast(`Deleted "${name}"`);
+    } catch (e) {
+      showToast("Delete failed: " + String(e));
+    }
   };
 
   const item = (
@@ -143,6 +179,56 @@ export function Sidebar({ expanded }: Props) {
         </li>
         {item({ kind: "archive" }, <Archive size={20} />, "Archive")}
         {item({ kind: "trash" }, <Trash2 size={20} />, "Trash")}
+        {smartLabels.length > 0 && expanded && (
+          <li className="px-6 pt-4 pb-1 text-xs font-medium text-gray-500 uppercase tracking-wide">
+            Smart Labels
+          </li>
+        )}
+        {smartLabels.map((s) => {
+          const active = isActive({ kind: "smart", smartLabelId: s.id });
+          return (
+            <li key={`smart:${s.id}`}>
+              <button
+                type="button"
+                onClick={() => activateSmart(s.id, s.queryJson)}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  void removeSmart(s.id, s.name);
+                }}
+                className={clsx(
+                  navItem,
+                  "w-full group",
+                  active
+                    ? "bg-[#feefc3] dark:bg-[#41331c] text-[#202124] dark:text-[#fdd663] font-medium"
+                    : "hover:bg-gray-200 dark:hover:bg-[#3c4043]",
+                  expanded ? "pl-6" : "pl-3 justify-center pr-3",
+                )}
+                aria-current={active ? "page" : undefined}
+                aria-label={`Smart Label: ${s.name} (right-click to delete)`}
+                title={`${s.name} — right-click to delete`}
+              >
+                <span className="w-6 grid place-items-center" aria-hidden>
+                  <Sparkles size={20} />
+                </span>
+                {expanded && <span className="ml-7 truncate flex-1">{s.name}</span>}
+                {expanded && (
+                  <span
+                    role="button"
+                    tabIndex={-1}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void removeSmart(s.id, s.name);
+                    }}
+                    aria-label={`Delete ${s.name}`}
+                    className="opacity-0 group-hover:opacity-60 hover:opacity-100 p-1 rounded"
+                  >
+                    <X size={14} aria-hidden />
+                  </span>
+                )}
+              </button>
+            </li>
+          );
+        })}
       </ul>
     </aside>
   );

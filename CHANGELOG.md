@@ -6,6 +6,20 @@ All notable changes to Keepr are documented here. Format loosely follows [Keep a
 
 (See [ROADMAP.md](ROADMAP.md) for the live task list.)
 
+## [0.22.2] — 2026-05-26 — "Smart Labels (saved searches)"
+
+### Added
+
+- **Smart Labels — saved-filter combos persisted as sidebar entries.** Apply any combination of filter chips (kinds / colors / labels / pinned / has-image / has-reminder / in-vault), then click "Save as Smart Label" next to the "Clear filters" link. Name it. The label appears in the sidebar below the regular Labels list with a Sparkles icon. Clicking it re-applies the saved filters AND switches the section to that Smart Label.
+- **Sidebar Smart Label management.** Hover a Smart Label row → an X appears for delete. Right-click also deletes. Deleting the currently-active Smart Label navigates back to Notes and clears filters.
+- **Schema v12** — new `smart_labels(id, name, query_json, position, created_at, updated_at)` table. `query_json` is opaque JSON so the schema doesn't need to migrate when the SearchFilters shape evolves. Indexed by (position, created_at).
+- **4 new Rust Tauri commands** — `list_smart_labels`, `create_smart_label`, `update_smart_label`, `delete_smart_label`. Name validation (1-80 chars), payload size cap (4 KB).
+- **`Section` type extended** with `{ kind: "smart"; smartLabelId: string }`. `filterNotes` handles it by narrowing to the non-archived non-trashed pool (the filter chips themselves do the rest).
+
+### Pattern
+
+Modeled after Apple Notes' Smart Folders and Obsidian's saved searches. Fits Keepr's flat-labels identity — Smart Labels are "named filter recipes," not folders, so the non-goal against hierarchy stays intact.
+
 ## [0.22.1] — 2026-05-26 — "Vault verifier CLI"
 
 ### Added
