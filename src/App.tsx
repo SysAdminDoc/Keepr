@@ -437,11 +437,26 @@ export default function App() {
                           position slot; unpinning a middle card leaves
                           a blank cell so the remaining pinned cards
                           stay in place. */}
-                      <NoteGrid notes={pinned} layout="stable-grid" />
+                      <NoteGrid
+                        notes={pinned}
+                        layout="stable-grid"
+                        ariaLabel="Pinned notes"
+                      />
                       {others.length > 0 && <SectionLabel text="OTHERS" />}
                     </>
                   )}
-                  {others.length > 0 && <NoteGrid notes={others} />}
+                  {others.length > 0 && (
+                    <NoteGrid
+                      notes={others}
+                      ariaLabel={
+                        section.kind === "notes"
+                          ? pinned.length > 0
+                            ? "Other notes"
+                            : "Notes"
+                          : headerLabel
+                      }
+                    />
+                  )}
                 </div>
               )}
             </>

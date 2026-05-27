@@ -28,6 +28,10 @@ interface Props {
    *  visual cell so the user's muscle memory holds — Keep's masonry
    *  reflow on unpin was the original gripe. */
   layout?: "masonry" | "stable-grid";
+  /** v0.22.11 — screen-reader-only label for the grid's `role="list"`.
+   *  Examples: "Pinned notes", "Other notes", "Archived notes", "Notes
+   *  labeled Work". Renders silently; visually nothing changes. */
+  ariaLabel?: string;
 }
 
 /**
@@ -40,7 +44,7 @@ interface Props {
  * would feel like it had no effect. Users have to switch to Custom in the
  * Sort menu to get drag handles.
  */
-export function NoteGrid({ notes, layout = "masonry" }: Props) {
+export function NoteGrid({ notes, layout = "masonry", ariaLabel }: Props) {
   const viewMode = useStore((s) => s.viewMode);
   const sortMode = useStore((s) => s.sortMode);
   const setSortMode = useStore((s) => s.setSortMode);
@@ -145,9 +149,9 @@ export function NoteGrid({ notes, layout = "masonry" }: Props) {
   let cards: JSX.Element;
   if (viewMode === "list") {
     cards = (
-      <div className="max-w-3xl mx-auto">
+      <div className="max-w-3xl mx-auto" role="list" aria-label={ariaLabel}>
         {notes.map((n) => (
-          <div key={n.id} className="mb-4">
+          <div key={n.id} role="listitem" className="mb-4">
             <NoteCard note={n} />
           </div>
         ))}
@@ -163,6 +167,8 @@ export function NoteGrid({ notes, layout = "masonry" }: Props) {
     for (const n of byPos) slots[n.position] = n;
     cards = (
       <div
+        role="list"
+        aria-label={ariaLabel}
         style={{
           display: "grid",
           gridTemplateColumns: `repeat(auto-fill, minmax(${cardWidth}px, 1fr))`,
@@ -172,16 +178,18 @@ export function NoteGrid({ notes, layout = "masonry" }: Props) {
       >
         {slots.map((n, i) =>
           n ? (
-            <NoteCard key={n.id} note={n} />
+            <div key={n.id} role="listitem">
+              <NoteCard note={n} />
+            </div>
           ) : (
             // Invisible placeholder — keeps the grid cell occupied so
             // surrounding cards stay put. aria-hidden so screen readers
-            // skip it; visibility:hidden so the cell still claims space
-            // in row-height calculations. v0.21.2 — `min-height: 1px`
-            // guards against the all-placeholders-in-a-row case where
-            // CSS Grid would otherwise collapse the row to zero and
-            // cards below would jump up. 1px is enough to keep the
-            // row claimed without producing a visible gap-row band.
+            // skip it (and so the placeholder isn't announced as an
+            // empty listitem); visibility:hidden so the cell still
+            // claims space in row-height calculations. v0.21.2 —
+            // `min-height: 1px` guards against the all-placeholders-
+            // in-a-row case where CSS Grid would otherwise collapse
+            // the row to zero and cards below would jump up.
             <div
               key={`gap-${i}`}
               aria-hidden
@@ -193,13 +201,25 @@ export function NoteGrid({ notes, layout = "masonry" }: Props) {
     );
   } else {
     cards = (
-      <div className="gap-4" style={{ columnWidth: `${cardWidth}px`, columnGap: "1rem" }}>
+      <div
+        role="list"
+        aria-label={ariaLabel}
+        className="gap-4"
+        style={{ columnWidth: `${cardWidth}px`, columnGap: "1rem" }}
+      >
         {notes.map((n) => (
           // `break-inside-avoid` keeps a card from being split across
           // columns; the inline-block + w-full pairing is the Tailwind
           // recipe for masonry-with-multicol that works in every modern
           // browser back to Chrome 50 / Firefox 52 / Safari 9.
-          <div key={n.id} className="break-inside-avoid mb-4 inline-block w-full">
+          // v0.22.11 — `role="listitem"` on the wrapper preserves
+          // semantics under CSS multi-column (a logical role, not
+          // affected by `display: column` flow).
+          <div
+            key={n.id}
+            role="listitem"
+            className="break-inside-avoid mb-4 inline-block w-full"
+          >
             <NoteCard note={n} />
           </div>
         ))}
