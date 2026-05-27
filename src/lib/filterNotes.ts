@@ -42,6 +42,11 @@ export function filterNotes(
     pool = pool.filter((n) => n.trashed);
   } else if (section.kind === "label") {
     pool = pool.filter((n) => !n.trashed && n.labels.includes(section.labelId));
+  } else if (section.kind === "smart") {
+    // Smart Labels are saved-filter combos applied OVER the default
+    // Notes pool (exclude archived + trashed). The filters payload
+    // itself does the narrowing further down.
+    pool = pool.filter((n) => !n.archived && !n.trashed);
   } else if (section.kind === "reminders") {
     // Order notes by when their reminder is next due. Excludes trashed
     // notes (a trashed reminder is dead weight) and notes without an

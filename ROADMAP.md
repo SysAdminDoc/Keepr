@@ -52,8 +52,8 @@
   - `tauri-plugin-biometric`. New `notes.note_locked` column. Per-note Lock button when vault initialized.
 - [ ] **P2 — Two-way `[[Note Title]]` links + Linked-from panel** *(v0.22.2)*
   - Regex extract on save into `note_links` table. Editor renders `[[Foo]]` as clickable span. Editor footer "Linked from N notes" panel. Title autocomplete on `[[`.
-- [ ] **P2 — Saved searches / Smart Labels** *(v0.22.3)*
-  - `smart_labels(name, query_json)` table. "Save as Smart Label" button when filter active. Sidebar renders below labels.
+- [x] **P2 — Saved searches / Smart Labels** *(v0.22.2 — shipped)*
+  - Schema v12 `smart_labels` table; 4 new Tauri commands; sidebar entries below regular labels; "Save as Smart Label" button when filter active; click to re-apply; X / right-click to delete.
 - [x] **P2 — Vault verifier CLI (`keepr-verify`)** *(v0.22.1 — shipped)*
   - Standalone Rust binary at `src-tauri/src/bin/keepr-verify.rs`. Supports `--db`, `--note-id`, `--seed`, `--help`. Reads stdin for passphrase. Builds independently of Tauri runtime.
 

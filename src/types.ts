@@ -125,7 +125,8 @@ export type Section =
   | { kind: "reminders" }
   | { kind: "archive" }
   | { kind: "trash" }
-  | { kind: "label"; labelId: string };
+  | { kind: "label"; labelId: string }
+  | { kind: "smart"; smartLabelId: string };
 
 export interface NoteSnapshot {
   id: string;
@@ -165,6 +166,18 @@ export interface SearchFilters {
   /** Only notes in the Private Vault if true (v0.19.4). Chip is only
    *  rendered when the vault is initialized + unlocked. */
   inVault: boolean;
+}
+
+/** v0.22.2 — Smart Label = saved filter combo shown in the sidebar. */
+export interface SmartLabel {
+  id: string;
+  name: string;
+  /** Serialised SearchFilters. Stored as a JSON string so the schema
+   *  doesn't break when the filter shape evolves. */
+  queryJson: string;
+  position: number;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export const EMPTY_FILTERS: SearchFilters = {

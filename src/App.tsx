@@ -383,6 +383,12 @@ export default function App() {
     if (section.kind === "archive") return "Archive";
     if (section.kind === "trash") return "Trash";
     if (section.kind === "reminders") return "Reminders";
+    if (section.kind === "smart") {
+      const smart = useStore.getState().smartLabels.find(
+        (s) => s.id === section.smartLabelId,
+      );
+      return smart?.name || "Smart Label";
+    }
     return "Notes";
   })();
 
@@ -520,7 +526,7 @@ function EmptyState({
   section,
   headerLabel,
 }: {
-  section: "notes" | "archive" | "trash" | "label" | "reminders";
+  section: "notes" | "archive" | "trash" | "label" | "reminders" | "smart";
   headerLabel: string;
 }) {
   const map: Record<string, { icon: React.ReactNode; text: string }> = {

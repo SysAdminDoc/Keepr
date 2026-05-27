@@ -4,7 +4,7 @@ use std::path::Path;
 
 /// Current schema version. Bump and add a new arm to `apply_migration` for every
 /// schema change. Migrations are forward-only and ordered.
-pub const SCHEMA_VERSION: i32 = 11;
+pub const SCHEMA_VERSION: i32 = 12;
 
 pub fn open(path: &Path) -> Result<Connection> {
     let mut conn = Connection::open(path)?;
@@ -56,6 +56,7 @@ fn apply_migration(tx: &rusqlite::Transaction, version: i32) -> Result<()> {
         9 => tx.execute_batch(MIGRATION_V9)?,
         10 => tx.execute_batch(MIGRATION_V10)?,
         11 => tx.execute_batch(MIGRATION_V11)?,
+        12 => tx.execute_batch(MIGRATION_V12)?,
         v => bail!("no migration defined for schema v{v}"),
     }
     Ok(())
@@ -367,6 +368,27 @@ CREATE INDEX IF NOT EXISTS idx_checklist_parent
 /// erroring.
 const MIGRATION_V11: &str = r#"
 ALTER TABLE notes ADD COLUMN background_pattern TEXT NOT NULL DEFAULT '';
+"#;
+
+/// v12 — Smart Labels (D4 / v0.22.2).
+///
+/// A Smart Label is a saved filter combo that appears in the sidebar
+/// below the regular Labels list. Clicking it applies a stored
+/// SearchFilters payload. The renderer is the source of truth for the
+/// query shape; we persist it as JSON so we don't have to migrate the
+/// table when the filter schema changes. `position` is the sort order
+/// (ASC), so an empty position list naturally falls back to
+/// created_at — same pattern as `notes.position`.
+const MIGRATION_V12: &str = r#"
+CREATE TABLE IF NOT EXISTS smart_labels (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    query_json TEXT NOT NULL,
+    position INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_smart_labels_position ON smart_labels(position, created_at);
 "#;
 
 #[cfg(test)]

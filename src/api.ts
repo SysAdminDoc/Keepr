@@ -1,5 +1,13 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { Attachment, Note, NoteInput, NoteSnapshot, Label, Reminder } from "./types";
+import type {
+  Attachment,
+  Note,
+  NoteInput,
+  NoteSnapshot,
+  Label,
+  Reminder,
+  SmartLabel,
+} from "./types";
 
 export const api = {
   listNotes: () => invoke<Note[]>("list_notes"),
@@ -108,6 +116,16 @@ export const api = {
     }),
   pruneAutoBackups: (folder: string, keep: number) =>
     invoke<number>("prune_auto_backups", { folder, keep }),
+  listSmartLabels: () => invoke<SmartLabel[]>("list_smart_labels"),
+  createSmartLabel: (name: string, queryJson: string) =>
+    invoke<SmartLabel>("create_smart_label", { name, queryJson }),
+  updateSmartLabel: (id: string, patch: { name?: string; queryJson?: string }) =>
+    invoke<SmartLabel>("update_smart_label", {
+      id,
+      name: patch.name ?? null,
+      queryJson: patch.queryJson ?? null,
+    }),
+  deleteSmartLabel: (id: string) => invoke<void>("delete_smart_label", { id }),
   listSnapshots: (noteId: string) =>
     invoke<NoteSnapshot[]>("list_snapshots", { noteId }),
   restoreSnapshot: (snapshotId: string) =>
