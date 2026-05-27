@@ -1,8 +1,10 @@
-import { X } from "lucide-react";
-import { useMemo, useState } from "react";
+import { X, MicVocal, Loader2 } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 import clsx from "clsx";
 import type { Attachment } from "../types";
 import { convertFileSrc } from "@tauri-apps/api/core";
+import { api } from "../api";
+import { useStore } from "../store";
 
 interface Props {
   attachments: Attachment[];
@@ -109,27 +111,107 @@ function AudioRow({
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [attachment.id, attachment.mime],
   );
+  // v0.23.0 — opt-in whisper transcription. Each audio row lazily checks
+  // whether a transcript exists, and exposes a Transcribe button when
+  // one doesn't. The button is gated on the speech model being
+  // downloaded (the user can do that from Settings → Voice
+  // transcription); we don't surface the gate here because the per-row
+  // button would otherwise need to know the global model state.
+  const [transcript, setTranscript] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState(false);
+  const showToast = useStore((s) => s.showToast);
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const t = await api.getTranscript(attachment.id);
+        if (alive && t) setTranscript(t.text);
+      } catch { /* silent — transcript is best-effort */ }
+    })();
+    return () => { alive = false; };
+  }, [attachment.id]);
+
+  const onTranscribe = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setBusy(true);
+    setError(null);
+    try {
+      const text = await api.transcribeAudioAttachment(attachment.id);
+      setTranscript(text);
+      setExpanded(true);
+      showToast("Transcribed");
+    } catch (err) {
+      const msg = String(err);
+      setError(msg);
+      showToast("Transcription failed: " + msg);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
-    <div className="flex items-center gap-2">
-      <audio
-        controls
-        src={src}
-        className="flex-1 h-10"
-        aria-label={attachment.filename}
-      />
-      {editable && onRemove && (
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            onRemove(attachment);
-          }}
-          aria-label={`Remove ${attachment.filename}`}
-          title="Remove voice note"
-          className="p-1 rounded-full bg-black/60 text-white hover:bg-black/80"
-        >
-          <X size={14} aria-hidden />
-        </button>
+    <div className="flex flex-col gap-1">
+      <div className="flex items-center gap-2">
+        <audio
+          controls
+          src={src}
+          className="flex-1 h-10"
+          aria-label={attachment.filename}
+        />
+        {editable && (
+          <button
+            type="button"
+            onClick={onTranscribe}
+            disabled={busy}
+            aria-label={transcript ? "Re-transcribe voice note" : "Transcribe voice note"}
+            title={transcript ? "Re-transcribe (overwrites existing)" : "Transcribe to text (requires speech model from Settings)"}
+            className="p-1.5 rounded hover:bg-black/5 dark:hover:bg-white/10 disabled:opacity-50"
+          >
+            {busy ? (
+              <Loader2 size={14} className="animate-spin" aria-hidden />
+            ) : (
+              <MicVocal size={14} aria-hidden />
+            )}
+          </button>
+        )}
+        {editable && onRemove && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onRemove(attachment);
+            }}
+            aria-label={`Remove ${attachment.filename}`}
+            title="Remove voice note"
+            className="p-1 rounded-full bg-black/60 text-white hover:bg-black/80"
+          >
+            <X size={14} aria-hidden />
+          </button>
+        )}
+      </div>
+      {transcript && (
+        <div className="px-2">
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); setExpanded((v) => !v); }}
+            className="text-[11px] uppercase tracking-wide text-gray-500 dark:text-gray-400 hover:text-[var(--keepr-accent)] focus:outline-none"
+          >
+            {expanded ? "Hide transcript" : "Show transcript"}
+          </button>
+          {expanded && (
+            <div className="mt-1 text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap break-words">
+              {transcript}
+            </div>
+          )}
+        </div>
+      )}
+      {error && (
+        <div className="px-2 text-xs text-red-600 dark:text-red-400">
+          {error}
+        </div>
       )}
     </div>
   );

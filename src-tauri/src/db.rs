@@ -4,7 +4,7 @@ use std::path::Path;
 
 /// Current schema version. Bump and add a new arm to `apply_migration` for every
 /// schema change. Migrations are forward-only and ordered.
-pub const SCHEMA_VERSION: i32 = 12;
+pub const SCHEMA_VERSION: i32 = 13;
 
 pub fn open(path: &Path) -> Result<Connection> {
     let mut conn = Connection::open(path)?;
@@ -57,6 +57,7 @@ fn apply_migration(tx: &rusqlite::Transaction, version: i32) -> Result<()> {
         10 => tx.execute_batch(MIGRATION_V10)?,
         11 => tx.execute_batch(MIGRATION_V11)?,
         12 => tx.execute_batch(MIGRATION_V12)?,
+        13 => tx.execute_batch(MIGRATION_V13)?,
         v => bail!("no migration defined for schema v{v}"),
     }
     Ok(())
@@ -389,6 +390,27 @@ CREATE TABLE IF NOT EXISTS smart_labels (
     updated_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_smart_labels_position ON smart_labels(position, created_at);
+"#;
+
+/// v13 — v0.23.0 — opt-in offline speech transcription via whisper.cpp.
+/// One transcript per audio attachment, keyed by `attachment_id`. The
+/// `crc32` of the source WAV is recorded so we can short-circuit a
+/// re-transcription request when the audio file hasn't changed. `model`
+/// records which whisper model (e.g. `ggml-base.en-q5_1`) produced the
+/// transcript so a future model upgrade can decide to refresh stale
+/// transcripts. Cascades on attachment delete so an audio-note removal
+/// cleans up its transcript too.
+const MIGRATION_V13: &str = r#"
+CREATE TABLE IF NOT EXISTS transcripts (
+    attachment_id TEXT PRIMARY KEY REFERENCES attachments(id) ON DELETE CASCADE,
+    note_id TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
+    text TEXT NOT NULL,
+    model TEXT NOT NULL,
+    source_crc32 INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_transcripts_note ON transcripts(note_id);
 "#;
 
 #[cfg(test)]

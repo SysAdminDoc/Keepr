@@ -1,6 +1,6 @@
 [package]
 name = "keepr"
-version = "0.22.11"
+version = "0.23.0"
 description = "Offline-first Google Keep clone"
 authors = ["Matthew Ashton"]
 edition = "2021"
@@ -50,6 +50,39 @@ zeroize = { version = "1", features = ["zeroize_derive"] }
 tauri-plugin-window-state = "2.4.1"
 tauri-plugin-opener = "2.5.4"
 bip39 = "2"
+# v0.23.0 — opt-in offline speech transcription via whisper.cpp.
+# `whisper-rs` builds whisper.cpp from source via `cmake` at compile
+# time (~60 s first build, cached thereafter). We disable default
+# features to skip GPU backends — pure CPU is fast enough for the
+# 30-second voice-note range and ships everywhere. The model is NOT
+# bundled: ~57 MB ggml-base.en-q5_1.bin is downloaded on first use
+# with explicit user consent.
+whisper-rs = { version = "0.16.0", default-features = false }
+# WAV reader for the in-app voice notes Keepr saves at the AudioContext
+# sample rate (typically 48 kHz, 16-bit mono).
+hound = "3.5.1"
+# Anti-aliased 48 kHz → 16 kHz resampler. Whisper expects 16 kHz mono
+# f32. Linear interp at this 3:1 ratio aliases badly on sibilants;
+# rubato's FFT-based polyphase resampler is the smallest pure-Rust
+# library that does this right.
+rubato = "0.16.2"
+# Model download HTTP client. `rustls-tls` so we don't drag in OpenSSL
+# on Windows; `stream` for chunked progress reporting; `gzip` is the
+# default for HF served content. No `default-features = false` — we
+# want connection pooling, redirects, etc.
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }
+# SHA-1 verification of the downloaded model bytes against the digest
+# Hugging Face publishes for each whisper.cpp weight.
+sha1 = "0.11.0"
+# Async runtime for the Tauri command + the model download task.
+# Tauri 2 commands declared `async fn` integrate with whatever runtime
+# is present; we keep features minimal.
+tokio = { version = "1", default-features = false, features = ["rt", "sync", "macros"] }
+# CRC32 of the WAV bytes — used to short-circuit redundant
+# transcriptions when the same attachment is requested twice.
+crc32fast = "1"
+# Stream extensions for `reqwest::Response::bytes_stream()`.
+futures-util = "0.3"
 
 [dev-dependencies]
 tempfile = "3"

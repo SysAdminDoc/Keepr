@@ -82,7 +82,21 @@ jobs:
             libayatana-appindicator3-dev \
             librsvg2-dev \
             libsoup-3.0-dev \
-            patchelf
+            patchelf \
+            libclang-dev \
+            cmake
+
+      # v0.23.0 — whisper-rs requires libclang at build time (bindgen).
+      # macOS has Xcode CLT; Linux apt-installs above; Windows runner
+      # needs explicit LLVM install + LIBCLANG_PATH.
+      - name: Install LLVM (Windows)
+        if: matrix.os == 'windows-latest'
+        uses: KyleMayes/install-llvm-action@v2
+        with:
+          version: "18"
+      - name: Set LIBCLANG_PATH (Windows)
+        if: matrix.os == 'windows-latest'
+        run: echo "LIBCLANG_PATH=$LLVM_PATH/bin" >> $GITHUB_ENV
 
       - name: Install npm dependencies
         run: npm ci

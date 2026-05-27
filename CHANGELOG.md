@@ -6,6 +6,33 @@ All notable changes to Keepr are documented here. Format loosely follows [Keep a
 
 (See [ROADMAP.md](ROADMAP.md) for the live task list.)
 
+## [0.23.0] — 2026-05-27 — "Offline speech transcription (whisper.cpp)"
+
+The feature promised through the v0.22.5–v0.22.9 voice-notes saga: tap Transcribe on any voice note and get the text right there, fully offline. Same engine [Vibe](https://github.com/thewh1teagle/vibe) uses (whisper.cpp).
+
+### Added
+
+- **Whisper.cpp transcription** via `whisper-rs = "0.16"`. New Rust module `src-tauri/src/transcribe.rs` handles model lifecycle (download / verify / delete), WAV → 16 kHz mono f32 resampling via `rubato`, and the inference call itself. Single supported model for v1: `ggml-base.en-q5_1.bin` (~57 MB) — the Vibe-recommended sweet spot for short voice notes.
+- **5 new Tauri commands**: `get_speech_model_status`, `download_speech_model`, `delete_speech_model`, `get_transcript`, `transcribe_audio_attachment`.
+- **Schema v13**: new `transcripts` table keyed by `attachment_id` (one transcript per audio attachment, cascades on delete). Stores text, model id, and source CRC32 so a re-Transcribe click on an unchanged audio file short-circuits to the cached result.
+- **Settings → Voice transcription** section (`src/components/VoiceTranscriptionSection.tsx`): one-click model download with live progress bar, on-disk path display, delete button, and copy explaining the offline guarantee.
+- **Per-audio Transcribe button** in `AttachmentGrid.AudioRow` (mic-vocal icon). Clicking it runs whisper on a worker thread; the result expands inline under the audio player as a "Show transcript" toggle. Re-clicking re-transcribes (or short-circuits via the CRC32 cache).
+- **CI hardening**: `.github/workflows/{ci,release}.yml` now install `libclang-dev + cmake` on Ubuntu and use `KyleMayes/install-llvm-action@v2` on Windows so whisper.cpp builds across the full matrix. macOS gets Xcode CLT free.
+
+### Design
+
+- **Network only on opt-in download.** Outbound HTTP fires from exactly one code path: `download_speech_model`. After the model file is on disk, transcription runs fully offline forever — no audio, text, or embeddings ever leave the machine. Confirmed compliant with the rewritten "cloud AI" non-goal language (v0.22.4).
+- **SHA-1 verification.** The downloaded model is checked against `d26d7ce5a1b6e57bea5d0431b9c20ae49423c94a` (Hugging Face's published digest for `ggml-base.en-q5_1.bin`). Mismatch → delete + error. We refuse to run inference on weights we didn't verify.
+- **Threading.** Whisper.cpp is CPU-heavy (3-8 s for a 30 s voice note on a typical laptop). Each transcribe runs on `std::thread::spawn` with the result bridged back via `tokio::sync::oneshot` — keeps the Tauri async runtime responsive.
+- **CRC32 short-circuit.** Re-transcribing the same audio file is free: `transcripts.source_crc32` lets us detect unchanged inputs.
+- **Why base.en and not tiny.en**: tiny mangles proper nouns + numbers on short clips; small is 3× the download for marginal gain. Per Vibe community consensus, base is the right v1 default.
+
+### Build impact
+
+- Adds ~60 s one-time C++ compile to `cargo check`/`build` (whisper.cpp built from source, no system dep). Cached by `Swatinem/rust-cache@v2` in CI; on subsequent runs it's instant.
+- Installer size unchanged — the model is not bundled.
+- New deps: `whisper-rs = 0.16` (default-features off, CPU-only), `hound = 3.5`, `rubato = 0.16`, `reqwest = 0.12` (rustls-tls + stream), `sha1 = 0.11`, `tokio = 1` (rt + sync + macros), `crc32fast = 1`, `futures-util = 0.3`.
+
 ## [0.22.11] — 2026-05-27 — "Note grid list semantics"
 
 ### Added

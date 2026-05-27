@@ -27,12 +27,10 @@
   - Hash bytes (BLAKE3), store at `<data_dir>/resources/ab/cd/<hash>.<ext>`. Daily sweep moves zero-ref blobs >24h old to `.trash/`; auto-purge .trash >30d. Migration: existing UUID-named files keep working; new attachments use hashed layout.
   - **Why deferred:** substantive refactor (new storage layout, ref-counting, migration); current install sizes (typically <100 MB resources) don't yet justify the dedup win. Revisit if field reports indicate orphan accumulation or duplicate-photo bloat. (v0.22.10's `delete_note_permanent` / `empty_trash` file-cleanup fix already plugged the worst orphan leak.)
 
-## Open: Voice transcription (v0.23.0)
+## Shipped: Voice transcription (v0.23.0)
 
-- [ ] **P1 — Offline transcription via whisper.cpp (Vibe-style)** *(v0.23.0 — planned)*
-  - `whisper-rs` (Rust bindings for whisper.cpp — same engine [Vibe](https://github.com/thewh1teagle/vibe) uses) operating on the WAV bytes we already save (v0.22.9 → present). New `transcribe_audio_attachment(attachment_id)` Tauri command writes the transcript back as a note-body append.
-  - `download_speech_model()` command pulls `ggml-tiny.en-q5_1.bin` (~31 MB) from huggingface.co into the per-app data dir on first use; UI shows a one-time prompt with size + opt-in copy. Settings → new "Voice transcription" section: enable/disable, choose model size (tiny/base/small), delete model. After download, **fully offline** — no network ever. Audio never leaves the machine.
-  - Per the binding non-goal language (rewritten in v0.22.4): cloud AI / Gemini-style transcription stays banned; local offline whisper.cpp is in-bounds — same offline-first / no-account / no-telemetry rules as the rest of Keepr.
+- [x] **P1 — Offline transcription via whisper.cpp (Vibe-style)** *(v0.23.0 — shipped 2026-05-27)*
+  - `whisper-rs = 0.16` + `rubato` (48 → 16 kHz resample) + `hound` (WAV reader). Schema v13 `transcripts` table keyed by `attachment_id`. Settings → Voice transcription section for opt-in model download (~57 MB `ggml-base.en-q5_1.bin`, SHA-1 verified). Per-audio Transcribe button in `AttachmentGrid.AudioRow` runs on a worker thread (`std::thread::spawn` + `tokio::sync::oneshot`); transcript expands inline under the player. CRC32 short-circuits re-transcribe on unchanged audio. CI workflows updated with libclang on every runner.
 
 ## Open: Housekeeping (v0.23+)
 

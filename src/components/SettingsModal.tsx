@@ -13,6 +13,7 @@ import { useFocusTrap } from "../hooks/useFocusTrap";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { AppLockSection } from "./AppLockSection";
 import { VaultSection } from "./VaultSection";
+import { VoiceTranscriptionSection } from "./VoiceTranscriptionSection";
 
 export function SettingsModal() {
   const settingsOpen = useStore((s) => s.settingsOpen);
@@ -442,6 +443,8 @@ export function SettingsModal() {
             <AppLockSection />
 
             <VaultSection />
+
+            <VoiceTranscriptionSection />
 
             <div>
               <div className="font-medium">Backup / Restore</div>
