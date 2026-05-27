@@ -119,6 +119,83 @@ fn err<E: std::fmt::Display>(e: E) -> String {
     e.to_string()
 }
 
+/// Canonical mime→ext mapping used by every attachment-related command:
+/// the resource file on disk is named `<id>.<ext>` and the renderer's
+/// `keepr-resource://<id>.<ext>` URL relies on the same mapping. Keep this
+/// in sync with `AttachmentGrid.mimeToExt` (frontend) and
+/// `guess_content_type` (lib.rs). `bin` is the fallback so unknown mimes
+/// don't break the `format!("{id}.{ext}")` pattern.
+pub(crate) fn mime_to_ext(mime: &str) -> &'static str {
+    match mime {
+        "image/png" => "png",
+        "image/jpeg" => "jpg",
+        "image/gif" => "gif",
+        "image/webp" => "webp",
+        "image/svg+xml" => "svg",
+        "audio/webm" => "webm",
+        "audio/ogg" => "ogg",
+        "audio/mp4" => "m4a",
+        "audio/mpeg" => "mp3",
+        "audio/wav" => "wav",
+        _ => "bin",
+    }
+}
+
+/// Delete a single attachment's blob + sibling thumbnail from the resources
+/// dir. Best-effort: errors are logged but not surfaced (the DB row is already
+/// gone by the time we get here, so the file is orphan regardless). Used by
+/// `delete_attachment`, `delete_note_permanent`, and `empty_trash` to keep
+/// the on-disk resources dir in sync with the `attachments` table.
+fn delete_attachment_files(resources_dir: &Path, id: &str, mime: &str) {
+    let ext = mime_to_ext(mime);
+    let main = resources_dir.join(format!("{id}.{ext}"));
+    if let Err(e) = std::fs::remove_file(&main) {
+        // NotFound is expected when the file was already cleaned up or never
+        // written (e.g., a thumbnail-only attachment); other errors mean
+        // we're leaking disk space.
+        if e.kind() != std::io::ErrorKind::NotFound {
+            log::warn!("could not remove attachment file {}: {e}", main.display());
+        }
+    }
+    // NF-V0.5-B — thumbnail is always `.thumb.jpg` regardless of source
+    // extension. See `add_image_attachment`.
+    let thumb = resources_dir.join(format!("{id}.thumb.jpg"));
+    if let Err(e) = std::fs::remove_file(&thumb) {
+        if e.kind() != std::io::ErrorKind::NotFound {
+            log::warn!("could not remove attachment thumb {}: {e}", thumb.display());
+        }
+    }
+}
+
+/// Collect every (id, mime) attachment row for the given note ids so the
+/// caller can clean up resource files after the DB rows are gone (cascading
+/// FK delete drops the `attachments` rows when the parent `notes` row is
+/// removed, but the files on disk are not the DB's concern).
+fn collect_attachment_files(
+    conn: &Connection,
+    note_ids: &[String],
+) -> rusqlite::Result<Vec<(String, String)>> {
+    if note_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let placeholders = std::iter::repeat("?")
+        .take(note_ids.len())
+        .collect::<Vec<_>>()
+        .join(",");
+    let sql = format!(
+        "SELECT id, mime FROM attachments WHERE note_id IN ({placeholders})"
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let params_iter: Vec<&dyn rusqlite::ToSql> =
+        note_ids.iter().map(|s| s as &dyn rusqlite::ToSql).collect();
+    let rows = stmt
+        .query_map(params_iter.as_slice(), |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(rows)
+}
+
 // EI-33 — server-side input caps. The renderer is trusted but we still defend
 // the SQLite store from accidentally-huge payloads or malformed kinds.
 const MAX_TITLE_CHARS: usize = 1024;
@@ -1161,17 +1238,6 @@ fn yaml_quote_if_needed(s: &str) -> String {
     }
 }
 
-fn mime_to_ext(mime: &str) -> &'static str {
-    match mime {
-        "image/png" => "png",
-        "image/jpeg" => "jpg",
-        "image/gif" => "gif",
-        "image/webp" => "webp",
-        "image/svg+xml" => "svg",
-        _ => "bin",
-    }
-}
-
 /// NF-08 — Google Keep Takeout importer. The Takeout export is a ZIP
 /// where each note lives next to a sibling HTML rendering (which we
 /// ignore) and any binary attachments. The canonical path is
@@ -1195,8 +1261,15 @@ pub fn import_takeout(
     if state.importing.load(std::sync::atomic::Ordering::SeqCst) {
         return Err("a restore is currently in progress".into());
     }
-    let file = File::open(&src).map_err(err)?;
-    let mut archive = zip::ZipArchive::new(file).map_err(err)?;
+    log::info!("import_takeout: opening {src}");
+    let file = File::open(&src).map_err(|e| {
+        log::error!("import_takeout: open failed: {e}");
+        err(e)
+    })?;
+    let mut archive = zip::ZipArchive::new(file).map_err(|e| {
+        log::error!("import_takeout: not a valid zip: {e}");
+        err(e)
+    })?;
 
     // Two-pass: first collect attachment bytes keyed by their archive
     // path so we can resolve note-relative references.
@@ -1429,6 +1502,7 @@ pub fn import_takeout(
 
         imported += 1;
     }
+    log::info!("import_takeout: imported {imported} notes from {src}");
     Ok(imported)
 }
 
@@ -2233,29 +2307,11 @@ pub fn delete_attachment(state: State<'_, AppState>, id: String) -> Result<(), S
         return Err("a restore is currently in progress".into());
     }
     let conn = state.db.lock();
-    // Read filename suffix so we can delete the blob.
-    let (note_id, ext): (String, String) = conn
+    let (note_id, mime): (String, String) = conn
         .query_row(
             "SELECT note_id, mime FROM attachments WHERE id = ?1",
             params![id],
-            |r| {
-                let note_id: String = r.get(0)?;
-                let mime: String = r.get(1)?;
-                let ext = match mime.as_str() {
-                    "image/png" => "png",
-                    "image/jpeg" => "jpg",
-                    "image/gif" => "gif",
-                    "image/webp" => "webp",
-                    "image/svg+xml" => "svg",
-                    "audio/webm" => "webm",
-                    "audio/ogg" => "ogg",
-                    "audio/mp4" => "m4a",
-                    "audio/mpeg" => "mp3",
-                    "audio/wav" => "wav",
-                    _ => "bin",
-                };
-                Ok((note_id, ext.to_string()))
-            },
+            |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)),
         )
         .map_err(|_| format!("attachment {id} not found"))?;
     conn.execute("DELETE FROM attachments WHERE id = ?1", params![id])
@@ -2268,10 +2324,7 @@ pub fn delete_attachment(state: State<'_, AppState>, id: String) -> Result<(), S
     );
     drop(conn);
     let resources = state.data_dir.join(RESOURCES_DIR);
-    let _ = std::fs::remove_file(resources.join(format!("{id}.{ext}")));
-    // NF-V0.5-B — also remove the sibling thumbnail if present. Always
-    // .jpg regardless of source extension (see add_image_attachment).
-    let _ = std::fs::remove_file(resources.join(format!("{id}.thumb.jpg")));
+    delete_attachment_files(&resources, &id, &mime);
     Ok(())
 }
 
@@ -2300,11 +2353,30 @@ pub fn reorder_notes(state: State<'_, AppState>, ids: Vec<String>) -> Result<(),
     Ok(())
 }
 
+/// Permanently delete a note + clean up its attachment files on disk.
+///
+/// Cascading FK takes care of `attachments`, `note_labels`, `reminders`,
+/// `note_snapshots`, `checklist_items`, etc. rows. **But the resource
+/// files at `<data_dir>/resources/<id>.<ext>` are NOT covered by the DB
+/// cascade** — they have to be removed manually, or the user's disk fills
+/// up with orphaned blobs after every "Delete forever" (silent data /
+/// space leak that survived from v0.1 → v0.22).
 #[tauri::command]
 pub fn delete_note_permanent(state: State<'_, AppState>, id: String) -> Result<(), String> {
+    if state.importing.load(std::sync::atomic::Ordering::SeqCst) {
+        return Err("a restore is currently in progress".into());
+    }
     let conn = state.db.lock();
+    // Snapshot attachment file metadata BEFORE the cascade deletes the rows.
+    let files = collect_attachment_files(&conn, std::slice::from_ref(&id))
+        .map_err(err)?;
     conn.execute("DELETE FROM notes WHERE id = ?1", params![id])
         .map_err(err)?;
+    drop(conn);
+    let resources = state.data_dir.join(RESOURCES_DIR);
+    for (att_id, mime) in &files {
+        delete_attachment_files(&resources, att_id, mime);
+    }
     Ok(())
 }
 
@@ -2466,8 +2538,30 @@ pub fn set_note_labels(
 
 #[tauri::command]
 pub fn empty_trash(state: State<'_, AppState>) -> Result<(), String> {
+    if state.importing.load(std::sync::atomic::Ordering::SeqCst) {
+        return Err("a restore is currently in progress".into());
+    }
     let conn = state.db.lock();
+    // Snapshot trashed note ids + their attachment files BEFORE cascade.
+    let note_ids: Vec<String> = conn
+        .prepare("SELECT id FROM notes WHERE trashed = 1")
+        .map_err(err)?
+        .query_map([], |r| r.get::<_, String>(0))
+        .map_err(err)?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(err)?;
+    let files = collect_attachment_files(&conn, &note_ids).map_err(err)?;
     conn.execute("DELETE FROM notes WHERE trashed = 1", []).map_err(err)?;
+    drop(conn);
+    let resources = state.data_dir.join(RESOURCES_DIR);
+    for (att_id, mime) in &files {
+        delete_attachment_files(&resources, att_id, mime);
+    }
+    log::info!(
+        "empty_trash: deleted {} notes, cleaned {} attachment files",
+        note_ids.len(),
+        files.len()
+    );
     Ok(())
 }
 
@@ -3577,15 +3671,22 @@ pub fn export_zip(
     let data_dir: PathBuf = state.data_dir.clone();
     let dest_path = PathBuf::from(&dest);
     if let Some(parent) = dest_path.parent() {
-        std::fs::create_dir_all(parent).map_err(err)?;
+        std::fs::create_dir_all(parent).map_err(|e| {
+            log::error!("export_zip: could not create parent dir {}: {e}", parent.display());
+            err(e)
+        })?;
     }
+    log::info!("export_zip: writing backup to {}", dest_path.display());
 
     // EI-02: flush WAL into the main DB before zipping (otherwise recent
     // committed writes are silently absent from the backup).
     {
         let conn = state.db.lock();
         conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")
-            .map_err(err)?;
+            .map_err(|e| {
+                log::error!("export_zip: wal_checkpoint failed: {e}");
+                err(e)
+            })?;
     }
 
     let file = File::create(&dest_path).map_err(err)?;
@@ -3675,7 +3776,13 @@ pub fn import_zip(
         flag: state.importing.clone(),
     };
 
-    do_import_zip(&state, &src)
+    log::info!("import_zip: restoring from {src}");
+    let result = do_import_zip(&state, &src);
+    match &result {
+        Ok(_) => log::info!("import_zip: restore complete"),
+        Err(e) => log::error!("import_zip: restore failed: {e}"),
+    }
+    result
 }
 
 struct ImportGate {

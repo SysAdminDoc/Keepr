@@ -6,6 +6,42 @@ All notable changes to Keepr are documented here. Format loosely follows [Keep a
 
 (See [ROADMAP.md](ROADMAP.md) for the live task list.)
 
+## [0.22.10] — 2026-05-27 — "Audit hardening pass"
+
+End-to-end audit + hardening sweep across the Rust backend, the React frontend, the build/install surface, and test coverage. No new features — only fixes, defensive hardening, and diagnostics.
+
+### Fixed (data-safety)
+
+- **P0 — "Delete forever" leaked attachment files on disk forever.** `delete_note_permanent` and `empty_trash` only ran `DELETE FROM notes`; the foreign-key cascade cleared the `attachments` table rows but never touched the resource blobs under `<data_dir>/resources/<id>.<ext>`. Every permanent delete since v0.1 silently leaked photos, voice notes, and drawings on disk. Both commands now snapshot the attachment ids+mimes inside the DB lock, delete the note(s), then remove each blob plus its `.thumb.jpg` sibling. New helpers `mime_to_ext`, `delete_attachment_files`, and `collect_attachment_files` factor out the duplicated mime→ext mapping that lived in three places. `delete_attachment` was refactored to use the same helpers.
+- **P1 — "Delete forever" had no confirmation dialog.** A single accidental click on the trash icon was costing the entire note + every attachment with no recovery (snapshots cascade with the note). Both per-card delete (`NoteCard`) and bulk delete (`BulkActionBar`) now show a `ConfirmDialog` listing the note title (or selection count) before proceeding.
+- **P1 — "Empty Trash" confirm now shows the actual count.** Was just "All notes in Trash will be permanently deleted." → now reads "This will permanently delete N notes and their attachments." with proper singular/plural handling, including a "Trash is already empty." branch.
+
+### Fixed (security)
+
+- **P1 — Path-traversal hardening in the `keepr-resource://` protocol handler.** The previous validation only rejected literal `..`, `/`, and `\\`. URL-encoded equivalents (`%2e%2e`, `%2f`, `%5c`), NUL bytes (`%00`), Windows reserved-device names (`CON`, `NUL`, `AUX`, `PRN`, `COM1-9`, `LPT1-9`), and Windows drive prefixes (`C:`) all slipped through. A new `is_safe_resource_id` helper centralizes all of these checks plus a `s.len() > 1024` bound. Defense-in-depth: even after the helper passes, the handler now verifies the resolved path's parent equals the resources directory. 10 new unit tests in `src-tauri/src/lib.rs`.
+
+### Added (diagnostics)
+
+- **`log::info!` and `log::error!` on the highest-stakes paths** in `commands.rs` — `import_takeout`, `import_zip`, `export_zip`, `empty_trash`. These commands previously failed silently to the user (just a `Result<_, String>` returned via IPC); now there's a paper trail in `Keepr.log` for support / triage.
+
+### Added (tests)
+
+- **9 frontend tests** in `src/__tests__/encodeWav.test.ts` covering the v0.22.9 WAV encoder (header structure, byte order, sample clamping, downmix math). `encodePcmWav` and `encodeWavFromAudioBuffer` are now exported for test access. This was the critical-path function in the voice-recorder rewrite cycle and had no coverage at all.
+- **10 Rust tests** for `is_safe_resource_id` in `src-tauri/src/lib.rs` covering UUID filenames, dot-dot, percent-encoded traversal, Windows drive prefixes, reserved device names (including legitimate names with reserved prefixes like `container.png`), NUL bytes, and oversize input.
+
+### Polish
+
+- `vite.config.ts` now sets `build.sourcemap: false` explicitly. Vite already defaults to that; pinning it makes the intent auditable and protects against a future contributor flipping it on for debugging.
+- `installer.nsh` `NSIS_HOOK_POSTUNINSTALL` now removes `portable.flag` from the install dir so a future reinstall in the same location doesn't silently inherit portable mode.
+- `installer.nsh` `README.txt` now documents where notes are stored (`%APPDATA%\com.sysadmindoc.keepr\keepr.db`) and that uninstalling does NOT delete the database — manual cleanup is required for a full wipe.
+- `delete_note_permanent` and `empty_trash` now refuse to run during a `import_zip` to match the rest of the mutating commands (was a small consistency gap).
+
+### Audit follow-ups deferred (not blockers for this release)
+
+- Schema downgrade guardrails (silent ignore of newer tables when an older binary opens a newer DB) — needs a real upgrade/downgrade policy decision.
+- Vault + app-lock + FTS5 end-to-end integration test — meaningful coverage requires a test-rig that mounts a real AppState.
+- `useClickOutside` mousedown vs pointerdown — current usages all wrap trigger + popover in the same ref, so click-inside doesn't actually leak. No real bug yet.
+
 ## [0.22.9] — 2026-05-26 — "MediaRecorder + decode → WAV"
 
 ### Fixed

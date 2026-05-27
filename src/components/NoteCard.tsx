@@ -18,6 +18,7 @@ import { BACKGROUND_PATTERNS, normalizePattern } from "../lib/backgroundPatterns
 import { useStore } from "../store";
 import { api } from "../api";
 import { ColorPicker } from "./ColorPicker";
+import { ConfirmDialog } from "./ConfirmDialog";
 import { IconBtn } from "./IconBtn";
 import { AttachmentGrid } from "./AttachmentGrid";
 import { effectiveFireAt, isActive, recurrenceLabel } from "../lib/reminders";
@@ -68,6 +69,10 @@ export function NoteCard({ note }: Props) {
   const [colorOpen, setColorOpen] = useState(false);
   const popoverRef = useRef<HTMLDivElement>(null);
   useClickOutside(popoverRef, colorOpen, () => setColorOpen(false));
+  // v0.22.10 hardening — "Delete forever" was a one-click destructive
+  // action with no recovery (snapshots cascade-delete with the note).
+  // Wrap it in a confirm to prevent accidental clicks from costing data.
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
 
   const inTrash = section.kind === "trash";
   const inArchive = section.kind === "archive";
@@ -170,9 +175,13 @@ export function NoteCard({ note }: Props) {
     });
   };
 
-  const deleteForever = (e: React.MouseEvent) => {
+  const requestDeleteForever = (e: React.MouseEvent) => {
     e.stopPropagation();
-    return withToast("delete note", async () => {
+    setDeleteConfirmOpen(true);
+  };
+  const confirmDeleteForever = () => {
+    setDeleteConfirmOpen(false);
+    void withToast("delete note", async () => {
       await api.deleteNotePermanent(note.id);
       removeNote(note.id);
       showToast("Note deleted");
@@ -420,12 +429,26 @@ export function NoteCard({ note }: Props) {
             <IconBtn ariaLabel="Restore" onClick={restore}>
               <RotateCcw size={18} aria-hidden />
             </IconBtn>
-            <IconBtn ariaLabel="Delete forever" onClick={deleteForever}>
+            <IconBtn ariaLabel="Delete forever" onClick={requestDeleteForever}>
               <Trash2 size={18} aria-hidden />
             </IconBtn>
           </>
         )}
       </div>
+      <ConfirmDialog
+        open={deleteConfirmOpen}
+        title="Delete this note forever?"
+        body={
+          note.title.trim()
+            ? `"${note.title.trim().slice(0, 80)}" and any attachments will be permanently deleted. This cannot be undone.`
+            : "This note and any attachments will be permanently deleted. This cannot be undone."
+        }
+        confirmLabel="Delete forever"
+        cancelLabel="Cancel"
+        destructive
+        onConfirm={confirmDeleteForever}
+        onCancel={() => setDeleteConfirmOpen(false)}
+      />
     </div>
   );
 }

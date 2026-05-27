@@ -63,8 +63,10 @@ function pickMime(): string | null {
 
 /** Encode a Web Audio AudioBuffer as a 16-bit mono PCM WAV. Multi-channel
  *  input is downmixed by averaging channels — voice notes don't need
- *  stereo and mono is what whisper.cpp expects anyway. */
-function encodeWavFromAudioBuffer(buffer: AudioBuffer): ArrayBuffer {
+ *  stereo and mono is what whisper.cpp expects anyway.
+ *
+ *  Exported only for unit testing; the modal calls it via the local name. */
+export function encodeWavFromAudioBuffer(buffer: AudioBuffer): ArrayBuffer {
   const sampleRate = buffer.sampleRate;
   const length = buffer.length;
   // Downmix to mono.
@@ -86,7 +88,9 @@ function encodeWavFromAudioBuffer(buffer: AudioBuffer): ArrayBuffer {
   return encodePcmWav(mono, sampleRate);
 }
 
-function encodePcmWav(samples: Float32Array, sampleRate: number): ArrayBuffer {
+/** Inner helper: encode raw Float32 PCM samples as a 16-bit mono WAV.
+ *  Exported only for unit testing. */
+export function encodePcmWav(samples: Float32Array, sampleRate: number): ArrayBuffer {
   const byteLength = 44 + samples.length * 2;
   const buf = new ArrayBuffer(byteLength);
   const view = new DataView(buf);

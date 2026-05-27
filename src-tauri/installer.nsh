@@ -39,7 +39,11 @@
   FileWrite $0 "this last step is unavoidably manual. See$\r$\n"
   FileWrite $0 "https://github.com/SysAdminDoc/Keepr for context.$\r$\n$\r$\n"
   FileWrite $0 "To uninstall: Settings -> Apps, or run uninstall.exe$\r$\n"
-  FileWrite $0 "in this folder.$\r$\n"
+  FileWrite $0 "in this folder.$\r$\n$\r$\n"
+  FileWrite $0 "Your notes are stored in:$\r$\n"
+  FileWrite $0 "  %APPDATA%\com.sysadmindoc.keepr\keepr.db$\r$\n"
+  FileWrite $0 "Uninstalling Keepr DOES NOT delete that database.$\r$\n"
+  FileWrite $0 "Remove that folder manually if you want a clean wipe.$\r$\n"
   FileClose $0
 !macroend
 
@@ -47,4 +51,9 @@
   Delete "$SMPROGRAMS\${PRODUCTNAME}.lnk"
   Delete "$DESKTOP\${PRODUCTNAME}.lnk"
   Delete "$INSTDIR\README.txt"
+  ; v0.22.10 — also clean the portable-mode sentinel if a user dropped
+  ; it next to the EXE. Leaving it behind would silently flip a future
+  ; reinstall into portable mode (data dir = $INSTDIR) which is rarely
+  ; what someone wants from a per-user installer.
+  Delete "$INSTDIR\portable.flag"
 !macroend
