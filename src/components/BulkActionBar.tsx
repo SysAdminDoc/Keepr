@@ -9,6 +9,8 @@ import {
   Trash2,
   Tag,
   RotateCcw,
+  Lock,
+  Unlock,
 } from "lucide-react";
 import { useStore } from "../store";
 import { api } from "../api";
@@ -58,10 +60,15 @@ export function BulkActionBar({ visibleIds }: Props) {
 
   const inTrash = section.kind === "trash";
   const inArchive = section.kind === "archive";
+  const vaultInitialized = useStore((s) => s.vaultInitialized);
+  const vaultUnlocked = useStore((s) => s.vaultUnlocked);
+  const load = useStore((s) => s.load);
 
   const selected = notes.filter((n) => selectedIds.has(n.id));
   const allPinned = selected.length > 0 && selected.every((n) => n.pinned);
   const allArchived = selected.length > 0 && selected.every((n) => n.archived);
+  const anyOutsideVault = selected.some((n) => n.vault !== "vault");
+  const anyInsideVault = selected.some((n) => n.vault === "vault");
 
   const runBulk = async (
     label: string,
@@ -251,6 +258,48 @@ export function BulkActionBar({ visibleIds }: Props) {
             </div>
           )}
         </div>
+      )}
+
+      {/* Vault bulk move — only when vault is initialized + unlocked.
+          The two buttons appear conditionally so the bar isn't cluttered
+          for users not using the vault. */}
+      {!inTrash && vaultInitialized && vaultUnlocked && anyOutsideVault && (
+        <IconBtn
+          ariaLabel="Move to Vault"
+          onClick={async () => {
+            const ids = selected.filter((n) => n.vault !== "vault").map((n) => n.id);
+            if (ids.length === 0) return;
+            try {
+              const moved = await api.moveNotesToVault(ids);
+              showToast(`Moved ${moved} to Vault`);
+              clearSelection();
+              await load();
+            } catch (e) {
+              showToast("Move to Vault failed: " + String(e));
+            }
+          }}
+        >
+          <Lock size={20} aria-hidden />
+        </IconBtn>
+      )}
+      {!inTrash && vaultInitialized && vaultUnlocked && anyInsideVault && (
+        <IconBtn
+          ariaLabel="Move out of Vault"
+          onClick={async () => {
+            const ids = selected.filter((n) => n.vault === "vault").map((n) => n.id);
+            if (ids.length === 0) return;
+            try {
+              const moved = await api.moveNotesOutOfVault(ids);
+              showToast(`Moved ${moved} out of Vault`);
+              clearSelection();
+              await load();
+            } catch (e) {
+              showToast("Move out of Vault failed: " + String(e));
+            }
+          }}
+        >
+          <Unlock size={20} aria-hidden />
+        </IconBtn>
       )}
 
       {!inTrash && !inArchive && (

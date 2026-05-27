@@ -6,6 +6,23 @@ All notable changes to Keepr are documented here. Format loosely follows [Keep a
 
 (See [ROADMAP.md](ROADMAP.md) for the live task list.)
 
+## [0.20.2] — 2026-05-26 — "Bulk Move to/from Vault"
+
+### Added
+
+- **`BulkActionBar` gets two new buttons** when 1+ notes are selected AND the Private Vault is both initialized AND unlocked:
+  - **Move to Vault (Lock icon)** — appears when at least one selected note is outside the vault. Encrypts the eligible selection.
+  - **Move out of Vault (Unlock icon)** — appears when at least one selected note is inside the vault. Decrypts the eligible selection.
+- Bulk reflects what's eligible: if you select a mix of vaulted and plain notes, the Move-to button only acts on the plain ones (and vice versa). Selection clears after success; toast shows the moved count.
+
+### Added (Rust)
+
+- `move_notes_to_vault(ids: Vec<String>)` and `move_notes_out_of_vault(ids: Vec<String>)` — thin loops over the existing per-note `move_note_to_vault` / `move_note_out_of_vault`. Stops on first error and returns the count moved so far. Not atomic across the batch (each per-note call commits its own transaction), which matches the existing per-note semantics — partial state is acceptable, the UI shows what happened.
+
+### Why
+
+Sensitive-info users with 30 notes to move into the vault had to touch each one individually before v0.20.2. Per the v0.19 research, this was the highest-friction gap in the App Lock + Vault stack.
+
 ## [0.20.1] — 2026-05-26 — "Hashtag autocomplete in editor"
 
 ### Added
