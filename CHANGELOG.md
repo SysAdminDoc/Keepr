@@ -6,6 +6,18 @@ All notable changes to Keepr are documented here. Format loosely follows [Keep a
 
 (See [ROADMAP.md](ROADMAP.md) for the live task list.)
 
+## [0.20.1] — 2026-05-26 — "Hashtag autocomplete in editor"
+
+### Added
+
+- **`#` in the editor body now triggers a label completion strip.** Type `#wo` and a small chip row appears under the textarea showing every existing label whose name starts with `wo` (up to 5). Tab or Enter completes to the top match; click any chip to pick it. Stops duplicate-label proliferation (`#workl` typo becoming a new label) that the v0.19 research flagged as a real pain.
+- **New `findPartialHashtag(text, caret)` pure helper** in `NoteEditor.tsx`, exported for testing. Returns the partial hashtag at the caret or `null`. Correctly handles start-of-string, newlines, and rejects mid-word `#` (so `foo#bar` is not treated as a hashtag).
+- **7 new vitest cases** for the helper (start-of-string, mid-word rejection, space-terminated rejection, bare `#`, multi-line).
+
+### How it works
+
+The textarea tracks `selectionStart` on every change + selection event into a `bodyCaret` state. `<HashtagSuggestions>` renders inline below the textarea when `findPartialHashtag` matches. The textarea's `onKeyDown` watches for Tab/Enter and swaps the partial token for `#{label.name}`, then restores the caret to just after the inserted label on the next tick.
+
 ## [0.20.0] — 2026-05-26 — "Command palette (Ctrl/Cmd+K)"
 
 ### Added

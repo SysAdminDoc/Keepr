@@ -27,8 +27,8 @@
 
 - [x] **P1 — Command Palette (Ctrl/Cmd+K)** *(v0.20.0 — shipped)*
   - New `CommandPalette.tsx`; fuzzy across note titles + every settings action + every section + every label. Lazy-loaded behind Suspense.
-- [ ] **P1 — Tag autocomplete in editor** *(v0.20.1)*
-  - When user types `#X`, dropdown of existing labels matching the prefix. Tab/Enter completes.
+- [x] **P1 — Tag autocomplete in editor** *(v0.20.1 — shipped)*
+  - `#X` triggers an inline chip-strip suggesting up to 5 matching labels; Tab/Enter completes top match; click any chip to pick. New `findPartialHashtag` pure helper + 7 tests.
 - [ ] **P1 — Bulk "Move to/from Vault"** *(v0.20.2)*
   - `BulkActionBar` new buttons. New `move_notes_to_vault` / `move_notes_out_of_vault` Rust commands wrapping per-note path in a single transaction.
 - [ ] **P1 — Audio voice notes** *(v0.20.3)*
