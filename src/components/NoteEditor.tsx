@@ -52,6 +52,29 @@ import type {
 } from "../types";
 import { BACKGROUND_PATTERNS, normalizePattern } from "../lib/backgroundPatterns";
 
+/** Given the body text and caret position, find a partial `#hashtag`
+ *  that the user is in the middle of typing — i.e. a `#` followed by
+ *  zero or more word characters, with the caret at the end. Returns
+ *  the prefix (without the `#`), the start index of the `#`, and the
+ *  end index = caret. Returns null if the caret isn't inside a hashtag
+ *  token (e.g. after a space, or not preceded by a `#`). v0.20.1 tag
+ *  autocomplete in editor (NoteEditor.tsx). */
+export function findPartialHashtag(
+  text: string,
+  caret: number,
+): { prefix: string; start: number; end: number } | null {
+  if (caret <= 0 || caret > text.length) return null;
+  // Walk backward from caret while characters are \w (word chars).
+  let i = caret;
+  while (i > 0 && /\w/.test(text[i - 1])) i -= 1;
+  // The character immediately before i must be `#` for this to be a
+  // hashtag token. Also require either start-of-string or non-word
+  // character before `#` so `foo#bar` doesn't trigger.
+  if (i === 0 || text[i - 1] !== "#") return null;
+  if (i - 1 > 0 && /\w/.test(text[i - 2])) return null;
+  return { prefix: text.slice(i, caret), start: i - 1, end: caret };
+}
+
 /** Compare a NoteInput payload against the existing Note. Returns true
  *  if every persisted field is identical — used by close() to skip the
  *  update_note round-trip on view-only opens, so `updated_at` doesn't
@@ -167,6 +190,10 @@ export function NoteEditor() {
   const [labelMenuOpen, setLabelMenuOpen] = useState(false);
   const [newLabelName, setNewLabelName] = useState("");
   const [dropActive, setDropActive] = useState(false);
+  // v0.20.1 — tag autocomplete state. Tracks the caret position in
+  // the body textarea so we can detect a partial `#hashtag` and
+  // surface matching labels. Updated on every selection-change event.
+  const [bodyCaret, setBodyCaret] = useState(0);
   const titleRef = useRef<HTMLTextAreaElement>(null);
   const bodyRef = useRef<HTMLTextAreaElement>(null);
 
@@ -783,14 +810,76 @@ export function NoteEditor() {
         </div>
 
         {draft.kind === "text" ? (
-          <textarea
-            ref={bodyRef}
-            value={draft.body}
-            onChange={(e) => setDraft({ ...draft, body: e.target.value })}
-            placeholder="Take a note…"
-            className="flex-1 w-full resize-none bg-transparent outline-none px-4 pb-3 placeholder-gray-500 dark:placeholder-gray-400 min-h-[20rem]"
-            style={{ fontSize: "var(--keepr-note-font-size)" }}
-          />
+          <>
+            <textarea
+              ref={bodyRef}
+              value={draft.body}
+              onChange={(e) => {
+                setDraft({ ...draft, body: e.target.value });
+                setBodyCaret(e.target.selectionStart ?? 0);
+              }}
+              onSelect={(e) => setBodyCaret(e.currentTarget.selectionStart ?? 0)}
+              onKeyDown={(e) => {
+                // v0.20.1 — Tab or Enter completes the currently-shown
+                // hashtag suggestion if any. Otherwise let the keystroke
+                // pass through (Tab focuses next, Enter inserts newline).
+                const partial = findPartialHashtag(draft.body, bodyCaret);
+                if (!partial) return;
+                const matches = labels
+                  .filter((l) =>
+                    l.name.toLowerCase().startsWith(partial.prefix.toLowerCase()),
+                  )
+                  .filter((l) => l.name.toLowerCase() !== partial.prefix.toLowerCase())
+                  .slice(0, 5);
+                if (matches.length === 0) return;
+                if (e.key === "Tab" || (e.key === "Enter" && matches.length > 0)) {
+                  e.preventDefault();
+                  const top = matches[0];
+                  const before = draft.body.slice(0, partial.start);
+                  const after = draft.body.slice(partial.end);
+                  const inserted = `#${top.name}`;
+                  const next = `${before}${inserted}${after}`;
+                  const newCaret = (before + inserted).length;
+                  setDraft({ ...draft, body: next });
+                  setBodyCaret(newCaret);
+                  // Defer caret restoration until after React has
+                  // re-rendered with the new value.
+                  setTimeout(() => {
+                    if (bodyRef.current) {
+                      bodyRef.current.selectionStart = newCaret;
+                      bodyRef.current.selectionEnd = newCaret;
+                    }
+                  }, 0);
+                }
+              }}
+              placeholder="Take a note…"
+              className="flex-1 w-full resize-none bg-transparent outline-none px-4 pb-3 placeholder-gray-500 dark:placeholder-gray-400 min-h-[20rem]"
+              style={{ fontSize: "var(--keepr-note-font-size)" }}
+            />
+            <HashtagSuggestions
+              body={draft.body}
+              caret={bodyCaret}
+              labels={labels}
+              onPick={(name) => {
+                const partial = findPartialHashtag(draft.body, bodyCaret);
+                if (!partial) return;
+                const before = draft.body.slice(0, partial.start);
+                const after = draft.body.slice(partial.end);
+                const inserted = `#${name}`;
+                const next = `${before}${inserted}${after}`;
+                const newCaret = (before + inserted).length;
+                setDraft({ ...draft, body: next });
+                setBodyCaret(newCaret);
+                setTimeout(() => {
+                  if (bodyRef.current) {
+                    bodyRef.current.focus();
+                    bodyRef.current.selectionStart = newCaret;
+                    bodyRef.current.selectionEnd = newCaret;
+                  }
+                }, 0);
+              }}
+            />
+          </>
         ) : (
           // EI-V0.5-10 (v0.16) — checklist editor extracted to its own
           // component. ChecklistSection owns the dnd-kit context, FLIP
@@ -1045,6 +1134,48 @@ export function NoteEditor() {
           />
         </Suspense>
       )}
+    </div>
+  );
+}
+
+/** v0.20.1 — inline chip row that surfaces label-name completions
+ *  whenever the body caret sits inside a partial `#hashtag` token.
+ *  Tab/Enter from the textarea completes the first suggestion; mouse
+ *  click picks any. Rendered inside the editor body's scroll wrapper
+ *  so long notes don't bury it. */
+function HashtagSuggestions({
+  body,
+  caret,
+  labels,
+  onPick,
+}: {
+  body: string;
+  caret: number;
+  labels: { id: string; name: string }[];
+  onPick: (name: string) => void;
+}) {
+  const partial = findPartialHashtag(body, caret);
+  if (!partial) return null;
+  // Show at most 5 matches, excluding the case where the prefix is
+  // already an exact label (no completion to offer).
+  const matches = labels
+    .filter((l) => l.name.toLowerCase().startsWith(partial.prefix.toLowerCase()))
+    .filter((l) => l.name.toLowerCase() !== partial.prefix.toLowerCase())
+    .slice(0, 5);
+  if (matches.length === 0) return null;
+  return (
+    <div className="px-3 pb-1 -mt-1 flex items-center gap-2 text-xs">
+      <span className="opacity-60">Tab/Enter:</span>
+      {matches.map((l) => (
+        <button
+          key={l.id}
+          type="button"
+          onClick={() => onPick(l.name)}
+          className="px-2 py-0.5 rounded border border-gray-300 dark:border-[#5f6368] hover:bg-black/5 dark:hover:bg-white/10"
+        >
+          #{l.name}
+        </button>
+      ))}
     </div>
   );
 }
