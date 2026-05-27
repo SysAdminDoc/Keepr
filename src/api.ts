@@ -7,6 +7,8 @@ import type {
   Label,
   Reminder,
   SmartLabel,
+  SpeechModelStatus,
+  TranscriptRecord,
 } from "./types";
 
 export const api = {
@@ -130,4 +132,13 @@ export const api = {
     invoke<NoteSnapshot[]>("list_snapshots", { noteId }),
   restoreSnapshot: (snapshotId: string) =>
     invoke<Note>("restore_snapshot", { snapshotId }),
+  // v0.23.0 — opt-in offline speech transcription.
+  getSpeechModelStatus: () =>
+    invoke<SpeechModelStatus>("get_speech_model_status"),
+  downloadSpeechModel: () => invoke<void>("download_speech_model"),
+  deleteSpeechModel: () => invoke<void>("delete_speech_model"),
+  getTranscript: (attachmentId: string) =>
+    invoke<TranscriptRecord | null>("get_transcript", { attachmentId }),
+  transcribeAudioAttachment: (attachmentId: string) =>
+    invoke<string>("transcribe_audio_attachment", { attachmentId }),
 };

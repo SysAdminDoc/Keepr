@@ -3924,6 +3924,222 @@ fn do_import_zip(state: &State<'_, AppState>, src: &str) -> Result<(), String> {
     }
 }
 
+// ---------------------------------------------------------------------------
+// v0.23.0 — offline speech transcription via whisper.cpp
+// ---------------------------------------------------------------------------
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SpeechModelStatus {
+    pub downloaded: bool,
+    pub model_id: String,
+    pub model_filename: String,
+    pub model_size_bytes: u64,
+    pub model_url: String,
+    pub on_disk_path: String,
+}
+
+/// Renderer-facing status of the speech model. Settings → Voice
+/// transcription uses this to decide whether to show "Download" or
+/// "Delete + Re-download".
+#[tauri::command]
+pub fn get_speech_model_status(
+    state: State<'_, AppState>,
+) -> Result<SpeechModelStatus, String> {
+    let path = crate::transcribe::model_path(&state.data_dir);
+    Ok(SpeechModelStatus {
+        downloaded: path.exists(),
+        model_id: crate::transcribe::MODEL_ID.to_string(),
+        model_filename: crate::transcribe::MODEL_FILENAME.to_string(),
+        model_size_bytes: crate::transcribe::MODEL_BYTES,
+        model_url: crate::transcribe::MODEL_URL.to_string(),
+        on_disk_path: path.to_string_lossy().to_string(),
+    })
+}
+
+/// Download the whisper model from Hugging Face. Streams ~57 MB with
+/// progress events on `transcribe://model-progress`. Idempotent: if the
+/// model is already on disk and its SHA-1 matches the published digest,
+/// this returns without any network activity.
+///
+/// This is the ONLY outbound HTTP call in Keepr — explicitly opt-in via
+/// the Settings → Voice transcription UI. After download, transcription
+/// runs fully offline forever.
+#[tauri::command]
+pub async fn download_speech_model(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let data_dir = state.data_dir.clone();
+    crate::transcribe::download_model(app, data_dir)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Delete the model file from disk. Idempotent.
+#[tauri::command]
+pub fn delete_speech_model(state: State<'_, AppState>) -> Result<(), String> {
+    crate::transcribe::delete_model(&state.data_dir).map_err(|e| e.to_string())
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TranscriptRecord {
+    pub attachment_id: String,
+    pub note_id: String,
+    pub text: String,
+    pub model: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// Return the persisted transcript (if any) for a given audio attachment.
+/// Used by the renderer to show "Transcribed" state without re-running
+/// inference.
+#[tauri::command]
+pub fn get_transcript(
+    state: State<'_, AppState>,
+    attachment_id: String,
+) -> Result<Option<TranscriptRecord>, String> {
+    let conn = state.db.lock();
+    let row = conn
+        .query_row(
+            "SELECT attachment_id, note_id, text, model, created_at, updated_at
+             FROM transcripts WHERE attachment_id = ?1",
+            params![attachment_id],
+            |r| {
+                Ok(TranscriptRecord {
+                    attachment_id: r.get(0)?,
+                    note_id: r.get(1)?,
+                    text: r.get(2)?,
+                    model: r.get(3)?,
+                    created_at: r.get(4)?,
+                    updated_at: r.get(5)?,
+                })
+            },
+        )
+        .optional()
+        .map_err(err)?;
+    Ok(row)
+}
+
+/// Transcribe a saved audio attachment. The audio must already be
+/// stored on disk via `add_audio_attachment_bytes`. Returns the
+/// transcribed text; also persists it to the `transcripts` table so
+/// subsequent reads via `get_transcript` are free.
+///
+/// CPU-heavy: spawns a dedicated OS thread for whisper inference so
+/// the Tauri async runtime stays responsive. Cancellation is not
+/// supported (whisper.cpp has no mid-inference abort hook); a typical
+/// 30-second voice note takes 3-8 seconds depending on CPU.
+#[tauri::command]
+pub async fn transcribe_audio_attachment(
+    state: State<'_, AppState>,
+    attachment_id: String,
+) -> Result<String, String> {
+    // Resolve the audio path + verify it's an audio kind.
+    let (note_id, audio_path) = {
+        let conn = state.db.lock();
+        let (note_id, kind, mime): (String, String, String) = conn
+            .query_row(
+                "SELECT note_id, kind, mime FROM attachments WHERE id = ?1",
+                params![attachment_id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .map_err(|_| format!("attachment {attachment_id} not found"))?;
+        if kind != "audio" {
+            return Err(format!("attachment {attachment_id} is not an audio kind"));
+        }
+        let ext = mime_to_ext(&mime);
+        let path = state
+            .data_dir
+            .join(RESOURCES_DIR)
+            .join(format!("{attachment_id}.{ext}"));
+        (note_id, path)
+    };
+    if !audio_path.exists() {
+        return Err(format!(
+            "audio file missing on disk: {}",
+            audio_path.display()
+        ));
+    }
+
+    // Model must be present + valid.
+    let model_path = crate::transcribe::model_path(&state.data_dir);
+    if !model_path.exists() {
+        return Err(
+            "Speech model not downloaded. Open Settings → Voice transcription to download it (~57 MB, one time, then fully offline)."
+                .into(),
+        );
+    }
+
+    // Short-circuit: if we have a transcript for the same CRC32, reuse it.
+    let crc = crate::transcribe::wav_crc32(&audio_path).map_err(|e| e.to_string())?;
+    {
+        let conn = state.db.lock();
+        let cached: Option<(String, u32)> = conn
+            .query_row(
+                "SELECT text, source_crc32 FROM transcripts WHERE attachment_id = ?1",
+                params![attachment_id],
+                |r| Ok((r.get::<_, String>(0)?, r.get::<_, u32>(1)?)),
+            )
+            .optional()
+            .map_err(err)?;
+        if let Some((text, prior_crc)) = cached {
+            if prior_crc == crc {
+                log::info!("transcribe: cache hit for {attachment_id}");
+                return Ok(text);
+            }
+        }
+    }
+
+    log::info!(
+        "transcribe: starting whisper on {} ({crc:08x})",
+        audio_path.display()
+    );
+
+    // Spawn whisper on a dedicated OS thread; bridge the result back via
+    // tokio's oneshot so this async fn doesn't block the Tauri runtime.
+    let (tx, rx) = tokio::sync::oneshot::channel::<Result<String, String>>();
+    std::thread::spawn(move || {
+        let work = (|| -> Result<String, String> {
+            let samples = crate::transcribe::wav_to_whisper_samples(&audio_path)
+                .map_err(|e| e.to_string())?;
+            if samples.is_empty() {
+                return Err("audio file decoded to zero samples".into());
+            }
+            crate::transcribe::transcribe_samples_blocking(&model_path, &samples)
+                .map_err(|e| e.to_string())
+        })();
+        let _ = tx.send(work);
+    });
+    let text = rx.await.map_err(|e| format!("worker thread crashed: {e}"))??;
+
+    // Persist (upsert by attachment_id).
+    let now = now_iso();
+    {
+        let conn = state.db.lock();
+        conn.execute(
+            "INSERT INTO transcripts (attachment_id, note_id, text, model, source_crc32, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)
+             ON CONFLICT(attachment_id) DO UPDATE SET
+                 text = excluded.text,
+                 model = excluded.model,
+                 source_crc32 = excluded.source_crc32,
+                 updated_at = excluded.updated_at",
+            params![attachment_id, note_id, text, crate::transcribe::MODEL_ID, crc, now],
+        )
+        .map_err(err)?;
+        // Bump the parent note's updated_at so the card resorts.
+        let _ = conn.execute(
+            "UPDATE notes SET updated_at = ?1 WHERE id = ?2",
+            params![now, note_id],
+        );
+    }
+    log::info!("transcribe: completed for {attachment_id} ({} chars)", text.len());
+    Ok(text)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

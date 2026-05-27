@@ -6,6 +6,7 @@ mod lock;
 // vault notes from outside the Tauri runtime. No private fields are
 // exposed beyond what was already accessible to commands.rs.
 pub mod vault;
+pub mod transcribe;
 
 use parking_lot::Mutex;
 use std::path::{Path, PathBuf};
@@ -581,6 +582,12 @@ pub fn run() {
             commands::list_snapshots,
             commands::restore_snapshot,
             commands::export_reminders_ics,
+            // v0.23.0 — opt-in offline speech transcription via whisper.cpp.
+            commands::get_speech_model_status,
+            commands::download_speech_model,
+            commands::delete_speech_model,
+            commands::get_transcript,
+            commands::transcribe_audio_attachment,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

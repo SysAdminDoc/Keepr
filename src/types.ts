@@ -180,6 +180,33 @@ export interface SmartLabel {
   updatedAt: string;
 }
 
+/** v0.23.0 — opt-in offline speech-to-text via whisper.cpp. */
+export interface SpeechModelStatus {
+  downloaded: boolean;
+  modelId: string;
+  modelFilename: string;
+  modelSizeBytes: number;
+  modelUrl: string;
+  onDiskPath: string;
+}
+
+/** v0.23.0 — persisted transcript for a single audio attachment. */
+export interface TranscriptRecord {
+  attachmentId: string;
+  noteId: string;
+  text: string;
+  model: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** v0.23.0 — payload of the `transcribe://model-progress` Tauri event
+ *  emitted while the speech model is downloading. */
+export interface ModelDownloadProgress {
+  downloaded: number;
+  total: number;
+}
+
 export const EMPTY_FILTERS: SearchFilters = {
   kinds: [],
   colors: [],
