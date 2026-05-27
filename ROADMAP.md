@@ -25,8 +25,8 @@
 
 ## Phase B — Core capture surface (v0.20.x)
 
-- [ ] **P1 — Command Palette (Ctrl/Cmd+K)** *(v0.20.0)*
-  - New `CommandPalette.tsx`; fuzzy across note titles + every settings action + every section + every label + every shortcut.
+- [x] **P1 — Command Palette (Ctrl/Cmd+K)** *(v0.20.0 — shipped)*
+  - New `CommandPalette.tsx`; fuzzy across note titles + every settings action + every section + every label. Lazy-loaded behind Suspense.
 - [ ] **P1 — Tag autocomplete in editor** *(v0.20.1)*
   - When user types `#X`, dropdown of existing labels matching the prefix. Tab/Enter completes.
 - [ ] **P1 — Bulk "Move to/from Vault"** *(v0.20.2)*
