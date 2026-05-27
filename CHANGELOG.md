@@ -6,6 +6,17 @@ All notable changes to Keepr are documented here. Format loosely follows [Keep a
 
 (See [ROADMAP.md](ROADMAP.md) for the live task list.)
 
+## [0.22.6] — 2026-05-26 — "Record button actually enables"
+
+### Fixed
+
+- **The Record button stayed greyed out after mic acquisition succeeded.** Real root cause of "voice notes don't work" — separate from (and underneath) the v0.22.5 WebView2 permission fix. `recRef.current = rec` assigned the MediaRecorder to a `useRef`, which **does not trigger a re-render**, so the button's `disabled={... || !recRef.current}` was evaluated against the initial-render snapshot and stayed disabled forever. Replaced with a state-backed `ready` flag (`useState(false)` → `setReady(true)` after MediaRecorder is constructed). The mirror is intentional: we still need the imperative ref for cleanup + start/stop calls, but render decisions now read from state.
+- **Added an "Acquiring microphone…" intermediate caption** so users know what's happening during the brief window between modal-open and mic-ready.
+
+### Notes
+
+This bug existed since v0.20.3 — voice notes have *never* worked in any shipped build. The v0.22.5 WebView2 permission fix was real and necessary (cached denies would have hit users eventually) but on its own would not have made the modal functional. v0.22.6 is the build to actually try.
+
 ## [0.22.5] — 2026-05-26 — "Voice notes actually record"
 
 ### Fixed

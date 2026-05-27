@@ -48,6 +48,11 @@ export function VoiceRecorderModal({ open, onSave, onClose }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [elapsed, setElapsed] = useState(0);
   const [saving, setSaving] = useState(false);
+  // `ready` mirrors `recRef.current` for render purposes. Refs don't
+  // trigger re-renders, so without this the Record button's
+  // `disabled={... || !recRef.current}` would stay disabled forever
+  // even after mic acquisition succeeded. (v0.22.6 regression fix.)
+  const [ready, setReady] = useState(false);
   const streamRef = useRef<MediaStream | null>(null);
   const recRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
@@ -59,6 +64,7 @@ export function VoiceRecorderModal({ open, onSave, onClose }: Props) {
     setElapsed(0);
     setRecording(false);
     setSaving(false);
+    setReady(false);
     chunksRef.current = [];
     // Kick off mic acquisition immediately so the OS prompt appears
     // on open rather than on the Start button — saves a click and the
@@ -88,6 +94,7 @@ export function VoiceRecorderModal({ open, onSave, onClose }: Props) {
           if (e.data && e.data.size > 0) chunksRef.current.push(e.data);
         };
         recRef.current = rec;
+        setReady(true);
       } catch (e) {
         // Map well-known DOMException names to actionable text. This is
         // what users actually see when WebView2 PermissionRequested is
@@ -203,6 +210,10 @@ export function VoiceRecorderModal({ open, onSave, onClose }: Props) {
         </div>
         {error ? (
           <p className="text-sm text-red-600 dark:text-red-400 mb-3">{error}</p>
+        ) : !ready ? (
+          <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">
+            Acquiring microphone…
+          </p>
         ) : (
           <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">
             Hold a quiet space, tap Record, speak, then tap Stop to attach the audio to this note.
@@ -216,7 +227,7 @@ export function VoiceRecorderModal({ open, onSave, onClose }: Props) {
             <button
               type="button"
               onClick={start}
-              disabled={!!error || saving || !recRef.current}
+              disabled={!!error || saving || !ready}
               className="flex items-center gap-2 px-4 py-2 rounded text-white font-medium bg-[var(--keepr-accent)] hover:bg-[var(--keepr-accent-hover)] disabled:opacity-50"
             >
               <Mic size={18} aria-hidden /> Record
