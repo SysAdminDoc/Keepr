@@ -6,6 +6,17 @@ All notable changes to Keepr are documented here. Format loosely follows [Keep a
 
 (See [ROADMAP.md](ROADMAP.md) for the live task list.)
 
+## [0.22.4] — 2026-05-26 — "Installer shortcuts + taskbar README"
+
+### Added
+
+- **NSIS installer hooks** at `src-tauri/installer.nsh`, wired via `bundle.windows.nsis.installerHooks` in `tauri.conf.json`. `NSIS_HOOK_POSTINSTALL` explicitly creates a top-level Start Menu shortcut (`$SMPROGRAMS\Keepr.lnk`) and a Desktop shortcut (`$DESKTOP\Keepr.lnk`) on every install — silent or GUI. `NSIS_HOOK_POSTUNINSTALL` removes them.
+- **README.txt dropped into the install directory** explaining the taskbar-pin limitation. Windows 10 1809+ blocks programmatic taskbar pinning (anti-spam UX measure by Microsoft); no installer can flip that bit. The user-facing workaround is two clicks: right-click the Start Menu Keepr entry → "Pin to taskbar". The README documents this plus uninstall instructions.
+
+### Design
+
+Tauri's NSIS template usually creates these shortcuts via the Components page, but documenting them as explicit hooks makes the behavior auditable and bypasses any Components toggle quirks. Hooks are idempotent — re-running the installer just overwrites the existing shortcut and README. ASCII-only writes so NSIS FileWrite stays locale-independent.
+
 ## [0.22.3] — 2026-05-26 — "Two-way `[[Note Title]]` links"
 
 ### Added

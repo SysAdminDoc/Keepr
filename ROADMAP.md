@@ -4,7 +4,7 @@
 
 **Priority legend:** P0 = data loss / crash / security / distribution-blocker · P1 = visible bug / high user value · P2 = polish / nice-to-have · P3 = future / experimental.
 
-**Status (2026-05-26):** **v0.22.3 shipped.** v0.19+ cycle made the following pass:
+**Status (2026-05-26):** **v0.22.4 shipped.** v0.19+ cycle made the following pass:
 - Phase A (distribution credibility): 4 of 5 shipped — Azure signing + auto-updater are both gated on the same signing-key decision and remain blocked.
 - Phase B (capture surface): **all 4 shipped** (command palette, hashtag autocomplete, bulk vault, voice notes).
 - Phase C (trust + recovery): 2 of 3 shipped — auto-backup rotation + vault recovery seed. Content-addressed attachments deferred (big refactor, marginal value at current install sizes).
@@ -79,13 +79,24 @@
 - [ ] **P2 — `commands.rs` split (now ~4400 lines)** *(deferred to v0.23+)*
   - Split into `commands/notes.rs`, `commands/io.rs`, `commands/security.rs`, `commands/attachments.rs`, `commands/reminders.rs`, `commands/history.rs`, `commands/labels.rs`. Re-exported from `commands/mod.rs`.
   - **Deferred this cycle**: high merge-conflict risk during an active feature cycle. Schedule for a quiet "no other open PRs" day.
+- [x] **P1 — NSIS installer hooks: Start Menu + Desktop shortcuts + README.txt** *(v0.22.4 — shipped)*
+  - `src-tauri/installer.nsh` with explicit `NSIS_HOOK_POSTINSTALL` / `NSIS_HOOK_POSTUNINSTALL` macros wired via `bundle.windows.nsis.installerHooks`. README.txt explains the unavoidable manual taskbar-pin step (Windows 10 1809+ blocks programmatic taskbar pinning by design).
 
-## Phase F — Web Clipper (v0.23.x)
+## Phase F — Voice notes recovery + transcription (v0.22.5 / v0.23.0)
+
+- [ ] **P0 — Voice-note recording fix (WebView2 mic permission)** *(v0.22.5 — in progress)*
+  - Root cause: WebView2's default `PermissionRequested` handler auto-denies microphone without firing a prompt, so `getUserMedia` rejects with a `NotAllowedError` the user never sees. Fix: pass `--use-fake-ui-for-media-stream` via `app.windows[0].additionalBrowserArgs` in `tauri.conf.json` (Chromium flag that auto-allows mic/camera prompts inside the embedded WebView2; no effect outside the app). Add defensive `if (!navigator.mediaDevices?.getUserMedia)` guard in `VoiceRecorderModal.tsx` so the modal surfaces a clear error instead of a TypeError when the API is unavailable. Document the `%LOCALAPPDATA%\com.sysadmindoc.keepr\EBWebView\Default\Preferences` reset path in CLAUDE.md gotchas.
+
+- [ ] **P1 — Offline transcription via whisper.cpp (Vibe-style)** *(v0.23.0 — planned)*
+  - `whisper-rs = "0.13"` (Rust bindings for whisper.cpp — same engine [Vibe](https://github.com/thewh1teagle/vibe) uses) + `symphonia` for decoding the recorded webm/opus blob into 16 kHz f32 PCM. New `transcribe_audio_attachment(attachment_id)` Tauri command writes the transcript back as a note-body append or a dedicated `transcript` column. `download_speech_model()` command pulls `ggml-tiny.en-q5_1.bin` (~31 MB) from huggingface.co into the per-app data dir on first use; UI shows a one-time prompt with size + opt-in copy. Settings → new "Voice transcription" section: enable/disable, choose model size (tiny/base/small), delete model. After download, **fully offline** — no network ever. Audio never leaves the machine.
+  - **Non-goal note**: the existing "no AI / no transcription" non-goal was scoped to *cloud / Gemini-style* transcription (audio leaves the machine, account required, costs accrue). Local whisper.cpp inference fits the same offline-first / single-user / no-account / no-telemetry promise as the rest of Keepr; treating it as in-bounds. Non-goal language rewritten in this commit.
+
+## Phase G — Web Clipper (v0.24.x)
 
 - [ ] **P1 — Web Clipper (browser extension + Tauri localhost server)** *(v0.23.0 — LARGER BET, defer until Phase A-D done)*
   - Rust localhost HTTP server on randomized port; per-install bearer token; MV3 extension at `web-clipper/`. Endpoints `/clip` `/clip/markdown` `/clip/selection` `/clip/screenshot` `/clip/url`. Bundled Readability.js + Turndown.js inside extension (no CDN). Tested on Firefox + Chrome + Edge.
 
-## Phase G — Distribution larger bets (when ready)
+## Phase H — Distribution larger bets (when ready)
 
 - [ ] **P3 — MSIX packaging + Microsoft Store** — free signing, Windows Share Target contract, auto-update via Store
 - [ ] **P3 — macOS notarization** (Apple Developer $99/yr) — when distribution scale justifies
@@ -108,7 +119,7 @@ Carried forward across every research cycle:
 
 - Collaboration / real-time co-edit — single-user only
 - Cloud sync server (Keepr-hosted) — BYO-cloud-folder only
-- AI features / RAG / autocomplete / Gemini-style transcription
+- Cloud AI / RAG / autocomplete / Gemini-style transcription (anything that ships audio, text, or embeddings to a remote service). Local offline inference (e.g. whisper.cpp for voice notes) is in-bounds — same offline-first / no-account / no-telemetry rules as the rest of Keepr.
 - Account / sign-in
 - Telemetry
 - Folders / hierarchy (labels-only is Keep identity; nested tags also rejected)
