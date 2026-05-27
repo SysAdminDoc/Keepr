@@ -6,6 +6,22 @@ All notable changes to Keepr are documented here. Format loosely follows [Keep a
 
 (See [ROADMAP.md](ROADMAP.md) for the live task list.)
 
+## [0.22.8] — 2026-05-26 — "WAV encoder + HTTP Range support"
+
+### Changed
+
+- **Voice notes now record directly to PCM WAV** (16-bit mono at the AudioContext's native sample rate, typically 48 kHz). Replaces the MediaRecorder → WebM/Opus pipeline that shipped through v0.22.7. WebM from MediaRecorder writes its EBML header with `Duration = Infinity` because the recorder doesn't know the recording length up front; even with the trailing element written on stop, Chrome's `<audio src=>` direct-load pipeline refuses to play it back because it can't determine the playable range. WAV's 44-byte header carries an explicit sample count, so duration is known from the first byte and playback works in every browser and standalone media player.
+- File-size trade-off: ~96 KB/s at 48 kHz mono 16-bit, so a 1-minute voice note is ~5.5 MB. Acceptable for personal notes; tiny next to a typical attachment-bearing note. Also exactly the format whisper.cpp wants for the v0.23.0 transcription work, so no switching cost later.
+- **Capture stack**: `MediaStreamSource → AnalyserNode` (powers the level meter) `+ ScriptProcessorNode` (captures Float32 PCM into a sample buffer). On stop, samples are flattened and encoded inline via a 50-line WAV writer (no extra dependency).
+
+### Added
+
+- **HTTP Range request support** in the `keepr-resource://` protocol handler (`src-tauri/src/lib.rs`). Browsers issue `Range: bytes=...` requests for `<audio>` / `<video>` elements to probe duration and enable seek; without proper 206 Partial Content responses, Chromium often refuses to start media playback even when the file is well-formed. The handler now parses single-range specs (full, open-ended, suffix), returns 206 with `Content-Range` + `Content-Length`, falls back to a 200 for malformed range headers, and tags every response with `Accept-Ranges: bytes` so the browser knows seek is supported. 10 new unit tests for `parse_byte_range`.
+
+### Notes
+
+ScriptProcessorNode is deprecated in favor of AudioWorklet, but is still present in every Chromium build (including WebView2). Migration to AudioWorklet would require a separate worklet module file served from a known URL — punted for a future polish pass since the current approach is reliable.
+
 ## [0.22.7] — 2026-05-26 — "Live mic-level meter + chunk flush"
 
 ### Added
