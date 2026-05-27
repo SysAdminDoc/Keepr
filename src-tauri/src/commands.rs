@@ -2123,6 +2123,110 @@ pub fn add_image_attachment_bytes(
     })
 }
 
+/// v0.20.3 — audio voice note attachment. The bytes come from a
+/// MediaRecorder blob in the renderer (webm/opus or mp4/m4a depending
+/// on platform). We bypass `add_image_attachment` because that one
+/// runs the bytes through the `image` crate for thumbnail generation,
+/// which would fail on audio. Audio attachments don't get thumbnails;
+/// the renderer shows an `<audio controls>` element instead.
+#[tauri::command]
+pub fn add_audio_attachment_bytes(
+    state: State<'_, AppState>,
+    note_id: String,
+    bytes: Vec<u8>,
+    mime: String,
+    filename_hint: Option<String>,
+) -> Result<Attachment, String> {
+    if state.importing.load(std::sync::atomic::Ordering::SeqCst) {
+        return Err("a restore is currently in progress".into());
+    }
+    if bytes.len() as u64 > MAX_ATTACHMENT_BYTES {
+        return Err(format!(
+            "audio exceeds {} bytes (got {})",
+            MAX_ATTACHMENT_BYTES,
+            bytes.len()
+        ));
+    }
+    let ext = match mime.as_str() {
+        "audio/webm" => "webm",
+        "audio/ogg" => "ogg",
+        "audio/mp4" => "m4a",
+        "audio/mpeg" => "mp3",
+        "audio/wav" => "wav",
+        _ => return Err(format!("unsupported audio mime: {mime}")),
+    };
+    let new_id = Uuid::new_v4().to_string();
+    let stored_name = format!("{new_id}.{ext}");
+    let resources_dir = state.data_dir.join(RESOURCES_DIR);
+    std::fs::create_dir_all(&resources_dir).map_err(err)?;
+    let dest = resources_dir.join(&stored_name);
+    let original_name = filename_hint.unwrap_or_else(|| format!("voice-note.{ext}"));
+
+    let mut conn = state.db.lock();
+    let now = now_iso();
+    let position: i64 = {
+        let tx = conn.transaction().map_err(err)?;
+        let exists: i64 = tx
+            .query_row(
+                "SELECT COUNT(*) FROM notes WHERE id = ?1",
+                params![note_id],
+                |r| r.get(0),
+            )
+            .map_err(err)?;
+        if exists == 0 {
+            return Err(format!("note {note_id} not found"));
+        }
+        let pos: i64 = tx
+            .query_row(
+                "SELECT COALESCE(MAX(position) + 1, 0) FROM attachments WHERE note_id = ?1",
+                params![note_id],
+                |r| r.get(0),
+            )
+            .map_err(err)?;
+        tx.execute(
+            "INSERT INTO attachments (id, note_id, kind, mime, filename, byte_size, position, created_at)
+             VALUES (?1, ?2, 'audio', ?3, ?4, ?5, ?6, ?7)",
+            params![
+                new_id,
+                note_id,
+                mime,
+                original_name,
+                bytes.len() as i64,
+                pos,
+                now,
+            ],
+        )
+        .map_err(err)?;
+        tx.execute(
+            "UPDATE notes SET updated_at = ?1 WHERE id = ?2",
+            params![now, note_id],
+        )
+        .map_err(err)?;
+        tx.commit().map_err(err)?;
+        pos
+    };
+    drop(conn);
+
+    if let Err(write_err) = std::fs::write(&dest, &bytes) {
+        let conn = state.db.lock();
+        let _ = conn.execute("DELETE FROM attachments WHERE id = ?1", params![new_id]);
+        return Err(format!("could not write audio blob: {write_err}"));
+    }
+
+    Ok(Attachment {
+        id: new_id,
+        note_id,
+        kind: "audio".into(),
+        mime,
+        filename: original_name,
+        byte_size: bytes.len() as i64,
+        width: None,
+        height: None,
+        position,
+        created_at: now,
+    })
+}
+
 #[tauri::command]
 pub fn delete_attachment(state: State<'_, AppState>, id: String) -> Result<(), String> {
     if state.importing.load(std::sync::atomic::Ordering::SeqCst) {
@@ -2143,6 +2247,11 @@ pub fn delete_attachment(state: State<'_, AppState>, id: String) -> Result<(), S
                     "image/gif" => "gif",
                     "image/webp" => "webp",
                     "image/svg+xml" => "svg",
+                    "audio/webm" => "webm",
+                    "audio/ogg" => "ogg",
+                    "audio/mp4" => "m4a",
+                    "audio/mpeg" => "mp3",
+                    "audio/wav" => "wav",
                     _ => "bin",
                 };
                 Ok((note_id, ext.to_string()))

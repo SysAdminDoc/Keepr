@@ -15,6 +15,7 @@ import {
   AlignLeft,
   Copy,
   Image as ImageIcon,
+  Mic,
   Bell,
   Lock,
   Unlock,
@@ -41,6 +42,9 @@ const ReminderPicker = lazy(() =>
 );
 const HistoryDrawer = lazy(() =>
   import("./HistoryDrawer").then((m) => ({ default: m.HistoryDrawer })),
+);
+const VoiceRecorderModal = lazy(() =>
+  import("./VoiceRecorderModal").then((m) => ({ default: m.VoiceRecorderModal })),
 );
 import type {
   BackgroundPatternKey,
@@ -170,6 +174,7 @@ export function NoteEditor() {
   // attachments on open and append optimistically on add.
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [reminderPickerOpen, setReminderPickerOpen] = useState(false);
+  const [voiceRecorderOpen, setVoiceRecorderOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   // EI-V0.5-15 — kebab "More" overflow menu. Absorbs the lower-priority
   // actions (Make a copy, Move to vault, Version history) so the
@@ -926,6 +931,17 @@ export function NoteEditor() {
             <ImageIcon size={18} aria-hidden />
           </IconBtn>
           <IconBtn
+            ariaLabel="Record voice note"
+            onClick={async () => {
+              // Ensure the note exists on the Rust side first so we
+              // have a noteId for the audio attachment (mirrors addImage).
+              const id = await ensureExistingId();
+              if (id) setVoiceRecorderOpen(true);
+            }}
+          >
+            <Mic size={18} aria-hidden />
+          </IconBtn>
+          <IconBtn
             ariaLabel="Background options"
             onClick={() => setColorOpen((v) => !v)}
             pressed={colorOpen}
@@ -1113,6 +1129,31 @@ export function NoteEditor() {
             onSnooze={snoozeReminderForNote}
             onClear={clearReminderForNote}
             onClose={() => setReminderPickerOpen(false)}
+          />
+        </Suspense>
+      )}
+
+      {voiceRecorderOpen && existing && (
+        <Suspense fallback={null}>
+          <VoiceRecorderModal
+            open={voiceRecorderOpen}
+            onClose={() => setVoiceRecorderOpen(false)}
+            onSave={async (bytes, mime) => {
+              try {
+                const att = await api.addAudioAttachmentBytes(
+                  existing.id,
+                  Array.from(bytes),
+                  mime,
+                );
+                setAttachments((prev) => [...prev, att]);
+                patchNote(existing.id, {
+                  attachments: [...attachments, att],
+                  updated_at: new Date().toISOString(),
+                });
+              } catch (e) {
+                showToast("Could not save voice note: " + String(e));
+              }
+            }}
           />
         </Suspense>
       )}
