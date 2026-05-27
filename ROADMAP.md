@@ -39,8 +39,8 @@
 - [x] **P1 — Auto-backup rotation** *(v0.21.0 — shipped, partial)*
   - Rotation shipped: after each successful auto-backup, `prune_auto_backups` deletes everything older than the latest N (default 12, configurable in Settings 0–365; 0 = unlimited). 4 new tests for the prune helper.
   - **Deferred**: moving the poll loop from renderer to Rust background thread. Renderer poll works today; migration cost > marginal reliability win. Revisit if field reports surface missed backups.
-- [ ] **P1 — Vault recovery seed (BIP39 12-word, opt-in)** *(v0.21.1)*
-  - Schema v12: `vault_dek_seed_wrapped`. Vault init shows seed once if opt-in checked. Recovery flow: enter seed → unlock → set new passphrase. Make explicit that opting in trades the absolute "no recovery" guarantee for a recoverable seed.
+- [x] **P1 — Vault recovery seed (BIP39 12-word, opt-in)** *(v0.21.1 — shipped)*
+  - No schema migration needed (app_settings is k/v; 3 new keys for the seed envelope). Set up via Settings → Vault → "Set up recovery seed…" when unlocked. Recovery flow on locked vault: "Forgot password? Recover with seed phrase…". 3 new Rust round-trip tests. Explicitly opt-in — preserves the "no recovery" guarantee for users who don't enable it. Settings → Vault microcopy made explicit about the trade-off.
 - [ ] **P1 — Content-addressed attachment storage + orphan sweep** *(v0.21.2)*
   - Hash bytes (BLAKE3), store at `<data_dir>/resources/ab/cd/<hash>.<ext>`. Daily sweep in same thread as auto-backup moves zero-ref blobs >24h old to `.trash/`; auto-purge .trash >30d. Migration: existing UUID-named files keep working; new attachments use hashed layout.
 
@@ -63,7 +63,7 @@
 - [ ] **P2 — First-run sample notes** *(v0.22.5)*
 - [ ] **P2 — Audit `IconBtn` `aria-label` coverage** *(v0.22.6)*
 - [ ] **P2 — `role="list"` + `role="listitem"` on note grid** *(part of v0.22.6)*
-- [ ] **P2 — Settings → Vault first-run microcopy** *(part of v0.21.1)*
+- [x] **P2 — Settings → Vault first-run microcopy** *(part of v0.21.1 — addressed)*
 - [ ] **P3 — Default `trashRetentionDays` to 30 if currently 0** *(v0.22.7)*
 - [ ] **P2 — Verify pinned stable-grid empty-row behavior; fix if broken** *(v0.22.8)*
 - [ ] **P2 — `commands.rs` split (3866 lines monolith)** *(v0.22.9)*
