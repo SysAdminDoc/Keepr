@@ -14,9 +14,9 @@
   - Extend `.github/workflows/ci.yml` from `windows-latest` only to also run `macos-14` + `ubuntu-22.04`. Add the Linux build-dep apt-install step from release.yml. Same four steps everywhere (cargo check + test, npm lint + test + build).
 - [ ] **P0 — Azure Trusted Signing for Windows builds** *(BLOCKED — needs paid subscription)*
   - Subscribe to Azure Trusted Signing ($9.99/mo basic). Add sign step to release.yml. Update SECURITY.md.
-- [ ] **P0 — `tauri-plugin-updater` scaffolding (Ed25519-signed manifest)** *(v0.19.1)*
+- [ ] **P0 — `tauri-plugin-updater` scaffolding (Ed25519-signed manifest)** *(BLOCKED — needs signing-key decision; same gate as Azure Trusted Signing)*
   - Add plugin + generate keypair (private in GH Actions secret, public in `tauri.conf.json`). Workflow updates `latest.json` at fixed Releases URL after each tag. App checks at startup + once/week. Settings toggle to disable.
-- [ ] **P1 — Window state persistence** *(v0.19.2)*
+- [x] **P1 — Window state persistence** *(v0.19.2 — shipped)*
   - `tauri-plugin-window-state`. Two-line plugin init.
 - [ ] **P1 — "Open log folder" button** *(v0.19.3)*
   - Add to Settings → Log folder row. New `tauri-plugin-opener`. Permission-gated to data/log dirs only.
