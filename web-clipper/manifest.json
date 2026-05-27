@@ -1,0 +1,41 @@
+{
+  "manifest_version": 3,
+  "name": "Keepr Web Clipper",
+  "short_name": "Keepr Clipper",
+  "version": "0.1.0",
+  "description": "Save the current page or selection to your local Keepr database. Offline-only — talks to http://127.0.0.1 with a bearer token from Keepr's Settings.",
+  "permissions": ["activeTab", "scripting", "storage"],
+  "host_permissions": ["http://127.0.0.1/*"],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Save to Keepr",
+    "default_icon": {
+      "16": "icons/16.png",
+      "32": "icons/32.png",
+      "48": "icons/48.png",
+      "128": "icons/128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/16.png",
+    "32": "icons/32.png",
+    "48": "icons/48.png",
+    "128": "icons/128.png"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'"
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "keepr-clipper@sysadmindoc",
+      "strict_min_version": "115.0"
+    }
+  }
+}

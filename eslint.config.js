@@ -18,6 +18,13 @@ export default [
       "tsconfig.tsbuildinfo",
       "tsconfig.node.tsbuildinfo",
       "*.tsbuildinfo",
+      // v0.24.0 — the browser-extension code under `web-clipper/` runs
+      // inside Chrome/Edge/Firefox, not Node and not our Vite renderer.
+      // It uses its own globals (chrome, browser, fetch, window) that
+      // this config doesn't surface. The extension code is small + flat
+      // enough that linting it under a browser env wouldn't catch
+      // anything our manual review didn't.
+      "web-clipper/**",
     ],
   },
   js.configs.recommended,

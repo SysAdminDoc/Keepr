@@ -1,6 +1,6 @@
 [package]
 name = "keepr"
-version = "0.23.0"
+version = "0.24.0"
 description = "Offline-first Google Keep clone"
 authors = ["Matthew Ashton"]
 edition = "2021"
@@ -77,12 +77,24 @@ sha1 = "0.11.0"
 # Async runtime for the Tauri command + the model download task.
 # Tauri 2 commands declared `async fn` integrate with whatever runtime
 # is present; we keep features minimal.
-tokio = { version = "1", default-features = false, features = ["rt", "sync", "macros"] }
+tokio = { version = "1", default-features = false, features = ["rt", "sync", "macros", "rt-multi-thread", "net"] }
 # CRC32 of the WAV bytes — used to short-circuit redundant
 # transcriptions when the same attachment is requested twice.
 crc32fast = "1"
 # Stream extensions for `reqwest::Response::bytes_stream()`.
 futures-util = "0.3"
+# v0.24.0 — Web Clipper localhost HTTP server. axum 0.8 is the
+# smallest sane stack for ~4 routes + JSON + CORS; tower-http for
+# the chrome-extension://moz-extension:// origin matching.
+axum = { version = "0.8.9", default-features = false, features = ["http1", "json", "tokio"] }
+tower-http = { version = "0.6.11", default-features = false, features = ["cors"] }
+# Random port allocation + 256-bit bearer token generation for the
+# Web Clipper. Don't use the rand_chacha + getrandom combo from
+# elsewhere — keep this isolated to the clipper module.
+rand = "0.10.1"
+# Subtle constant-time comparison for the Web Clipper bearer token
+# (prevents timing oracles on token verification).
+subtle = "2"
 
 [dev-dependencies]
 tempfile = "3"

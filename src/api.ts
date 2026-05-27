@@ -141,4 +141,9 @@ export const api = {
     invoke<TranscriptRecord | null>("get_transcript", { attachmentId }),
   transcribeAudioAttachment: (attachmentId: string) =>
     invoke<string>("transcribe_audio_attachment", { attachmentId }),
+  // v0.24.0 — Web Clipper localhost server info.
+  getWebClipperInfo: () =>
+    invoke<{ port: number | null; token: string | null }>("get_web_clipper_info"),
+  regenerateWebClipperToken: () =>
+    invoke<string>("regenerate_web_clipper_token"),
 };

@@ -6,6 +6,37 @@ All notable changes to Keepr are documented here. Format loosely follows [Keep a
 
 (See [ROADMAP.md](ROADMAP.md) for the live task list.)
 
+## [0.24.0] — 2026-05-27 — "Web Clipper (browser extension + localhost server)"
+
+Save what you're reading straight into Keepr from your browser. Localhost-only — no internet roundtrip.
+
+### Added
+
+- **Localhost HTTP server inside Keepr** (`src-tauri/src/web_clipper.rs`) using `axum 0.8` on a tokio multi-thread runtime, bound to `127.0.0.1:0` so the OS picks a random port at every startup. Routes: `GET /health` (no auth), `POST /clip`, `POST /clip/url`, `POST /clip/selection` (bearer-token gated). 4 MiB body cap. CORS limited to `chrome-extension://`, `moz-extension://`, and `http://127.0.0.1:*`.
+- **Per-install 256-bit bearer token** persisted in `app_settings`. Generated on first launch via `getrandom`; constant-time-compared with `subtle::ConstantTimeEq` to defeat token-timing oracles. User can regenerate from Settings → Web Clipper, which invalidates previously-paired extensions.
+- **Settings → Web Clipper section** (`src/components/WebClipperSection.tsx`) shows the port + token with one-click copy buttons + a "Regenerate token" action. Explains the manual-paste threat model in-line.
+- **MV3 browser extension** under `web-clipper/`: `manifest.json` (Chrome/Edge/Firefox compatible via `browser_specific_settings`), `background.js` service worker, `popup.{html,js}` toolbar UI, `options.{html,js}` for token paste + Test Connection, `icons/`, `README.md`. `activeTab` + `scripting` permissions only — no `<all_urls>` install warning. `host_permissions: ["http://127.0.0.1/*"]` only. Bundled CSP `script-src 'self'; object-src 'self'`.
+- **2 new Tauri commands**: `get_web_clipper_info`, `regenerate_web_clipper_token`.
+- **10 new Rust unit tests** for the web_clipper module: token generation, regeneration, idempotency, payload-to-note insertion, body truncation at 64 KiB, auth header parsing (missing / wrong / case-insensitive Bearer / non-Bearer scheme).
+
+### Design
+
+- **Manual token paste, no auto-discovery.** Auto-discovery (mDNS, well-known-port probe) is exploitable by any local process. 15 seconds of copy-paste eliminates the entire attack surface. Token is 64-hex-char (256 bits) — copy buttons in Settings + Options page make the friction trivial.
+- **No internet binding ever.** `axum::serve` is given a `TcpListener` bound to `127.0.0.1:0` explicitly. The server never reaches out.
+- **No port file in a well-known path.** Threat model: malware reading `%APPDATA%\Keepr\port.txt` would defeat manual-paste auth. Both port + token live in the SQLite `app_settings` table; renderer reads via IPC.
+- **Manifest V3 for both Chrome and Firefox** via `browser_specific_settings.gecko`. The `chrome` / `browser` API split is bridged with `const api = globalThis.browser ?? globalThis.chrome;` at the top of every script.
+- **Excerpt-based clipping for v0.1.** Full page = `<article> ?? <main> ?? <body>` `innerText` truncated to 4 KiB + meta description. No bundled Readability.js yet — works fine for "save the URL and a summary" which is what most clips are. Selection mode just sends the current selection text. The Settings UI hard-caps the note body at the existing 64 KiB limit (matching `validate_note_input`) and appends a truncation marker if exceeded.
+
+### Build impact
+
+- 8 new Rust deps: `axum 0.8` (default-features off, http1 + json + tokio), `tower-http 0.6` (cors only), `rand 0.10`, `subtle 2`. Tokio features broadened to `rt-multi-thread + net` (was `rt + sync + macros` for whisper).
+- Installer size: ~5.0 MB (was 4.7 MB in v0.23.0). axum + tower-http add ~300 KB statically.
+- 88 cargo tests + 128 vitest tests, all green.
+
+### Notes
+
+The extension is shipped here as `web-clipper/` source (load unpacked / temporary add-on for now). Chrome Web Store + Firefox AMO packaging is a follow-up that needs a self-signed CRX3 + signed XPI pipeline.
+
 ## [0.23.0] — 2026-05-27 — "Offline speech transcription (whisper.cpp)"
 
 The feature promised through the v0.22.5–v0.22.9 voice-notes saga: tap Transcribe on any voice note and get the text right there, fully offline. Same engine [Vibe](https://github.com/thewh1teagle/vibe) uses (whisper.cpp).

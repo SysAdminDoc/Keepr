@@ -40,10 +40,13 @@
 - [x] **P2 — `role="list"` + `role="listitem"` on note grid** *(v0.22.11 — shipped)*
   - All three NoteGrid layouts (masonry, stable-grid, list) now expose proper list semantics with an optional `ariaLabel` prop. Stable-grid placeholders stay `aria-hidden`. Visual layout unchanged.
 
-## Open: Larger bets (v0.24.x and later)
+## Shipped: Web Clipper (v0.24.0)
 
-- [ ] **P1 — Web Clipper (browser extension + Tauri localhost server)** *(v0.24.0 — LARGER BET)*
-  - Rust localhost HTTP server on randomized port; per-install bearer token; MV3 extension at `web-clipper/`. Endpoints `/clip` `/clip/markdown` `/clip/selection` `/clip/screenshot` `/clip/url`. Bundled Readability.js + Turndown.js inside extension (no CDN). Tested on Firefox + Chrome + Edge.
+- [x] **P1 — Web Clipper (browser extension + Tauri localhost server)** *(v0.24.0 — shipped 2026-05-27)*
+  - axum-based localhost HTTP server on `127.0.0.1:0` (random port at startup), 256-bit per-install bearer token (constant-time-compared), CORS limited to chrome-extension://, moz-extension://, and 127.0.0.1. MV3 extension under `web-clipper/` with `activeTab + scripting` permission only (no `<all_urls>` warning). Settings → Web Clipper section displays the connection info for the user to paste into the extension's Options page. Routes: `/health`, `/clip`, `/clip/url`, `/clip/selection`.
+  - **Follow-ups (v0.24.1+):** bundle Readability.js + Turndown.js for proper article-mode markdown extraction; package + sign the extension for Chrome Web Store / Firefox AMO; right-click context-menu items; screenshot-clip via tabCapture.
+
+## Open: Larger bets (v0.25.x and later)
 - [ ] **P3 — MSIX packaging + Microsoft Store** — free signing, Windows Share Target contract, auto-update via Store.
 - [ ] **P3 — macOS notarization** (Apple Developer $99/yr) — when distribution scale justifies.
 - [ ] **P3 — `--data-dir <path>` CLI flag** for non-portable explicit relocation.

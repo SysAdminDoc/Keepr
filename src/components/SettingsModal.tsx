@@ -14,6 +14,7 @@ import { ConfirmDialog } from "./ConfirmDialog";
 import { AppLockSection } from "./AppLockSection";
 import { VaultSection } from "./VaultSection";
 import { VoiceTranscriptionSection } from "./VoiceTranscriptionSection";
+import { WebClipperSection } from "./WebClipperSection";
 
 export function SettingsModal() {
   const settingsOpen = useStore((s) => s.settingsOpen);
@@ -445,6 +446,8 @@ export function SettingsModal() {
             <VaultSection />
 
             <VoiceTranscriptionSection />
+
+            <WebClipperSection />
 
             <div>
               <div className="font-medium">Backup / Restore</div>

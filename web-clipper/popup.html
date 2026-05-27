@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Save to Keepr</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --bg: #fff;
+        --fg: #202124;
+        --muted: #5f6368;
+        --accent: #1a73e8;
+        --accent-hover: #1557b0;
+        --border: #dadce0;
+        --row: #f5f6f7;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #202124;
+          --fg: #e8eaed;
+          --muted: #9aa0a6;
+          --border: #5f6368;
+          --row: #2d2e30;
+        }
+      }
+      html, body {
+        margin: 0;
+        padding: 0;
+        background: var(--bg);
+        color: var(--fg);
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        width: 280px;
+        font-size: 13px;
+      }
+      .wrap { padding: 12px; }
+      h1 {
+        margin: 0 0 8px 0;
+        font-size: 13px;
+        font-weight: 600;
+      }
+      .status {
+        margin-bottom: 10px;
+        padding: 6px 8px;
+        font-size: 12px;
+        border-radius: 4px;
+        background: var(--row);
+        color: var(--muted);
+      }
+      .status.ok { color: #137333; }
+      .status.err { color: #d93025; }
+      button {
+        display: block;
+        width: 100%;
+        margin: 6px 0;
+        padding: 8px;
+        font: inherit;
+        background: var(--accent);
+        color: white;
+        border: 0;
+        border-radius: 4px;
+        cursor: pointer;
+      }
+      button:hover { background: var(--accent-hover); }
+      button.secondary {
+        background: transparent;
+        color: var(--fg);
+        border: 1px solid var(--border);
+      }
+      button:disabled { opacity: 0.5; cursor: not-allowed; }
+      a {
+        display: block;
+        margin-top: 10px;
+        font-size: 11px;
+        color: var(--muted);
+        text-align: center;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <h1>Save to Keepr</h1>
+      <div id="status" class="status">Checking connection…</div>
+      <button id="clip-page" disabled>Save full page</button>
+      <button id="clip-selection" disabled>Save selection</button>
+      <button id="clip-url" class="secondary" disabled>Save URL only</button>
+      <a href="options.html" target="_blank">Options</a>
+    </div>
+    <script src="popup.js"></script>
+  </body>
+</html>

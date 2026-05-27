@@ -7,6 +7,7 @@ mod lock;
 // exposed beyond what was already accessible to commands.rs.
 pub mod vault;
 pub mod transcribe;
+pub mod web_clipper;
 
 use parking_lot::Mutex;
 use std::path::{Path, PathBuf};
@@ -58,6 +59,12 @@ pub struct AppState {
     /// thread checks this flag at the top of every iteration AND wakes
     /// from sleep early via a parking pair (see `run()` below).
     pub shutdown: Arc<AtomicBool>,
+    /// v0.24.0 — runtime metadata for the Web Clipper localhost server
+    /// (port + bearer token). `None` until the server has bound on
+    /// startup. Exposed to the renderer via `get_web_clipper_info` so
+    /// Settings → Web Clipper can display the connection info the
+    /// user needs to paste into their browser extension.
+    pub web_clipper: web_clipper::WebClipperState,
 }
 
 /// Subdirectory under the data dir where the `keepr-resource://` protocol
@@ -374,12 +381,47 @@ pub fn run() {
                     return Err(format!("failed to open db: {e}").into());
                 }
             };
+            let db_arc = Arc::new(Mutex::new(conn));
+            let web_clipper_info: web_clipper::WebClipperState =
+                Arc::new(Mutex::new(web_clipper::WebClipperInfo::default()));
+
+            // v0.24.0 — spin up the Web Clipper localhost server. Binds
+            // 127.0.0.1:0 (OS picks the port); persists port + token
+            // into app_settings. We tokio::spawn the bind itself onto
+            // a dedicated runtime so we don't block app init if a
+            // network namespace quirk delays bind.
+            let db_for_clipper = db_arc.clone();
+            let info_for_clipper = web_clipper_info.clone();
+            std::thread::spawn(move || {
+                let rt = match tokio::runtime::Builder::new_multi_thread()
+                    .worker_threads(1)
+                    .enable_all()
+                    .build()
+                {
+                    Ok(r) => r,
+                    Err(e) => {
+                        log::error!("web_clipper: could not build tokio runtime: {e}");
+                        return;
+                    }
+                };
+                rt.block_on(async move {
+                    match web_clipper::start_server(db_for_clipper, info_for_clipper).await {
+                        Ok(port) => log::info!("web_clipper: ready on 127.0.0.1:{port}"),
+                        Err(e) => log::error!("web_clipper: start failed: {e}"),
+                    }
+                    // Keep the runtime alive so the spawned server task
+                    // keeps running for the lifetime of the app.
+                    std::future::pending::<()>().await;
+                });
+            });
+
             app.manage(AppState {
-                db: Arc::new(Mutex::new(conn)),
+                db: db_arc,
                 importing: Arc::new(AtomicBool::new(false)),
                 data_dir,
                 vault_dek: Arc::new(Mutex::new(None)),
                 shutdown: Arc::new(AtomicBool::new(false)),
+                web_clipper: web_clipper_info,
             });
 
             // NF-06 — tray icon + menu. "Show / Hide Keepr" toggles the
@@ -588,6 +630,9 @@ pub fn run() {
             commands::delete_speech_model,
             commands::get_transcript,
             commands::transcribe_audio_attachment,
+            // v0.24.0 — Web Clipper (localhost server + MV3 extension).
+            commands::get_web_clipper_info,
+            commands::regenerate_web_clipper_token,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
