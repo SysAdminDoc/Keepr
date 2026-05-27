@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Keepr Web Clipper — Options</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --bg: #fff;
+        --fg: #202124;
+        --muted: #5f6368;
+        --accent: #1a73e8;
+        --accent-hover: #1557b0;
+        --border: #dadce0;
+        --row: #f5f6f7;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #202124;
+          --fg: #e8eaed;
+          --muted: #9aa0a6;
+          --border: #5f6368;
+          --row: #2d2e30;
+        }
+      }
+      html, body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--fg);
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      }
+      .wrap { max-width: 640px; margin: 32px auto; padding: 0 24px; }
+      h1 { font-size: 18px; margin: 0 0 16px 0; }
+      p { color: var(--muted); line-height: 1.5; }
+      label { display: block; margin: 16px 0 4px 0; font-size: 13px; font-weight: 500; }
+      input {
+        width: 100%;
+        padding: 8px 10px;
+        font: inherit;
+        font-family: ui-monospace, Menlo, Consolas, monospace;
+        background: var(--row);
+        color: var(--fg);
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        box-sizing: border-box;
+      }
+      button {
+        margin-top: 16px;
+        padding: 8px 14px;
+        font: inherit;
+        background: var(--accent);
+        color: white;
+        border: 0;
+        border-radius: 4px;
+        cursor: pointer;
+      }
+      button:hover { background: var(--accent-hover); }
+      #status {
+        margin-top: 12px;
+        padding: 8px 10px;
+        border-radius: 4px;
+        background: var(--row);
+        min-height: 1em;
+        font-size: 13px;
+      }
+      #status.ok { color: #137333; }
+      #status.err { color: #d93025; }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <h1>Keepr Web Clipper — Options</h1>
+      <p>
+        Open Keepr → Settings → Web Clipper. Copy the <strong>Port</strong>
+        and <strong>Bearer token</strong> displayed there, paste them
+        below, and click Save. Both values stay on this device — the
+        extension only talks to <code>http://127.0.0.1</code>.
+      </p>
+      <label for="port">Port</label>
+      <input id="port" type="text" inputmode="numeric" placeholder="e.g. 52341" />
+      <label for="token">Bearer token (64 hex characters)</label>
+      <input id="token" type="text" placeholder="paste from Keepr" />
+      <button id="save">Save</button>
+      <button id="test" style="background: transparent; color: var(--fg); border: 1px solid var(--border); margin-left: 8px;">
+        Test connection
+      </button>
+      <div id="status"></div>
+    </div>
+    <script src="options.js"></script>
+  </body>
+</html>

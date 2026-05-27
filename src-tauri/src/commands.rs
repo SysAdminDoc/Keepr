@@ -3925,6 +3925,45 @@ fn do_import_zip(state: &State<'_, AppState>, src: &str) -> Result<(), String> {
 }
 
 // ---------------------------------------------------------------------------
+// v0.24.0 — Web Clipper (localhost HTTP server + MV3 extension)
+// ---------------------------------------------------------------------------
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WebClipperInfoOut {
+    /// Localhost port the server is bound on. `None` if startup hasn't
+    /// completed yet (rare — startup is sub-second).
+    pub port: Option<u16>,
+    /// 64-char hex bearer token. Persisted per install.
+    pub token: Option<String>,
+}
+
+/// Return the current Web Clipper port + bearer token so the user can
+/// paste them into the browser extension's Options page.
+#[tauri::command]
+pub fn get_web_clipper_info(state: State<'_, AppState>) -> Result<WebClipperInfoOut, String> {
+    let info = state.web_clipper.lock().clone();
+    Ok(WebClipperInfoOut {
+        port: info.port,
+        token: info.token,
+    })
+}
+
+/// Generate a fresh 256-bit bearer token. Invalidates any previously
+/// paired extensions — user must re-paste the new token.
+#[tauri::command]
+pub fn regenerate_web_clipper_token(state: State<'_, AppState>) -> Result<String, String> {
+    let new_token = {
+        let conn = state.db.lock();
+        crate::web_clipper::regenerate_token(&conn)?
+    };
+    let mut guard = state.web_clipper.lock();
+    guard.token = Some(new_token.clone());
+    log::info!("web_clipper: bearer token regenerated");
+    Ok(new_token)
+}
+
+// ---------------------------------------------------------------------------
 // v0.23.0 — offline speech transcription via whisper.cpp
 // ---------------------------------------------------------------------------
 
@@ -4413,6 +4452,7 @@ mod tests {
             data_dir,
             vault_dek: Arc::new(Mutex::new(None)),
             shutdown: Arc::new(AtomicBool::new(false)),
+            web_clipper: Arc::new(Mutex::new(crate::web_clipper::WebClipperInfo::default())),
         }
     }
 
