@@ -100,6 +100,8 @@ export const api = {
       mime,
       filenameHint,
     }),
+  pruneAutoBackups: (folder: string, keep: number) =>
+    invoke<number>("prune_auto_backups", { folder, keep }),
   listSnapshots: (noteId: string) =>
     invoke<NoteSnapshot[]>("list_snapshots", { noteId }),
   restoreSnapshot: (snapshotId: string) =>

@@ -6,6 +6,27 @@ All notable changes to Keepr are documented here. Format loosely follows [Keep a
 
 (See [ROADMAP.md](ROADMAP.md) for the live task list.)
 
+## [0.21.0] — 2026-05-26 — "Auto-backup rotation"
+
+### Added
+
+- **Auto-backup folder now self-cleans.** After each successful auto-backup write, Keepr lists `keepr-autobackup-*.zip` files in the configured folder, sorts them by their embedded ISO timestamp (lexical = chronological), and deletes everything older than the latest N. Default N = 12; configurable in Settings as a number input (0 = unlimited, no pruning). Other files in the same folder are never touched — only files matching the `keepr-autobackup-` prefix.
+- **`prune_auto_backups(folder, keep)` Tauri command.** Returns the count deleted. Folder must be a directory; non-directory input rejected. Pure filesystem op — doesn't touch the DB.
+- **`backupsToPrune(filenames, keep)` pure helper** in `src/lib/autoBackup.ts`, exported for testing.
+- **4 new vitest cases** covering: nothing-to-prune, oldest-first pruning, ignores non-matching prefixes, keep=0 = disable.
+
+### Added (UI)
+
+- **Settings → auto-backup row gets a "Keep latest N" control** when cadence is daily or weekly. Number input, 0–365 range, default 12. Persisted to localStorage (`keepr:autobackup-retention`).
+
+### Already shipped (not new in this release)
+
+- The "Last backup: <timestamp>" line in Settings has been present since v0.10-era — verified during this work; left as-is.
+
+### Deferred
+
+- **Moving the auto-backup poll from renderer to a Rust background thread** (originally part of this item) is intentionally deferred. The renderer poll has been running successfully for many releases; the migration cost (DB-backed settings, full state-sync, plus the renderer→Rust IPC for cadence/folder writes) is higher than the marginal reliability win. Revisit if we ever see field reports of missed backups due to renderer pruning.
+
 ## [0.20.3] — 2026-05-26 — "Voice notes"
 
 ### Added

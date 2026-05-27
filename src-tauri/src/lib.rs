@@ -442,6 +442,7 @@ pub fn run() {
             commands::move_notes_to_vault,
             commands::move_notes_out_of_vault,
             commands::add_audio_attachment_bytes,
+            commands::prune_auto_backups,
             commands::list_snapshots,
             commands::restore_snapshot,
             commands::export_reminders_ics,

@@ -36,8 +36,9 @@
 
 ## Phase C — Trust + recovery (v0.21.x)
 
-- [ ] **P1 — Auto-backup → Rust thread + rotation** *(v0.21.0)*
-  - Move `src/lib/autoBackup.ts` poll to Rust background thread (same AtomicBool shutdown pattern as reminder scheduler). Keep 7 daily + 4 weekly rotation. Configurable retention.
+- [x] **P1 — Auto-backup rotation** *(v0.21.0 — shipped, partial)*
+  - Rotation shipped: after each successful auto-backup, `prune_auto_backups` deletes everything older than the latest N (default 12, configurable in Settings 0–365; 0 = unlimited). 4 new tests for the prune helper.
+  - **Deferred**: moving the poll loop from renderer to Rust background thread. Renderer poll works today; migration cost > marginal reliability win. Revisit if field reports surface missed backups.
 - [ ] **P1 — Vault recovery seed (BIP39 12-word, opt-in)** *(v0.21.1)*
   - Schema v12: `vault_dek_seed_wrapped`. Vault init shows seed once if opt-in checked. Recovery flow: enter seed → unlock → set new passphrase. Make explicit that opting in trades the absolute "no recovery" guarantee for a recoverable seed.
 - [ ] **P1 — Content-addressed attachment storage + orphan sweep** *(v0.21.2)*

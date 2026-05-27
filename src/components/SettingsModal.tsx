@@ -26,6 +26,8 @@ export function SettingsModal() {
   const autoBackupCadence = useStore((s) => s.autoBackupCadence);
   const setAutoBackupCadence = useStore((s) => s.setAutoBackupCadence);
   const autoBackupFolder = useStore((s) => s.autoBackupFolder);
+  const autoBackupRetention = useStore((s) => s.autoBackupRetention);
+  const setAutoBackupRetention = useStore((s) => s.setAutoBackupRetention);
   const setAutoBackupFolder = useStore((s) => s.setAutoBackupFolder);
   const autoBackupLastAt = useStore((s) => s.autoBackupLastAt);
   const accentColor = useStore((s) => s.accentColor);
@@ -414,6 +416,25 @@ export function SettingsModal() {
               {autoBackupLastAt && (
                 <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
                   Last backup: {new Date(autoBackupLastAt).toLocaleString()}
+                </div>
+              )}
+              {autoBackupCadence !== "off" && (
+                <div className="mt-3 flex items-center gap-2 text-xs">
+                  <label htmlFor="autobackup-retention" className="text-gray-600 dark:text-gray-400">
+                    Keep latest
+                  </label>
+                  <input
+                    id="autobackup-retention"
+                    type="number"
+                    min={0}
+                    max={365}
+                    value={autoBackupRetention}
+                    onChange={(e) => setAutoBackupRetention(parseInt(e.target.value, 10) || 0)}
+                    className="w-16 text-right px-1 py-0.5 rounded border border-gray-300 dark:border-[#5f6368] bg-transparent"
+                  />
+                  <span className="text-gray-600 dark:text-gray-400">
+                    auto-backups in this folder (0 = unlimited; older ones are deleted)
+                  </span>
                 </div>
               )}
             </div>

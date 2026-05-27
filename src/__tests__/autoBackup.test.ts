@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { backupFilename, backupPath, cadenceMs, isBackupDue } from "../lib/autoBackup";
+import {
+  backupFilename,
+  backupPath,
+  backupsToPrune,
+  cadenceMs,
+  isBackupDue,
+} from "../lib/autoBackup";
 
 const HOUR = 60 * 60 * 1000;
 
@@ -62,5 +68,48 @@ describe("backupPath", () => {
     expect(backupPath("/some/folder", "file.zip")).toBe("/some/folder/file.zip");
     expect(backupPath("/some/folder/", "file.zip")).toBe("/some/folder/file.zip");
     expect(backupPath("C:\\backups\\", "file.zip")).toBe("C:\\backups/file.zip");
+  });
+});
+
+describe("backupsToPrune (v0.21.0)", () => {
+  it("returns empty when nothing to keep beyond limit", () => {
+    const files = [
+      "keepr-autobackup-2026-05-20T00-00-00.zip",
+      "keepr-autobackup-2026-05-21T00-00-00.zip",
+      "keepr-autobackup-2026-05-22T00-00-00.zip",
+    ];
+    expect(backupsToPrune(files, 5)).toEqual([]);
+  });
+
+  it("returns the oldest files when count exceeds keep", () => {
+    const files = [
+      "keepr-autobackup-2026-05-20T00-00-00.zip",
+      "keepr-autobackup-2026-05-21T00-00-00.zip",
+      "keepr-autobackup-2026-05-22T00-00-00.zip",
+      "keepr-autobackup-2026-05-23T00-00-00.zip",
+    ];
+    expect(backupsToPrune(files, 2)).toEqual([
+      "keepr-autobackup-2026-05-20T00-00-00.zip",
+      "keepr-autobackup-2026-05-21T00-00-00.zip",
+    ]);
+  });
+
+  it("ignores files not matching the keepr-autobackup prefix", () => {
+    const files = [
+      "keepr-autobackup-2026-05-20T00-00-00.zip",
+      "random.zip",
+      "keepr-backup-2026-05-22T00-00-00.zip", // missing "auto"
+      "keepr-autobackup-2026-05-23T00-00-00.zip",
+    ];
+    // Two ours, keep 1 → delete the older one.
+    expect(backupsToPrune(files, 1)).toEqual([
+      "keepr-autobackup-2026-05-20T00-00-00.zip",
+    ]);
+  });
+
+  it("keep=0 returns empty (disable pruning)", () => {
+    expect(
+      backupsToPrune(["keepr-autobackup-2026-05-20T00-00-00.zip"], 0),
+    ).toEqual([]);
   });
 });

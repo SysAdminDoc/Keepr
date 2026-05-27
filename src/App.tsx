@@ -165,6 +165,12 @@ export default function App() {
   // backup is due (cadence + folder + elapsed time) and run export_zip
   // into the configured folder. A single failure surfaces a toast; the
   // next tick retries.
+  //
+  // v0.21.0 — after a successful write, prune older auto-backups in the
+  // same folder to enforce the retention cap (default 12). Lexical sort
+  // of `keepr-autobackup-<ISO>.zip` filenames is equivalent to
+  // chronological order, so we keep the latest N regardless of cadence
+  // (daily and weekly both append to the same series).
   useEffect(() => {
     if (!loaded) return;
     const tick = async () => {
@@ -176,6 +182,12 @@ export default function App() {
         const dest = backupPath(s.autoBackupFolder!, backupFilename());
         await api.exportZip(dest);
         s.setAutoBackupLastAt(new Date().toISOString());
+        try {
+          await api.pruneAutoBackups(s.autoBackupFolder!, s.autoBackupRetention);
+        } catch (pruneErr) {
+          // Rotation failure shouldn't roll back a successful backup.
+          console.warn("auto-backup rotation failed:", pruneErr);
+        }
       } catch (e) {
         s.showToast("Auto-backup failed: " + String(e));
       }

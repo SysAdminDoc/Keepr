@@ -50,6 +50,10 @@ interface UIState {
   autoBackupFolder: string | null;
   /** ISO timestamp of the last auto-backup we wrote. */
   autoBackupLastAt: string | null;
+  /** v0.21.0 — how many auto-backup ZIPs to keep in the target folder.
+   *  Older ones are deleted after each successful write. 0 = unlimited
+   *  (no pruning). Default 12. */
+  autoBackupRetention: number;
   editorOpen: boolean;
   editorNoteId: string | null;
   settingsOpen: boolean;
@@ -95,6 +99,7 @@ interface UIState {
   setAutoBackupCadence: (c: AutoBackupCadence) => void;
   setAutoBackupFolder: (folder: string | null) => void;
   setAutoBackupLastAt: (iso: string | null) => void;
+  setAutoBackupRetention: (n: number) => void;
   /** Masonry-grid card width in px. Adjusted by Ctrl+Wheel over the
    *  notes area (scroll up zooms in / wider cards, scroll down zooms
    *  out / narrower cards). Persisted to localStorage. */
@@ -175,6 +180,8 @@ const MOVE_CHECKED_KEY = "keepr:move-checked-to-bottom"; // "true" | "false"
 const AUTOBACKUP_CADENCE_KEY = "keepr:autobackup-cadence"; // "off"|"daily"|"weekly"
 const AUTOBACKUP_FOLDER_KEY = "keepr:autobackup-folder"; // absolute path
 const AUTOBACKUP_LAST_KEY = "keepr:autobackup-last-at"; // ISO
+const AUTOBACKUP_RETENTION_KEY = "keepr:autobackup-retention"; // integer, default 12
+const DEFAULT_AUTOBACKUP_RETENTION = 12;
 const CARD_WIDTH_KEY = "keepr:card-width"; // integer px, clamped to MIN/MAX_CARD_WIDTH
 const ACCENT_COLOR_KEY = "keepr:accent-color"; // hex string, must match an ACCENT_PRESETS entry
 const NOTE_FONT_SIZE_KEY = "keepr:note-font-size"; // integer px, clamped to MIN/MAX_NOTE_FONT_SIZE
@@ -281,6 +288,15 @@ function readInitialAutoBackupLastAt(): string | null {
   return localStorage.getItem(AUTOBACKUP_LAST_KEY);
 }
 
+function readInitialAutoBackupRetention(): number {
+  if (typeof localStorage === "undefined") return DEFAULT_AUTOBACKUP_RETENTION;
+  const raw = localStorage.getItem(AUTOBACKUP_RETENTION_KEY);
+  if (raw == null) return DEFAULT_AUTOBACKUP_RETENTION;
+  const n = parseInt(raw, 10);
+  if (Number.isNaN(n) || n < 0 || n > 365) return DEFAULT_AUTOBACKUP_RETENTION;
+  return n;
+}
+
 function clampCardWidth(n: number): number {
   if (!Number.isFinite(n)) return DEFAULT_CARD_WIDTH;
   return Math.max(MIN_CARD_WIDTH, Math.min(MAX_CARD_WIDTH, Math.round(n)));
@@ -372,6 +388,7 @@ export const useStore = create<UIState>((set, get) => ({
   autoBackupCadence: readInitialAutoBackupCadence(),
   autoBackupFolder: readInitialAutoBackupFolder(),
   autoBackupLastAt: readInitialAutoBackupLastAt(),
+  autoBackupRetention: readInitialAutoBackupRetention(),
   cardWidth: readInitialCardWidth(),
   noteFontSize: readInitialNoteFontSize(),
   accentColor: readInitialAccentColor(),
@@ -489,6 +506,11 @@ export const useStore = create<UIState>((set, get) => ({
   resetAccentColor: () => {
     localStorage.removeItem(ACCENT_COLOR_KEY);
     set({ accentColor: DEFAULT_ACCENT_COLOR });
+  },
+  setAutoBackupRetention: (n) => {
+    const clamped = Math.max(0, Math.min(365, Math.round(n)));
+    localStorage.setItem(AUTOBACKUP_RETENTION_KEY, String(clamped));
+    set({ autoBackupRetention: clamped });
   },
   setAutoBackupLastAt: (iso) => {
     if (iso) localStorage.setItem(AUTOBACKUP_LAST_KEY, iso);

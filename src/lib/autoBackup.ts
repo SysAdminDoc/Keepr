@@ -40,3 +40,19 @@ export function backupPath(folder: string, filename: string): string {
   const trimmed = folder.replace(/[\\/]+$/, "");
   return `${trimmed}/${filename}`;
 }
+
+/** v0.21.0 — given a list of `keepr-autobackup-<ISO>.zip` filenames,
+ *  return the ones that should be deleted to enforce a "keep latest N
+ *  by sort order" retention. The ISO stamp in the filename sorts
+ *  lexicographically as it does chronologically, so a string sort is
+ *  enough. Returns filenames (not full paths). Pure for testing. */
+export function backupsToPrune(filenames: string[], keep: number): string[] {
+  if (keep <= 0) return [];
+  const ours = filenames
+    .filter((f) => f.startsWith("keepr-autobackup-") && f.endsWith(".zip"))
+    .slice()
+    .sort();
+  if (ours.length <= keep) return [];
+  // Newest are last (ISO ascending). Drop everything BEFORE the last `keep`.
+  return ours.slice(0, ours.length - keep);
+}
