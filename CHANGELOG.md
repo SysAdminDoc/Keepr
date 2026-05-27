@@ -6,6 +6,12 @@ All notable changes to Keepr are documented here. Format loosely follows [Keep a
 
 (See [ROADMAP.md](ROADMAP.md) for the live task list.)
 
+## [0.22.11] — 2026-05-27 — "Note grid list semantics"
+
+### Added
+
+- **`role="list"` + `role="listitem"` on every NoteGrid layout** (masonry, stable-grid, list view). Screen readers now announce the note grid as a proper list with a count; cards become listitems. New optional `ariaLabel` prop on `NoteGrid` — passed as "Pinned notes" / "Other notes" / the current section header label (e.g. "Archive") from `App.tsx`. Stable-grid placeholder cells stay `aria-hidden` so they don't get announced as empty listitems. Verified visual layout unaffected on all three layouts (the roles are logical-only, not coupled to CSS).
+
 ## [0.22.10] — 2026-05-27 — "Audit hardening pass"
 
 End-to-end audit + hardening sweep across the Rust backend, the React frontend, the build/install surface, and test coverage. No new features — only fixes, defensive hardening, and diagnostics.

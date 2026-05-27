@@ -39,8 +39,8 @@
 - [ ] **P2 — `commands.rs` split** *(now ~4500 lines)*
   - Split into `commands/notes.rs`, `commands/io.rs`, `commands/security.rs`, `commands/attachments.rs`, `commands/reminders.rs`, `commands/history.rs`, `commands/labels.rs`. Re-exported from `commands/mod.rs`.
   - **Why deferred:** high merge-conflict risk during an active feature cycle. Schedule for a quiet "no other open PRs" day.
-- [ ] **P2 — `role="list"` + `role="listitem"` on note grid** *(verify against current masonry first)*
-  - Adds screen-reader semantics to the masonry / stable-grid containers. Low LOC, but masonry's multi-column flow can disrupt visual layout if applied carelessly — start with a flag, A/B against current.
+- [x] **P2 — `role="list"` + `role="listitem"` on note grid** *(v0.22.11 — shipped)*
+  - All three NoteGrid layouts (masonry, stable-grid, list) now expose proper list semantics with an optional `ariaLabel` prop. Stable-grid placeholders stay `aria-hidden`. Visual layout unchanged.
 
 ## Open: Larger bets (v0.24.x and later)
 
