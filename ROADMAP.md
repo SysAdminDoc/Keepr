@@ -4,7 +4,15 @@
 
 **Priority legend:** P0 = data loss / crash / security / distribution-blocker · P1 = visible bug / high user value · P2 = polish / nice-to-have · P3 = future / experimental.
 
-**Status (2026-05-26):** v0.18.1 shipped. v0.19+ cycle starting — see the v0.19 research file for the rationale behind each item below.
+**Status (2026-05-26):** **v0.22.3 shipped.** v0.19+ cycle made the following pass:
+- Phase A (distribution credibility): 4 of 5 shipped — Azure signing + auto-updater are both gated on the same signing-key decision and remain blocked.
+- Phase B (capture surface): **all 4 shipped** (command palette, hashtag autocomplete, bulk vault, voice notes).
+- Phase C (trust + recovery): 2 of 3 shipped — auto-backup rotation + vault recovery seed. Content-addressed attachments deferred (big refactor, marginal value at current install sizes).
+- Phase D (power user): 4 of 5 shipped — body diff, smart labels, wiki links (panels), verifier CLI. Biometric per-note re-lock deferred (platform-specific concerns).
+- Phase E (quick wins): all addressed (some "already done, audit confirmed" rather than shipped).
+- Phase F (web clipper) + G (distribution larger bets): unstarted, larger scope.
+
+107 → **119** vitest + 55 → **58** cargo tests across the cycle. See [CHANGELOG.md](CHANGELOG.md) for per-release detail.
 
 ---
 
@@ -41,15 +49,17 @@
   - **Deferred**: moving the poll loop from renderer to Rust background thread. Renderer poll works today; migration cost > marginal reliability win. Revisit if field reports surface missed backups.
 - [x] **P1 — Vault recovery seed (BIP39 12-word, opt-in)** *(v0.21.1 — shipped)*
   - No schema migration needed (app_settings is k/v; 3 new keys for the seed envelope). Set up via Settings → Vault → "Set up recovery seed…" when unlocked. Recovery flow on locked vault: "Forgot password? Recover with seed phrase…". 3 new Rust round-trip tests. Explicitly opt-in — preserves the "no recovery" guarantee for users who don't enable it. Settings → Vault microcopy made explicit about the trade-off.
-- [ ] **P1 — Content-addressed attachment storage + orphan sweep** *(v0.21.2)*
-  - Hash bytes (BLAKE3), store at `<data_dir>/resources/ab/cd/<hash>.<ext>`. Daily sweep in same thread as auto-backup moves zero-ref blobs >24h old to `.trash/`; auto-purge .trash >30d. Migration: existing UUID-named files keep working; new attachments use hashed layout.
+- [ ] **P1 — Content-addressed attachment storage + orphan sweep** *(deferred to v0.23+)*
+  - Hash bytes (BLAKE3), store at `<data_dir>/resources/ab/cd/<hash>.<ext>`. Daily sweep moves zero-ref blobs >24h old to `.trash/`; auto-purge .trash >30d. Migration: existing UUID-named files keep working; new attachments use hashed layout.
+  - **Deferred this cycle**: substantive refactor (new storage layout, ref-counting, migration), and current install sizes (typically <100 MB resources) don't yet justify the dedup win. Revisit when field reports indicate orphan accumulation or duplicate-photo bloat.
 
 ## Phase D — Power user (v0.22.x)
 
 - [x] **P2 — HistoryDrawer body diff** *(v0.22.0 — shipped)*
   - Expand arrow per snapshot → inline LCS line-diff vs current. Hand-rolled (no diff-match-patch), 7 vitest cases. Vault snapshots excluded (ciphertext).
-- [ ] **P2 — Per-note re-lock with biometric** *(v0.22.1)*
+- [ ] **P2 — Per-note re-lock with biometric** *(deferred to v0.23+)*
   - `tauri-plugin-biometric`. New `notes.note_locked` column. Per-note Lock button when vault initialized.
+  - **Deferred this cycle**: biometric APIs differ per platform (Windows Hello via WinRT, macOS Touch ID via LocalAuthentication, no Linux equivalent). Need a platform-test rig before shipping. The existing Vault provides at-rest encryption already; this is a granular-lock convenience layer.
 - [x] **P2 — Two-way `[[Note Title]]` links + Linked-from panel** *(v0.22.3 — shipped, partial)*
   - Editor footer shows "Mentions" + "Linked from N" panels. Click chips to jump. Renderer-only (no schema, no IPC) — `src/lib/wikiLinks.ts` + 12 tests. Inline `[[Foo]]` rendering as clickable span in the body and `[[` autocomplete dropdown intentionally deferred (would require contenteditable rewrite of the body textarea; not worth it for the gain).
 - [x] **P2 — Saved searches / Smart Labels** *(v0.22.2 — shipped)*
@@ -59,15 +69,16 @@
 
 ## Phase E — Quick wins / housekeeping (rolled into above phases as fit)
 
-- [ ] **P2 — "Last backup: ..." line in Settings** *(part of v0.21.0)*
+- [x] **P2 — "Last backup: ..." line in Settings** *(v0.21.0 — already present pre-cycle, verified)*
 - [x] **P2 — First-run sample notes** *(v0.21.2 — shipped)*
 - [x] **P2 — Audit `IconBtn` `aria-label` coverage** *(v0.21.2 — already clean, verified zero violations)*
 - [ ] **P2 — `role="list"` + `role="listitem"` on note grid** *(defer; risks visual layout regressions on multi-column CSS — verify against current masonry first)*
 - [x] **P2 — Settings → Vault first-run microcopy** *(part of v0.21.1 — addressed)*
 - [x] **P3 — Default `trashRetentionDays` to 30 if currently 0** *(v0.21.2 — already 7, matches Keep mobile)*
 - [x] **P2 — Verify pinned stable-grid empty-row behavior; fix if broken** *(v0.21.2 — min-height: 1px guard added to placeholders)*
-- [ ] **P2 — `commands.rs` split (3866 lines monolith)** *(v0.22.9)*
+- [ ] **P2 — `commands.rs` split (now ~4400 lines)** *(deferred to v0.23+)*
   - Split into `commands/notes.rs`, `commands/io.rs`, `commands/security.rs`, `commands/attachments.rs`, `commands/reminders.rs`, `commands/history.rs`, `commands/labels.rs`. Re-exported from `commands/mod.rs`.
+  - **Deferred this cycle**: high merge-conflict risk during an active feature cycle. Schedule for a quiet "no other open PRs" day.
 
 ## Phase F — Web Clipper (v0.23.x)
 
