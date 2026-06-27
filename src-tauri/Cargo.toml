@@ -1,6 +1,6 @@
 [package]
 name = "keepr"
-version = "0.24.1"
+version = "0.25.0"
 description = "Offline-first Google Keep clone"
 authors = ["Matthew Ashton"]
 edition = "2021"
@@ -95,6 +95,10 @@ rand = "0.10.1"
 # Subtle constant-time comparison for the Web Clipper bearer token
 # (prevents timing oracles on token verification).
 subtle = "2"
+# v0.25.0 — content-addressed attachment resources. BLAKE3 is fast
+# enough for in-app uploads and keeps duplicate image/audio blobs to a
+# single on-disk file.
+blake3 = "1"
 
 [dev-dependencies]
 tempfile = "3"

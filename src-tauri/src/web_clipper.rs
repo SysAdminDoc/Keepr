@@ -145,7 +145,10 @@ struct ErrorBody<'a> {
 fn unauthorized() -> axum::response::Response {
     (
         StatusCode::UNAUTHORIZED,
-        Json(ErrorBody { error: "unauthorized", detail: None }),
+        Json(ErrorBody {
+            error: "unauthorized",
+            detail: None,
+        }),
     )
         .into_response()
 }
@@ -157,7 +160,10 @@ fn check_auth(headers: &HeaderMap, expected: &str) -> bool {
     let Ok(s) = raw.to_str() else {
         return false;
     };
-    let Some(token) = s.strip_prefix("Bearer ").or_else(|| s.strip_prefix("bearer ")) else {
+    let Some(token) = s
+        .strip_prefix("Bearer ")
+        .or_else(|| s.strip_prefix("bearer "))
+    else {
         return false;
     };
     // Constant-time compare prevents timing oracle on the 64-char token.
@@ -219,7 +225,9 @@ fn insert_clipped_note(
     // strings are trimmed and case-folded against existing labels.
     for tag in &payload.tags {
         let tag = tag.trim();
-        if tag.is_empty() { continue; }
+        if tag.is_empty() {
+            continue;
+        }
         // Find or create label.
         let label_id: String = conn
             .query_row(
@@ -254,7 +262,10 @@ async fn clip_url(
     if payload.url.is_empty() {
         return (
             StatusCode::BAD_REQUEST,
-            Json(ErrorBody { error: "invalid_payload", detail: Some("url required".into()) }),
+            Json(ErrorBody {
+                error: "invalid_payload",
+                detail: Some("url required".into()),
+            }),
         )
             .into_response();
     }
@@ -266,31 +277,40 @@ async fn clip_url(
                 log::error!("web_clipper: insert failed: {e}");
                 return (
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(ErrorBody { error: "db_write_failed", detail: Some(e.to_string()) }),
+                    Json(ErrorBody {
+                        error: "db_write_failed",
+                        detail: Some(e.to_string()),
+                    }),
                 )
                     .into_response();
             }
         }
     };
     log::info!("web_clipper: clipped {} -> note {}", payload.url, id);
-    Json(ClipResponse { ok: true, note_id: id }).into_response()
+    Json(ClipResponse {
+        ok: true,
+        note_id: id,
+    })
+    .into_response()
 }
 
 /// Build the axum router. Same handler for `/clip`, `/clip/selection`,
 /// and `/clip/url` for v1 — the extension picks what to send.
 fn router(state: ServerState) -> Router {
     let cors = CorsLayer::new()
-        .allow_origin(AllowOrigin::predicate(|origin: &HeaderValue, _req_parts| {
-            origin
-                .to_str()
-                .map(|s| {
-                    s.starts_with("chrome-extension://")
-                        || s.starts_with("moz-extension://")
-                        || s.starts_with("http://127.0.0.1:")
-                        || s == "http://127.0.0.1"
-                })
-                .unwrap_or(false)
-        }))
+        .allow_origin(AllowOrigin::predicate(
+            |origin: &HeaderValue, _req_parts| {
+                origin
+                    .to_str()
+                    .map(|s| {
+                        s.starts_with("chrome-extension://")
+                            || s.starts_with("moz-extension://")
+                            || s.starts_with("http://127.0.0.1:")
+                            || s == "http://127.0.0.1"
+                    })
+                    .unwrap_or(false)
+            },
+        ))
         .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
         .allow_headers([
             axum::http::header::AUTHORIZATION,
@@ -326,10 +346,7 @@ pub async fn start_server(
     let listener = tokio::net::TcpListener::bind(addr)
         .await
         .map_err(|e| format!("could not bind web clipper port: {e}"))?;
-    let port = listener
-        .local_addr()
-        .map_err(|e| e.to_string())?
-        .port();
+    let port = listener.local_addr().map_err(|e| e.to_string())?.port();
     {
         let conn = db.lock();
         persist_port(&conn, port);
@@ -448,7 +465,9 @@ mod tests {
                 |r| r.get(0),
             )
             .unwrap();
-        assert!(body.ends_with("[... truncated; original page is longer than Keepr's per-note cap]"));
+        assert!(
+            body.ends_with("[... truncated; original page is longer than Keepr's per-note cap]")
+        );
         assert!(body.len() <= 64 * 1024 + 100);
     }
 

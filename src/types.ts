@@ -57,6 +57,8 @@ export interface Attachment {
   height: number | null;
   position: number;
   createdAt: string;
+  resourcePath?: string | null;
+  thumbPath?: string | null;
 }
 
 export type VaultState = "plain" | "vault";

@@ -82,8 +82,7 @@ impl Dek {
 }
 
 fn kdf_params() -> Params {
-    Params::new(64 * 1024, 3, 1, Some(KEK_LEN))
-        .expect("argon2 KDF params are valid")
+    Params::new(64 * 1024, 3, 1, Some(KEK_LEN)).expect("argon2 KDF params are valid")
 }
 
 fn derive_kek(password: &str, salt: &[u8]) -> Result<[u8; KEK_LEN]> {

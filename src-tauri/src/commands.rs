@@ -38,6 +38,10 @@ pub struct Attachment {
     pub height: Option<i64>,
     pub position: i64,
     pub created_at: String,
+    #[serde(default)]
+    pub resource_path: Option<String>,
+    #[serde(default)]
+    pub thumb_path: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -119,12 +123,11 @@ fn err<E: std::fmt::Display>(e: E) -> String {
     e.to_string()
 }
 
-/// Canonical mime→ext mapping used by every attachment-related command:
-/// the resource file on disk is named `<id>.<ext>` and the renderer's
-/// `keepr-resource://<id>.<ext>` URL relies on the same mapping. Keep this
-/// in sync with `AttachmentGrid.mimeToExt` (frontend) and
-/// `guess_content_type` (lib.rs). `bin` is the fallback so unknown mimes
-/// don't break the `format!("{id}.{ext}")` pattern.
+/// Canonical mime→ext mapping used by every attachment-related command.
+/// Legacy attachments use `<id>.<ext>` filenames; v0.25+ writes
+/// content-addressed `ab/cd/<hash>.<ext>` paths. Keep this in sync with
+/// `AttachmentGrid.mimeToExt` (frontend) and `guess_content_type` (lib.rs).
+/// `bin` is the fallback so unknown mimes still get a deterministic suffix.
 pub(crate) fn mime_to_ext(mime: &str) -> &'static str {
     match mime {
         "image/png" => "png",
@@ -146,35 +149,151 @@ pub(crate) fn mime_to_ext(mime: &str) -> &'static str {
 /// gone by the time we get here, so the file is orphan regardless). Used by
 /// `delete_attachment`, `delete_note_permanent`, and `empty_trash` to keep
 /// the on-disk resources dir in sync with the `attachments` table.
-fn delete_attachment_files(resources_dir: &Path, id: &str, mime: &str) {
-    let ext = mime_to_ext(mime);
-    let main = resources_dir.join(format!("{id}.{ext}"));
-    if let Err(e) = std::fs::remove_file(&main) {
-        // NotFound is expected when the file was already cleaned up or never
-        // written (e.g., a thumbnail-only attachment); other errors mean
-        // we're leaking disk space.
-        if e.kind() != std::io::ErrorKind::NotFound {
-            log::warn!("could not remove attachment file {}: {e}", main.display());
+#[derive(Clone, Debug)]
+struct AttachmentFiles {
+    id: String,
+    mime: String,
+    resource_path: Option<String>,
+    thumb_path: Option<String>,
+}
+
+fn legacy_resource_path(id: &str, mime: &str) -> String {
+    format!("{}.{ext}", id, ext = mime_to_ext(mime))
+}
+
+fn legacy_thumb_path(id: &str) -> String {
+    format!("{id}.thumb.jpg")
+}
+
+fn attachment_resource_path(files: &AttachmentFiles) -> String {
+    files
+        .resource_path
+        .clone()
+        .unwrap_or_else(|| legacy_resource_path(&files.id, &files.mime))
+}
+
+fn attachment_thumb_path(files: &AttachmentFiles) -> String {
+    files
+        .thumb_path
+        .clone()
+        .unwrap_or_else(|| legacy_thumb_path(&files.id))
+}
+
+fn safe_resource_path(resources_dir: &Path, rel: &str) -> Option<PathBuf> {
+    if !is_safe_resource_rel_path(rel) {
+        return None;
+    }
+    Some(resources_dir.join(rel))
+}
+
+fn is_safe_resource_rel_path(rel: &str) -> bool {
+    if rel.is_empty()
+        || rel.len() > 1024
+        || rel.contains('\0')
+        || rel.contains('\\')
+        || rel.contains('%')
+    {
+        return false;
+    }
+    for segment in rel.split('/') {
+        if segment.is_empty()
+            || segment == "."
+            || segment == ".."
+            || segment.contains("..")
+            || segment.contains(':')
+            || !segment
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.')
+        {
+            return false;
+        }
+        let lower = segment.to_ascii_lowercase();
+        let stem = lower.split('.').next().unwrap_or(&lower);
+        if stem == "con"
+            || stem == "prn"
+            || stem == "aux"
+            || stem == "nul"
+            || matches!(
+                stem,
+                "com1" | "com2" | "com3" | "com4" | "com5" | "com6" | "com7" | "com8" | "com9"
+            )
+            || matches!(
+                stem,
+                "lpt1" | "lpt2" | "lpt3" | "lpt4" | "lpt5" | "lpt6" | "lpt7" | "lpt8" | "lpt9"
+            )
+        {
+            return false;
         }
     }
-    // NF-V0.5-B — thumbnail is always `.thumb.jpg` regardless of source
-    // extension. See `add_image_attachment`.
-    let thumb = resources_dir.join(format!("{id}.thumb.jpg"));
-    if let Err(e) = std::fs::remove_file(&thumb) {
+    true
+}
+
+fn remove_resource_file(path: &Path) {
+    if let Err(e) = std::fs::remove_file(path) {
         if e.kind() != std::io::ErrorKind::NotFound {
-            log::warn!("could not remove attachment thumb {}: {e}", thumb.display());
+            log::warn!("could not remove attachment file {}: {e}", path.display());
         }
     }
 }
 
-/// Collect every (id, mime) attachment row for the given note ids so the
+fn referenced_resource_count(conn: &Connection, column: &str, rel: &str) -> rusqlite::Result<i64> {
+    match column {
+        "resource_path" => conn.query_row(
+            "SELECT COUNT(*) FROM attachments WHERE resource_path = ?1",
+            params![rel],
+            |r| r.get(0),
+        ),
+        "thumb_path" => conn.query_row(
+            "SELECT COUNT(*) FROM attachments WHERE thumb_path = ?1",
+            params![rel],
+            |r| r.get(0),
+        ),
+        _ => Ok(0),
+    }
+}
+
+fn remove_if_unreferenced(conn: &Connection, resources_dir: &Path, rel: &str, column: &str) {
+    let Ok(refs) = referenced_resource_count(conn, column, rel) else {
+        return;
+    };
+    if refs > 0 {
+        return;
+    }
+    let Some(path) = safe_resource_path(resources_dir, rel) else {
+        log::warn!("skipping unsafe attachment resource path '{rel}'");
+        return;
+    };
+    remove_resource_file(&path);
+}
+
+/// Delete a single attachment's blob + sibling thumbnail from the resources
+/// dir. Content-addressed rows are ref-counted by `resource_path` and
+/// `thumb_path` so duplicate attachments can share one blob. Legacy rows have
+/// null paths and keep the old `<id>.<ext>` / `<id>.thumb.jpg` filenames.
+fn delete_attachment_files(conn: &Connection, resources_dir: &Path, files: &AttachmentFiles) {
+    let main = attachment_resource_path(files);
+    if files.resource_path.is_some() {
+        remove_if_unreferenced(conn, resources_dir, &main, "resource_path");
+    } else if let Some(path) = safe_resource_path(resources_dir, &main) {
+        remove_resource_file(&path);
+    }
+
+    let thumb = attachment_thumb_path(files);
+    if files.thumb_path.is_some() {
+        remove_if_unreferenced(conn, resources_dir, &thumb, "thumb_path");
+    } else if let Some(path) = safe_resource_path(resources_dir, &thumb) {
+        remove_resource_file(&path);
+    }
+}
+
+/// Collect every attachment row for the given note ids so the
 /// caller can clean up resource files after the DB rows are gone (cascading
 /// FK delete drops the `attachments` rows when the parent `notes` row is
 /// removed, but the files on disk are not the DB's concern).
 fn collect_attachment_files(
     conn: &Connection,
     note_ids: &[String],
-) -> rusqlite::Result<Vec<(String, String)>> {
+) -> rusqlite::Result<Vec<AttachmentFiles>> {
     if note_ids.is_empty() {
         return Ok(Vec::new());
     }
@@ -183,14 +302,19 @@ fn collect_attachment_files(
         .collect::<Vec<_>>()
         .join(",");
     let sql = format!(
-        "SELECT id, mime FROM attachments WHERE note_id IN ({placeholders})"
+        "SELECT id, mime, resource_path, thumb_path FROM attachments WHERE note_id IN ({placeholders})"
     );
     let mut stmt = conn.prepare(&sql)?;
     let params_iter: Vec<&dyn rusqlite::ToSql> =
         note_ids.iter().map(|s| s as &dyn rusqlite::ToSql).collect();
     let rows = stmt
         .query_map(params_iter.as_slice(), |r| {
-            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+            Ok(AttachmentFiles {
+                id: r.get(0)?,
+                mime: r.get(1)?,
+                resource_path: r.get(2)?,
+                thumb_path: r.get(3)?,
+            })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     Ok(rows)
@@ -392,15 +516,14 @@ fn load_note_with_vault(
             .collect::<Result<Vec<_>, _>>()?;
         note.checklist = items;
     }
-    let mut lstmt =
-        conn.prepare("SELECT label_id FROM note_labels WHERE note_id = ?1")?;
+    let mut lstmt = conn.prepare("SELECT label_id FROM note_labels WHERE note_id = ?1")?;
     let labels: Vec<String> = lstmt
         .query_map(params![id], |row| row.get::<_, String>(0))?
         .collect::<Result<Vec<_>, _>>()?;
     note.labels = labels;
 
     let mut astmt = conn.prepare(
-        "SELECT id, note_id, kind, mime, filename, byte_size, width, height, position, created_at
+        "SELECT id, note_id, kind, mime, filename, byte_size, width, height, position, created_at, resource_path, thumb_path
          FROM attachments WHERE note_id = ?1 ORDER BY position ASC, rowid ASC",
     )?;
     let attachments = astmt
@@ -416,6 +539,8 @@ fn load_note_with_vault(
                 height: row.get(7)?,
                 position: row.get(8)?,
                 created_at: row.get(9)?,
+                resource_path: row.get(10)?,
+                thumb_path: row.get(11)?,
             })
         })?
         .collect::<Result<Vec<_>, _>>()?;
@@ -589,7 +714,7 @@ pub fn list_notes(state: State<'_, AppState>) -> Result<Vec<Note>, String> {
 
     let mut astmt = conn
         .prepare(
-            "SELECT note_id, id, kind, mime, filename, byte_size, width, height, position, created_at
+            "SELECT note_id, id, kind, mime, filename, byte_size, width, height, position, created_at, resource_path, thumb_path
              FROM attachments ORDER BY position ASC, rowid ASC",
         )
         .map_err(err)?;
@@ -608,6 +733,8 @@ pub fn list_notes(state: State<'_, AppState>) -> Result<Vec<Note>, String> {
                 height: row.get(7).map_err(err)?,
                 position: row.get(8).map_err(err)?,
                 created_at: row.get(9).map_err(err)?,
+                resource_path: row.get(10).map_err(err)?,
+                thumb_path: row.get(11).map_err(err)?,
             });
         }
     }
@@ -708,7 +835,14 @@ pub fn create_note(state: State<'_, AppState>, input: NoteInput) -> Result<Note,
         tx.execute(
             "INSERT INTO checklist_items (id, note_id, text, checked, position, parent_id)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![item_id, id, item.text, item.checked as i64, item.position, item.parent_id],
+            params![
+                item_id,
+                id,
+                item.text,
+                item.checked as i64,
+                item.position,
+                item.parent_id
+            ],
         )
         .map_err(err)?;
         checklist_out.push(ChecklistItem {
@@ -791,7 +925,16 @@ pub fn update_note(
             "SELECT created_at, archived, trashed, trashed_at, position, vault \
              FROM notes WHERE id = ?1",
             params![id],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?)),
+            |r| {
+                Ok((
+                    r.get(0)?,
+                    r.get(1)?,
+                    r.get(2)?,
+                    r.get(3)?,
+                    r.get(4)?,
+                    r.get(5)?,
+                ))
+            },
         )
         .map_err(|_| format!("note {id} not found"))?;
     let is_vault = vault_state == "vault";
@@ -871,13 +1014,23 @@ pub fn update_note(
             ],
         )
         .map_err(err)?;
-        tx.execute("DELETE FROM checklist_items WHERE note_id = ?1", params![id])
-            .map_err(err)?;
+        tx.execute(
+            "DELETE FROM checklist_items WHERE note_id = ?1",
+            params![id],
+        )
+        .map_err(err)?;
         for item in &checklist_out {
             tx.execute(
                 "INSERT INTO checklist_items (id, note_id, text, checked, position, parent_id)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                params![item.id, id, item.text, item.checked as i64, item.position, item.parent_id],
+                params![
+                    item.id,
+                    id,
+                    item.text,
+                    item.checked as i64,
+                    item.position,
+                    item.parent_id
+                ],
             )
             .map_err(err)?;
         }
@@ -920,12 +1073,9 @@ pub fn update_note(
     })
 }
 
-fn load_attachments(
-    conn: &Connection,
-    note_id: &str,
-) -> Result<Vec<Attachment>, rusqlite::Error> {
+fn load_attachments(conn: &Connection, note_id: &str) -> Result<Vec<Attachment>, rusqlite::Error> {
     let mut stmt = conn.prepare(
-        "SELECT id, note_id, kind, mime, filename, byte_size, width, height, position, created_at
+        "SELECT id, note_id, kind, mime, filename, byte_size, width, height, position, created_at, resource_path, thumb_path
          FROM attachments WHERE note_id = ?1 ORDER BY position ASC, rowid ASC",
     )?;
     let rows = stmt
@@ -941,6 +1091,8 @@ fn load_attachments(
                 height: row.get(7)?,
                 position: row.get(8)?,
                 created_at: row.get(9)?,
+                resource_path: row.get(10)?,
+                thumb_path: row.get(11)?,
             })
         })?
         .collect::<Result<Vec<_>, _>>()?;
@@ -958,7 +1110,9 @@ pub fn duplicate_note(state: State<'_, AppState>, id: String) -> Result<Note, St
         return Err("a restore is currently in progress".into());
     }
     let mut conn = state.db.lock();
-    let source = load_note(&conn, &id).map_err(err)?.ok_or_else(|| format!("note {id} not found"))?;
+    let source = load_note(&conn, &id)
+        .map_err(err)?
+        .ok_or_else(|| format!("note {id} not found"))?;
     if source.vault == "vault" {
         // Duplicating a vault note would silently drop its contents
         // (the row's title/body columns are empty until decrypted). Make
@@ -991,11 +1145,7 @@ pub fn duplicate_note(state: State<'_, AppState>, id: String) -> Result<Note, St
     let mut checklist_out: Vec<ChecklistItem> = Vec::with_capacity(source.checklist.len());
     for item in &source.checklist {
         let item_id = id_map.get(&item.id).expect("just inserted").clone();
-        let new_parent = item
-            .parent_id
-            .as_ref()
-            .and_then(|p| id_map.get(p))
-            .cloned();
+        let new_parent = item.parent_id.as_ref().and_then(|p| id_map.get(p)).cloned();
         tx.execute(
             "INSERT INTO checklist_items (id, note_id, text, checked, position, parent_id)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
@@ -1078,10 +1228,7 @@ fn sanitize_vault_filename(stem: &str, id: &str) -> String {
 }
 
 #[tauri::command]
-pub fn export_vault(
-    state: State<'_, AppState>,
-    dest_dir: String,
-) -> Result<String, String> {
+pub fn export_vault(state: State<'_, AppState>, dest_dir: String) -> Result<String, String> {
     if state.importing.load(std::sync::atomic::Ordering::SeqCst) {
         return Err("a restore is currently in progress".into());
     }
@@ -1093,9 +1240,7 @@ pub fn export_vault(
     // never silently overwrites a previous vault (or external edits
     // to those .md files). Folder name is `keepr-vault-<ISO>` with
     // colon and dot stripped for filesystem safety.
-    let stamp = chrono::Utc::now()
-        .format("%Y-%m-%dT%H-%M-%S")
-        .to_string();
+    let stamp = chrono::Utc::now().format("%Y-%m-%dT%H-%M-%S").to_string();
     let dest = parent.join(format!("keepr-vault-{stamp}"));
     std::fs::create_dir_all(&dest).map_err(err)?;
     let resources_out = dest.join(VAULT_RESOURCES_DIR);
@@ -1171,8 +1316,10 @@ pub fn export_vault(
         if !n.attachments.is_empty() {
             content.push_str("\n");
             for att in &n.attachments {
-                let ext = mime_to_ext(&att.mime);
-                let stored_name = format!("{}.{ext}", att.id);
+                let stored_name = att
+                    .resource_path
+                    .clone()
+                    .unwrap_or_else(|| legacy_resource_path(&att.id, &att.mime));
                 content.push_str(&format!(
                     "![{}]({}/{})\n",
                     att.filename.replace(']', " ").replace('[', " "),
@@ -1183,6 +1330,9 @@ pub fn export_vault(
                 let src = state.data_dir.join("resources").join(&stored_name);
                 let dst = resources_out.join(&stored_name);
                 if src.exists() {
+                    if let Some(parent) = dst.parent() {
+                        let _ = std::fs::create_dir_all(parent);
+                    }
                     let _ = std::fs::copy(&src, &dst);
                 }
             }
@@ -1195,10 +1345,7 @@ pub fn export_vault(
     Ok(dest.to_string_lossy().to_string())
 }
 
-fn build_frontmatter(
-    n: &Note,
-    labels_by_id: &std::collections::HashMap<String, String>,
-) -> String {
+fn build_frontmatter(n: &Note, labels_by_id: &std::collections::HashMap<String, String>) -> String {
     let label_names: Vec<String> = n
         .labels
         .iter()
@@ -1226,10 +1373,26 @@ fn yaml_quote_if_needed(s: &str) -> String {
     // If the value contains : # & * { } [ ] , | > ' " % @ ` or starts with
     // - we double-quote it. Conservative — over-quotes some safe values
     // but never under-quotes.
-    let needs = s
-        .chars()
-        .any(|c| matches!(c, ':' | '#' | '&' | '*' | '{' | '}' | '[' | ']' | ',' | '|' | '>' | '\'' | '"' | '%' | '@' | '`'))
-        || s.starts_with('-')
+    let needs = s.chars().any(|c| {
+        matches!(
+            c,
+            ':' | '#'
+                | '&'
+                | '*'
+                | '{'
+                | '}'
+                | '['
+                | ']'
+                | ','
+                | '|'
+                | '>'
+                | '\''
+                | '"'
+                | '%'
+                | '@'
+                | '`'
+        )
+    }) || s.starts_with('-')
         || s.is_empty();
     if needs {
         format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""))
@@ -1254,10 +1417,7 @@ fn yaml_quote_if_needed(s: &str) -> String {
 ///
 /// Returns the number of notes successfully imported.
 #[tauri::command]
-pub fn import_takeout(
-    state: State<'_, AppState>,
-    src: String,
-) -> Result<u32, String> {
+pub fn import_takeout(state: State<'_, AppState>, src: String) -> Result<u32, String> {
     if state.importing.load(std::sync::atomic::Ordering::SeqCst) {
         return Err("a restore is currently in progress".into());
     }
@@ -1273,8 +1433,7 @@ pub fn import_takeout(
 
     // Two-pass: first collect attachment bytes keyed by their archive
     // path so we can resolve note-relative references.
-    let mut blobs: std::collections::HashMap<String, Vec<u8>> =
-        std::collections::HashMap::new();
+    let mut blobs: std::collections::HashMap<String, Vec<u8>> = std::collections::HashMap::new();
     let mut note_entries: Vec<(String, String)> = Vec::new(); // (folder, json text)
 
     for i in 0..archive.len() {
@@ -1293,7 +1452,10 @@ pub fn import_takeout(
             }
             // Folder for resolving sibling attachments. Shape check
             // happens in pass 2 so we don't double-parse.
-            let folder = name.rsplit_once('/').map(|(d, _)| d.to_string()).unwrap_or_default();
+            let folder = name
+                .rsplit_once('/')
+                .map(|(d, _)| d.to_string())
+                .unwrap_or_default();
             note_entries.push((folder, text));
         } else if entry.size() > 0 && entry.size() <= MAX_ATTACHMENT_BYTES {
             let mut buf = Vec::with_capacity(entry.size() as usize);
@@ -1316,15 +1478,25 @@ pub fn import_takeout(
             // non-Keep JSON that happens to share the archive.
             continue;
         }
-        let title = v.get("title").and_then(|x| x.as_str()).unwrap_or("").to_string();
+        let title = v
+            .get("title")
+            .and_then(|x| x.as_str())
+            .unwrap_or("")
+            .to_string();
         let text_body = v
             .get("textContent")
             .and_then(|x| x.as_str())
             .unwrap_or("")
             .to_string();
         let pinned = v.get("isPinned").and_then(|x| x.as_bool()).unwrap_or(false);
-        let archived = v.get("isArchived").and_then(|x| x.as_bool()).unwrap_or(false);
-        let trashed = v.get("isTrashed").and_then(|x| x.as_bool()).unwrap_or(false);
+        let archived = v
+            .get("isArchived")
+            .and_then(|x| x.as_bool())
+            .unwrap_or(false);
+        let trashed = v
+            .get("isTrashed")
+            .and_then(|x| x.as_bool())
+            .unwrap_or(false);
         if trashed {
             continue; // Takeout-trashed notes get skipped on import.
         }
@@ -1334,35 +1506,40 @@ pub fn import_takeout(
             .and_then(|x| x.as_array())
             .map(|arr| {
                 arr.iter()
-                    .filter_map(|l| l.get("name").and_then(|n| n.as_str()).map(|s| s.to_string()))
+                    .filter_map(|l| {
+                        l.get("name")
+                            .and_then(|n| n.as_str())
+                            .map(|s| s.to_string())
+                    })
                     .collect()
             })
             .unwrap_or_default();
 
         // List content (checklist) — when present overrides textContent.
-        let (kind, checklist_input) = if let Some(arr) = v.get("listContent").and_then(|x| x.as_array()) {
-            let items: Vec<ChecklistItemInput> = arr
-                .iter()
-                .enumerate()
-                .map(|(i, e)| ChecklistItemInput {
-                    id: None,
-                    text: e
-                        .get("text")
-                        .and_then(|t| t.as_str())
-                        .unwrap_or("")
-                        .to_string(),
-                    checked: e
-                        .get("isChecked")
-                        .and_then(|t| t.as_bool())
-                        .unwrap_or(false),
-                    position: i as i64,
-                    parent_id: None,
-                })
-                .collect();
-            ("list".to_string(), items)
-        } else {
-            ("text".to_string(), Vec::new())
-        };
+        let (kind, checklist_input) =
+            if let Some(arr) = v.get("listContent").and_then(|x| x.as_array()) {
+                let items: Vec<ChecklistItemInput> = arr
+                    .iter()
+                    .enumerate()
+                    .map(|(i, e)| ChecklistItemInput {
+                        id: None,
+                        text: e
+                            .get("text")
+                            .and_then(|t| t.as_str())
+                            .unwrap_or("")
+                            .to_string(),
+                        checked: e
+                            .get("isChecked")
+                            .and_then(|t| t.as_bool())
+                            .unwrap_or(false),
+                        position: i as i64,
+                        parent_id: None,
+                    })
+                    .collect();
+                ("list".to_string(), items)
+            } else {
+                ("text".to_string(), Vec::new())
+            };
 
         // Resolve label ids (creating missing ones).
         let mut label_ids: Vec<String> = Vec::new();
@@ -1463,38 +1640,70 @@ pub fn import_takeout(
                 if let Some(bytes) = blobs.get(&archive_path) {
                     let ext = mime_to_ext(&mime);
                     let new_id = Uuid::new_v4().to_string();
-                    let stored_name = format!("{new_id}.{ext}");
                     let resources_dir = state.data_dir.join("resources");
                     if std::fs::create_dir_all(&resources_dir).is_err() {
                         continue;
                     }
-                    // EI-V0.5-13 — insert row first, then write file; on
-                    // write failure DELETE the row so we never reference
-                    // a missing blob (mirrors add_image_attachment's
-                    // rollback pattern).
-                    let now = now_iso();
-                    let dest = resources_dir.join(&stored_name);
-                    {
-                        let conn = state.db.lock();
-                        if conn
-                            .execute(
-                                "INSERT INTO attachments (id, note_id, kind, mime, filename, byte_size, position, created_at)
-                                 VALUES (?1, ?2, 'image', ?3, ?4, ?5, 0, ?6)",
-                                params![new_id, created.id, mime, rel, bytes.len() as i64, now],
-                            )
-                            .is_err()
-                        {
-                            continue;
+                    let Ok(stored) = store_content_addressed_bytes(&resources_dir, bytes, ext)
+                    else {
+                        continue;
+                    };
+                    let mut width_recorded: Option<i64> = None;
+                    let mut height_recorded: Option<i64> = None;
+                    let mut thumb_path: Option<String> = None;
+                    if mime.starts_with("image/") && mime != "image/svg+xml" {
+                        if let Ok(decoded) = image::load_from_memory(bytes) {
+                            width_recorded = Some(decoded.width() as i64);
+                            height_recorded = Some(decoded.height() as i64);
+                            thumb_path = write_content_addressed_thumbnail(
+                                &resources_dir,
+                                &stored.hash,
+                                &decoded,
+                            );
                         }
                     }
-                    if std::fs::write(&dest, bytes).is_err() {
-                        // Roll back the row so the DB stays consistent.
-                        let conn = state.db.lock();
-                        let _ = conn.execute(
-                            "DELETE FROM attachments WHERE id = ?1",
-                            params![new_id],
-                        );
-                        continue;
+                    let now = now_iso();
+                    {
+                        let mut conn = state.db.lock();
+                        let insert_result: Result<(), String> = (|| {
+                            let tx = conn.transaction().map_err(err)?;
+                            let pos: i64 = tx
+                                .query_row(
+                                    "SELECT COALESCE(MAX(position) + 1, 0) FROM attachments WHERE note_id = ?1",
+                                    params![&created.id],
+                                    |r| r.get(0),
+                                )
+                                .map_err(err)?;
+                            tx.execute(
+                                "INSERT INTO attachments (id, note_id, kind, mime, filename, byte_size, width, height, position, created_at, resource_path, thumb_path)
+                                 VALUES (?1, ?2, 'image', ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                                params![
+                                    &new_id,
+                                    &created.id,
+                                    &mime,
+                                    &rel,
+                                    bytes.len() as i64,
+                                    width_recorded,
+                                    height_recorded,
+                                    pos,
+                                    &now,
+                                    &stored.rel_path,
+                                    thumb_path.as_deref(),
+                                ],
+                            )
+                            .map_err(err)?;
+                            tx.commit().map_err(err)?;
+                            Ok(())
+                        })();
+                        if insert_result.is_err() {
+                            cleanup_new_resource_on_insert_failure(
+                                &conn,
+                                &resources_dir,
+                                &stored,
+                                thumb_path.as_deref(),
+                            );
+                            continue;
+                        }
                     }
                 }
             }
@@ -1517,10 +1726,9 @@ fn is_keep_note_shape(v: &serde_json::Value) -> bool {
         None => return false,
     };
     let has_pinned = obj.get("isPinned").map(|x| x.is_boolean()).unwrap_or(false);
-    let has_ts = obj.contains_key("createdTimestampUsec")
-        || obj.contains_key("userEditedTimestampUsec");
-    let has_content = obj.contains_key("textContent")
-        || obj.contains_key("listContent");
+    let has_ts =
+        obj.contains_key("createdTimestampUsec") || obj.contains_key("userEditedTimestampUsec");
+    let has_content = obj.contains_key("textContent") || obj.contains_key("listContent");
     has_pinned && has_ts && has_content
 }
 
@@ -1568,7 +1776,10 @@ fn takeout_reminder_fire_at(r: &serde_json::Value) -> Option<String> {
             return Some(s.to_string());
         }
     }
-    if let Some(usec_value) = r.get("reminderTimeUsec").or_else(|| r.get("reminder_time_usec")) {
+    if let Some(usec_value) = r
+        .get("reminderTimeUsec")
+        .or_else(|| r.get("reminder_time_usec"))
+    {
         if let Some(iso) = takeout_usec_to_rfc3339(Some(usec_value)) {
             return Some(iso);
         }
@@ -1604,12 +1815,7 @@ pub struct Reminder {
 /// strings — that lets us expand `next_fire_at` in plain Rust without
 /// pulling a 70 KB RRULE crate. Custom intervals (e.g. every 2 weeks)
 /// land in a future pass.
-const ALLOWED_RRULES: &[&str] = &[
-    "FREQ=DAILY",
-    "FREQ=WEEKLY",
-    "FREQ=MONTHLY",
-    "FREQ=YEARLY",
-];
+const ALLOWED_RRULES: &[&str] = &["FREQ=DAILY", "FREQ=WEEKLY", "FREQ=MONTHLY", "FREQ=YEARLY"];
 
 fn validate_rrule(rrule: Option<&str>) -> Result<(), String> {
     match rrule {
@@ -1638,11 +1844,10 @@ pub fn next_fire_at(prev_fire_at: &str, rrule: Option<&str>) -> Option<String> {
             // Construct a new DateTime with year + 1. chrono doesn't
             // have add_years; do via with_year + leap-day clamp.
             let y = prev_utc.year() + 1;
-            prev_utc.with_year(y)
-                .or_else(|| {
-                    // Feb 29 → Feb 28 in non-leap years
-                    prev_utc.with_day(28).and_then(|d| d.with_year(y))
-                })?
+            prev_utc.with_year(y).or_else(|| {
+                // Feb 29 → Feb 28 in non-leap years
+                prev_utc.with_day(28).and_then(|d| d.with_year(y))
+            })?
         }
         _ => return None,
     };
@@ -1738,11 +1943,8 @@ pub fn clear_reminder(state: State<'_, AppState>, note_id: String) -> Result<(),
         return Err("a restore is currently in progress".into());
     }
     let conn = state.db.lock();
-    conn.execute(
-        "DELETE FROM reminders WHERE note_id = ?1",
-        params![note_id],
-    )
-    .map_err(err)?;
+    conn.execute("DELETE FROM reminders WHERE note_id = ?1", params![note_id])
+        .map_err(err)?;
     Ok(())
 }
 
@@ -2006,6 +2208,261 @@ fn guess_mime_for_ext(ext: &str) -> &'static str {
     }
 }
 
+#[derive(Clone, Debug)]
+struct StoredResource {
+    hash: String,
+    rel_path: String,
+    created: bool,
+}
+
+fn content_addressed_rel_path(hash: &str, ext: &str) -> String {
+    format!("{}/{}/{}.{}", &hash[0..2], &hash[2..4], hash, ext)
+}
+
+fn content_addressed_thumb_path(hash: &str) -> String {
+    format!("{}/{}/{}.thumb.jpg", &hash[0..2], &hash[2..4], hash)
+}
+
+fn store_content_addressed_bytes(
+    resources_dir: &Path,
+    bytes: &[u8],
+    ext: &str,
+) -> Result<StoredResource, String> {
+    let hash = blake3::hash(bytes).to_hex().to_string();
+    let rel_path = content_addressed_rel_path(&hash, ext);
+    let target = safe_resource_path(resources_dir, &rel_path)
+        .ok_or_else(|| format!("unsafe generated resource path: {rel_path}"))?;
+    if target.exists() {
+        return Ok(StoredResource {
+            hash,
+            rel_path,
+            created: false,
+        });
+    }
+    let parent = target
+        .parent()
+        .ok_or_else(|| format!("resource path has no parent: {}", target.display()))?;
+    std::fs::create_dir_all(parent).map_err(err)?;
+    let tmp_name = format!(
+        ".{}.{}.tmp",
+        target
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("resource"),
+        Uuid::new_v4()
+    );
+    let tmp = parent.join(tmp_name);
+    std::fs::write(&tmp, bytes).map_err(err)?;
+    match std::fs::rename(&tmp, &target) {
+        Ok(_) => Ok(StoredResource {
+            hash,
+            rel_path,
+            created: true,
+        }),
+        Err(_) if target.exists() => {
+            let _ = std::fs::remove_file(&tmp);
+            log::info!(
+                "attachment resource already existed after write race: {}",
+                target.display()
+            );
+            Ok(StoredResource {
+                hash,
+                rel_path,
+                created: false,
+            })
+        }
+        Err(e) => {
+            let _ = std::fs::remove_file(&tmp);
+            Err(err(e))
+        }
+    }
+}
+
+fn write_content_addressed_thumbnail(
+    resources_dir: &Path,
+    hash: &str,
+    decoded: &image::DynamicImage,
+) -> Option<String> {
+    let rel_path = content_addressed_thumb_path(hash);
+    let target = safe_resource_path(resources_dir, &rel_path)?;
+    if target.exists() {
+        return Some(rel_path);
+    }
+    if let Some(parent) = target.parent() {
+        if let Err(e) = std::fs::create_dir_all(parent) {
+            log::warn!("thumbnail dir create failed for {}: {e}", parent.display());
+            return None;
+        }
+    }
+    let thumb = decoded.thumbnail(480, 480);
+    if let Err(e) = thumb
+        .to_rgb8()
+        .save_with_format(&target, image::ImageFormat::Jpeg)
+    {
+        log::warn!("thumbnail generation failed for {}: {e}", target.display());
+        return None;
+    }
+    Some(rel_path)
+}
+
+fn cleanup_new_resource_on_insert_failure(
+    conn: &Connection,
+    resources_dir: &Path,
+    resource: &StoredResource,
+    thumb_path: Option<&str>,
+) {
+    if resource.created {
+        remove_if_unreferenced(conn, resources_dir, &resource.rel_path, "resource_path");
+    }
+    if let Some(thumb) = thumb_path {
+        remove_if_unreferenced(conn, resources_dir, thumb, "thumb_path");
+    }
+}
+
+const RESOURCE_ORPHAN_GRACE: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
+const RESOURCE_TRASH_RETENTION: std::time::Duration =
+    std::time::Duration::from_secs(30 * 24 * 60 * 60);
+
+#[derive(Debug, Default)]
+pub struct OrphanSweepStats {
+    pub moved_to_trash: usize,
+    pub purged: usize,
+}
+
+pub fn sweep_orphaned_resources(
+    conn: &Connection,
+    resources_dir: &Path,
+) -> Result<OrphanSweepStats, String> {
+    sweep_orphaned_resources_with_clock(
+        conn,
+        resources_dir,
+        std::time::SystemTime::now(),
+        RESOURCE_ORPHAN_GRACE,
+        RESOURCE_TRASH_RETENTION,
+    )
+}
+
+fn referenced_resource_paths(
+    conn: &Connection,
+) -> Result<std::collections::HashSet<String>, String> {
+    let mut stmt = conn
+        .prepare("SELECT id, mime, resource_path, thumb_path FROM attachments")
+        .map_err(err)?;
+    let rows = stmt
+        .query_map([], |r| {
+            Ok(AttachmentFiles {
+                id: r.get(0)?,
+                mime: r.get(1)?,
+                resource_path: r.get(2)?,
+                thumb_path: r.get(3)?,
+            })
+        })
+        .map_err(err)?;
+    let mut paths = std::collections::HashSet::new();
+    for row in rows {
+        let files = row.map_err(err)?;
+        paths.insert(attachment_resource_path(&files));
+        paths.insert(attachment_thumb_path(&files));
+    }
+    Ok(paths)
+}
+
+fn path_age(path: &Path, now: std::time::SystemTime) -> Option<std::time::Duration> {
+    std::fs::metadata(path)
+        .ok()
+        .and_then(|m| m.modified().ok())
+        .and_then(|modified| now.duration_since(modified).ok())
+}
+
+fn resource_rel_from_path(resources_dir: &Path, path: &Path) -> Option<String> {
+    path.strip_prefix(resources_dir)
+        .ok()
+        .map(|p| p.to_string_lossy().replace('\\', "/"))
+}
+
+fn move_orphan_to_trash(resources_dir: &Path, trash_dir: &Path, rel: &str) -> Result<(), String> {
+    let src = safe_resource_path(resources_dir, rel)
+        .ok_or_else(|| format!("unsafe orphan resource path: {rel}"))?;
+    let dst = trash_dir.join(rel);
+    if let Some(parent) = dst.parent() {
+        std::fs::create_dir_all(parent).map_err(err)?;
+    }
+    if dst.exists() {
+        std::fs::remove_file(&dst).map_err(err)?;
+    }
+    match std::fs::rename(&src, &dst) {
+        Ok(_) => Ok(()),
+        Err(rename_err) => {
+            std::fs::copy(&src, &dst).map_err(|copy_err| {
+                format!("could not move orphan resource ({rename_err}); copy failed ({copy_err})")
+            })?;
+            std::fs::remove_file(&src).map_err(err)?;
+            Ok(())
+        }
+    }
+}
+
+fn sweep_orphaned_resources_with_clock(
+    conn: &Connection,
+    resources_dir: &Path,
+    now: std::time::SystemTime,
+    orphan_grace: std::time::Duration,
+    trash_retention: std::time::Duration,
+) -> Result<OrphanSweepStats, String> {
+    if !resources_dir.exists() {
+        return Ok(OrphanSweepStats::default());
+    }
+    let referenced = referenced_resource_paths(conn)?;
+    let trash_dir = resources_dir.join(".trash");
+    let mut stats = OrphanSweepStats::default();
+
+    for entry in walkdir::WalkDir::new(resources_dir)
+        .min_depth(1)
+        .into_iter()
+        .filter_map(|e| e.ok())
+    {
+        let path = entry.path();
+        if !path.is_file() || path.starts_with(&trash_dir) {
+            continue;
+        }
+        let Some(rel) = resource_rel_from_path(resources_dir, path) else {
+            continue;
+        };
+        if referenced.contains(&rel) {
+            continue;
+        }
+        let Some(age) = path_age(path, now) else {
+            continue;
+        };
+        if age < orphan_grace {
+            continue;
+        }
+        move_orphan_to_trash(resources_dir, &trash_dir, &rel)?;
+        stats.moved_to_trash += 1;
+    }
+
+    if trash_dir.exists() {
+        for entry in walkdir::WalkDir::new(&trash_dir)
+            .min_depth(1)
+            .contents_first(true)
+            .into_iter()
+            .filter_map(|e| e.ok())
+        {
+            let path = entry.path();
+            if path.is_file() {
+                if path_age(path, now).is_some_and(|age| age >= trash_retention) {
+                    std::fs::remove_file(path).map_err(err)?;
+                    stats.purged += 1;
+                }
+            } else if path.is_dir() {
+                let _ = std::fs::remove_dir(path);
+            }
+        }
+    }
+
+    Ok(stats)
+}
+
 #[tauri::command]
 pub fn add_image_attachment(
     state: State<'_, AppState>,
@@ -2016,12 +2473,12 @@ pub fn add_image_attachment(
         return Err("a restore is currently in progress".into());
     }
     let src = PathBuf::from(&src_path);
-    let metadata = std::fs::metadata(&src).map_err(err)?;
-    if metadata.len() > MAX_ATTACHMENT_BYTES {
+    let bytes = std::fs::read(&src).map_err(err)?;
+    if bytes.len() as u64 > MAX_ATTACHMENT_BYTES {
         return Err(format!(
             "image exceeds {} bytes (got {})",
             MAX_ATTACHMENT_BYTES,
-            metadata.len()
+            bytes.len()
         ));
     }
     let ext = sanitize_extension(&src);
@@ -2034,23 +2491,54 @@ pub fn add_image_attachment(
         .take(255)
         .collect::<String>();
 
-    // Insert metadata first so we know the id; then write the file at
-    // <data_dir>/resources/<id>.<ext>. If the write fails, roll back.
-    let new_id = Uuid::new_v4().to_string();
-    let stored_name = format!("{new_id}.{ext}");
+    add_image_attachment_bytes_inner(
+        state.inner(),
+        note_id,
+        bytes,
+        mime.to_string(),
+        original_name,
+    )
+}
+
+fn add_image_attachment_bytes_inner(
+    state: &AppState,
+    note_id: String,
+    bytes: Vec<u8>,
+    mime: String,
+    original_name: String,
+) -> Result<Attachment, String> {
+    if bytes.len() as u64 > MAX_ATTACHMENT_BYTES {
+        return Err(format!(
+            "image exceeds {} bytes (got {})",
+            MAX_ATTACHMENT_BYTES,
+            bytes.len()
+        ));
+    }
+    let ext = mime_to_ext(&mime);
     let resources_dir = state.data_dir.join(RESOURCES_DIR);
     std::fs::create_dir_all(&resources_dir).map_err(err)?;
-    let dest = resources_dir.join(&stored_name);
+    let stored = store_content_addressed_bytes(&resources_dir, &bytes, ext)?;
 
-    // Verify the note exists + read the next position in one transaction.
+    let mut width_recorded: Option<i64> = None;
+    let mut height_recorded: Option<i64> = None;
+    let mut thumb_path: Option<String> = None;
+    if mime.starts_with("image/") && mime != "image/svg+xml" {
+        if let Ok(decoded) = image::load_from_memory(&bytes) {
+            width_recorded = Some(decoded.width() as i64);
+            height_recorded = Some(decoded.height() as i64);
+            thumb_path = write_content_addressed_thumbnail(&resources_dir, &stored.hash, &decoded);
+        }
+    }
+
+    let new_id = Uuid::new_v4().to_string();
     let mut conn = state.db.lock();
     let now = now_iso();
-    let position: i64 = {
+    let position_result: Result<i64, String> = (|| {
         let tx = conn.transaction().map_err(err)?;
         let exists: i64 = tx
             .query_row(
                 "SELECT COUNT(*) FROM notes WHERE id = ?1",
-                params![note_id],
+                params![&note_id],
                 |r| r.get(0),
             )
             .map_err(err)?;
@@ -2060,87 +2548,75 @@ pub fn add_image_attachment(
         let pos: i64 = tx
             .query_row(
                 "SELECT COALESCE(MAX(position) + 1, 0) FROM attachments WHERE note_id = ?1",
-                params![note_id],
+                params![&note_id],
                 |r| r.get(0),
             )
             .map_err(err)?;
         tx.execute(
-            "INSERT INTO attachments (id, note_id, kind, mime, filename, byte_size, position, created_at)
-             VALUES (?1, ?2, 'image', ?3, ?4, ?5, ?6, ?7)",
+            "INSERT INTO attachments (id, note_id, kind, mime, filename, byte_size, width, height, position, created_at, resource_path, thumb_path)
+             VALUES (?1, ?2, 'image', ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             params![
-                new_id,
-                note_id,
-                mime,
-                original_name,
-                metadata.len() as i64,
+                &new_id,
+                &note_id,
+                &mime,
+                &original_name,
+                bytes.len() as i64,
+                width_recorded,
+                height_recorded,
                 pos,
-                now,
+                &now,
+                &stored.rel_path,
+                thumb_path.as_deref(),
             ],
         )
         .map_err(err)?;
-        // Bump notes.updated_at so the card re-sorts to the top in
-        // Modified view.
         tx.execute(
             "UPDATE notes SET updated_at = ?1 WHERE id = ?2",
-            params![now, note_id],
+            params![&now, &note_id],
         )
         .map_err(err)?;
         tx.commit().map_err(err)?;
-        pos
+        Ok(pos)
+    })();
+    let position = match position_result {
+        Ok(pos) => pos,
+        Err(e) => {
+            cleanup_new_resource_on_insert_failure(
+                &conn,
+                &resources_dir,
+                &stored,
+                thumb_path.as_deref(),
+            );
+            return Err(e);
+        }
     };
     drop(conn);
-
-    // Now copy the file. If the copy fails we delete the row we just
-    // inserted so the DB doesn't reference a missing blob.
-    if let Err(copy_err) = std::fs::copy(&src, &dest) {
-        let conn = state.db.lock();
-        let _ = conn.execute("DELETE FROM attachments WHERE id = ?1", params![new_id]);
-        return Err(format!("could not copy attachment: {copy_err}"));
-    }
-
-    // NF-V0.5-B — generate a 480-px thumbnail next to the original.
-    // Best-effort: a failure here doesn't roll back; the AttachmentTile
-    // falls back to the original via onError. Width/height of the source
-    // are recorded too so future card layouts can avoid layout shifts.
-    let mut width_recorded: Option<i64> = None;
-    let mut height_recorded: Option<i64> = None;
-    if mime.starts_with("image/") && mime != "image/svg+xml" {
-        if let Ok(img) = image::ImageReader::open(&dest).and_then(|r| Ok(r.with_guessed_format()?)) {
-            if let Ok(decoded) = img.decode() {
-                width_recorded = Some(decoded.width() as i64);
-                height_recorded = Some(decoded.height() as i64);
-                let thumb = decoded.thumbnail(480, 480);
-                let thumb_path = resources_dir.join(format!("{new_id}.thumb.jpg"));
-                if let Err(e) = thumb.to_rgb8().save_with_format(
-                    &thumb_path,
-                    image::ImageFormat::Jpeg,
-                ) {
-                    eprintln!("keepr: thumbnail generation failed for {new_id}: {e}");
-                }
-            }
-        }
-        // Persist measured dimensions back to the attachments row.
-        if let (Some(w), Some(h)) = (width_recorded, height_recorded) {
-            let conn = state.db.lock();
-            let _ = conn.execute(
-                "UPDATE attachments SET width = ?1, height = ?2 WHERE id = ?3",
-                params![w, h, new_id],
-            );
-        }
-    }
 
     Ok(Attachment {
         id: new_id,
         note_id,
         kind: "image".into(),
-        mime: mime.into(),
+        mime,
         filename: original_name,
-        byte_size: metadata.len() as i64,
+        byte_size: bytes.len() as i64,
         width: width_recorded,
         height: height_recorded,
         position,
         created_at: now,
+        resource_path: Some(stored.rel_path),
+        thumb_path,
     })
+}
+
+fn image_ext_for_mime(mime: &str) -> Option<&'static str> {
+    match mime {
+        "image/png" => Some("png"),
+        "image/jpeg" => Some("jpg"),
+        "image/gif" => Some("gif"),
+        "image/webp" => Some("webp"),
+        "image/svg+xml" => Some("svg"),
+        _ => None,
+    }
 }
 
 /// NF-V0.5-I — companion to add_image_attachment for paste-from-
@@ -2159,42 +2635,9 @@ pub fn add_image_attachment_bytes(
     if state.importing.load(std::sync::atomic::Ordering::SeqCst) {
         return Err("a restore is currently in progress".into());
     }
-    if bytes.len() as u64 > MAX_ATTACHMENT_BYTES {
-        return Err(format!(
-            "image exceeds {} bytes (got {})",
-            MAX_ATTACHMENT_BYTES,
-            bytes.len()
-        ));
-    }
-    // Stage bytes in a temp file so add_image_attachment's existing flow
-    // (file copy + thumbnail + DB insert + rollback) is reused. The temp
-    // file is dropped right after the call regardless of outcome.
-    let ext = match mime.as_str() {
-        "image/png" => "png",
-        "image/jpeg" => "jpg",
-        "image/gif" => "gif",
-        "image/webp" => "webp",
-        "image/svg+xml" => "svg",
-        _ => return Err(format!("unsupported mime: {mime}")),
-    };
-    let tmp = std::env::temp_dir().join(format!(
-        "keepr-paste-{}.{ext}",
-        Uuid::new_v4()
-    ));
-    if let Err(e) = std::fs::write(&tmp, &bytes) {
-        return Err(format!("could not stage clipboard bytes: {e}"));
-    }
+    let ext = image_ext_for_mime(&mime).ok_or_else(|| format!("unsupported mime: {mime}"))?;
     let original_name = filename_hint.unwrap_or_else(|| format!("pasted.{ext}"));
-    // Reuse the file-path flow with a faked-but-real path.
-    let tmp_path_str = tmp.to_string_lossy().to_string();
-    let result = add_image_attachment(state, note_id, tmp_path_str);
-    let _ = std::fs::remove_file(&tmp);
-    // Override filename on success — add_image_attachment derives it
-    // from the temp file's name; for paste we want the hint.
-    result.map(|mut a| {
-        a.filename = original_name;
-        a
-    })
+    add_image_attachment_bytes_inner(state.inner(), note_id, bytes, mime, original_name)
 }
 
 /// v0.20.3 — audio voice note attachment. The bytes come from a
@@ -2229,21 +2672,20 @@ pub fn add_audio_attachment_bytes(
         "audio/wav" => "wav",
         _ => return Err(format!("unsupported audio mime: {mime}")),
     };
-    let new_id = Uuid::new_v4().to_string();
-    let stored_name = format!("{new_id}.{ext}");
     let resources_dir = state.data_dir.join(RESOURCES_DIR);
     std::fs::create_dir_all(&resources_dir).map_err(err)?;
-    let dest = resources_dir.join(&stored_name);
+    let stored = store_content_addressed_bytes(&resources_dir, &bytes, ext)?;
+    let new_id = Uuid::new_v4().to_string();
     let original_name = filename_hint.unwrap_or_else(|| format!("voice-note.{ext}"));
 
     let mut conn = state.db.lock();
     let now = now_iso();
-    let position: i64 = {
+    let position_result: Result<i64, String> = (|| {
         let tx = conn.transaction().map_err(err)?;
         let exists: i64 = tx
             .query_row(
                 "SELECT COUNT(*) FROM notes WHERE id = ?1",
-                params![note_id],
+                params![&note_id],
                 |r| r.get(0),
             )
             .map_err(err)?;
@@ -2253,39 +2695,41 @@ pub fn add_audio_attachment_bytes(
         let pos: i64 = tx
             .query_row(
                 "SELECT COALESCE(MAX(position) + 1, 0) FROM attachments WHERE note_id = ?1",
-                params![note_id],
+                params![&note_id],
                 |r| r.get(0),
             )
             .map_err(err)?;
         tx.execute(
-            "INSERT INTO attachments (id, note_id, kind, mime, filename, byte_size, position, created_at)
-             VALUES (?1, ?2, 'audio', ?3, ?4, ?5, ?6, ?7)",
+            "INSERT INTO attachments (id, note_id, kind, mime, filename, byte_size, position, created_at, resource_path)
+             VALUES (?1, ?2, 'audio', ?3, ?4, ?5, ?6, ?7, ?8)",
             params![
-                new_id,
-                note_id,
-                mime,
-                original_name,
+                &new_id,
+                &note_id,
+                &mime,
+                &original_name,
                 bytes.len() as i64,
                 pos,
-                now,
+                &now,
+                &stored.rel_path,
             ],
         )
         .map_err(err)?;
         tx.execute(
             "UPDATE notes SET updated_at = ?1 WHERE id = ?2",
-            params![now, note_id],
+            params![&now, &note_id],
         )
         .map_err(err)?;
         tx.commit().map_err(err)?;
-        pos
+        Ok(pos)
+    })();
+    let position = match position_result {
+        Ok(pos) => pos,
+        Err(e) => {
+            cleanup_new_resource_on_insert_failure(&conn, &resources_dir, &stored, None);
+            return Err(e);
+        }
     };
     drop(conn);
-
-    if let Err(write_err) = std::fs::write(&dest, &bytes) {
-        let conn = state.db.lock();
-        let _ = conn.execute("DELETE FROM attachments WHERE id = ?1", params![new_id]);
-        return Err(format!("could not write audio blob: {write_err}"));
-    }
 
     Ok(Attachment {
         id: new_id,
@@ -2298,6 +2742,8 @@ pub fn add_audio_attachment_bytes(
         height: None,
         position,
         created_at: now,
+        resource_path: Some(stored.rel_path),
+        thumb_path: None,
     })
 }
 
@@ -2307,14 +2753,24 @@ pub fn delete_attachment(state: State<'_, AppState>, id: String) -> Result<(), S
         return Err("a restore is currently in progress".into());
     }
     let conn = state.db.lock();
-    let (note_id, mime): (String, String) = conn
+    let (note_id, files): (String, AttachmentFiles) = conn
         .query_row(
-            "SELECT note_id, mime FROM attachments WHERE id = ?1",
-            params![id],
-            |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)),
+            "SELECT note_id, id, mime, resource_path, thumb_path FROM attachments WHERE id = ?1",
+            params![&id],
+            |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    AttachmentFiles {
+                        id: r.get(1)?,
+                        mime: r.get(2)?,
+                        resource_path: r.get(3)?,
+                        thumb_path: r.get(4)?,
+                    },
+                ))
+            },
         )
         .map_err(|_| format!("attachment {id} not found"))?;
-    conn.execute("DELETE FROM attachments WHERE id = ?1", params![id])
+    conn.execute("DELETE FROM attachments WHERE id = ?1", params![&id])
         .map_err(err)?;
     // Best-effort: bump updated_at so cards re-sort.
     let now = now_iso();
@@ -2322,9 +2778,9 @@ pub fn delete_attachment(state: State<'_, AppState>, id: String) -> Result<(), S
         "UPDATE notes SET updated_at = ?1 WHERE id = ?2",
         params![now, note_id],
     );
-    drop(conn);
     let resources = state.data_dir.join(RESOURCES_DIR);
-    delete_attachment_files(&resources, &id, &mime);
+    delete_attachment_files(&conn, &resources, &files);
+    drop(conn);
     Ok(())
 }
 
@@ -2357,10 +2813,10 @@ pub fn reorder_notes(state: State<'_, AppState>, ids: Vec<String>) -> Result<(),
 ///
 /// Cascading FK takes care of `attachments`, `note_labels`, `reminders`,
 /// `note_snapshots`, `checklist_items`, etc. rows. **But the resource
-/// files at `<data_dir>/resources/<id>.<ext>` are NOT covered by the DB
-/// cascade** — they have to be removed manually, or the user's disk fills
-/// up with orphaned blobs after every "Delete forever" (silent data /
-/// space leak that survived from v0.1 → v0.22).
+/// files at `<data_dir>/resources/...` are NOT covered by the DB cascade** —
+/// they have to be removed manually, or the user's disk fills up with orphaned
+/// blobs after every "Delete forever" (silent data / space leak that survived
+/// from v0.1 → v0.22).
 #[tauri::command]
 pub fn delete_note_permanent(state: State<'_, AppState>, id: String) -> Result<(), String> {
     if state.importing.load(std::sync::atomic::Ordering::SeqCst) {
@@ -2368,24 +2824,19 @@ pub fn delete_note_permanent(state: State<'_, AppState>, id: String) -> Result<(
     }
     let conn = state.db.lock();
     // Snapshot attachment file metadata BEFORE the cascade deletes the rows.
-    let files = collect_attachment_files(&conn, std::slice::from_ref(&id))
-        .map_err(err)?;
+    let files = collect_attachment_files(&conn, std::slice::from_ref(&id)).map_err(err)?;
     conn.execute("DELETE FROM notes WHERE id = ?1", params![id])
         .map_err(err)?;
-    drop(conn);
     let resources = state.data_dir.join(RESOURCES_DIR);
-    for (att_id, mime) in &files {
-        delete_attachment_files(&resources, att_id, mime);
+    for files in &files {
+        delete_attachment_files(&conn, &resources, files);
     }
+    drop(conn);
     Ok(())
 }
 
 #[tauri::command]
-pub fn set_archived(
-    state: State<'_, AppState>,
-    id: String,
-    archived: bool,
-) -> Result<(), String> {
+pub fn set_archived(state: State<'_, AppState>, id: String, archived: bool) -> Result<(), String> {
     let conn = state.db.lock();
     let now = now_iso();
     conn.execute(
@@ -2397,11 +2848,7 @@ pub fn set_archived(
 }
 
 #[tauri::command]
-pub fn set_trashed(
-    state: State<'_, AppState>,
-    id: String,
-    trashed: bool,
-) -> Result<(), String> {
+pub fn set_trashed(state: State<'_, AppState>, id: String, trashed: bool) -> Result<(), String> {
     let conn = state.db.lock();
     let now = now_iso();
     if trashed {
@@ -2492,18 +2939,17 @@ pub fn create_label(state: State<'_, AppState>, name: String) -> Result<Label, S
 }
 
 #[tauri::command]
-pub fn rename_label(
-    state: State<'_, AppState>,
-    id: String,
-    name: String,
-) -> Result<(), String> {
+pub fn rename_label(state: State<'_, AppState>, id: String, name: String) -> Result<(), String> {
     let conn = state.db.lock();
     let trimmed = name.trim();
     if trimmed.is_empty() {
         return Err("label name cannot be empty".into());
     }
-    conn.execute("UPDATE labels SET name = ?1 WHERE id = ?2", params![trimmed, id])
-        .map_err(err)?;
+    conn.execute(
+        "UPDATE labels SET name = ?1 WHERE id = ?2",
+        params![trimmed, id],
+    )
+    .map_err(err)?;
     Ok(())
 }
 
@@ -2523,8 +2969,11 @@ pub fn set_note_labels(
 ) -> Result<(), String> {
     let mut conn = state.db.lock();
     let tx = conn.transaction().map_err(err)?;
-    tx.execute("DELETE FROM note_labels WHERE note_id = ?1", params![note_id])
-        .map_err(err)?;
+    tx.execute(
+        "DELETE FROM note_labels WHERE note_id = ?1",
+        params![note_id],
+    )
+    .map_err(err)?;
     for lid in label_ids {
         tx.execute(
             "INSERT OR IGNORE INTO note_labels (note_id, label_id) VALUES (?1, ?2)",
@@ -2551,12 +3000,13 @@ pub fn empty_trash(state: State<'_, AppState>) -> Result<(), String> {
         .collect::<rusqlite::Result<Vec<_>>>()
         .map_err(err)?;
     let files = collect_attachment_files(&conn, &note_ids).map_err(err)?;
-    conn.execute("DELETE FROM notes WHERE trashed = 1", []).map_err(err)?;
-    drop(conn);
+    conn.execute("DELETE FROM notes WHERE trashed = 1", [])
+        .map_err(err)?;
     let resources = state.data_dir.join(RESOURCES_DIR);
-    for (att_id, mime) in &files {
-        delete_attachment_files(&resources, att_id, mime);
+    for files in &files {
+        delete_attachment_files(&conn, &resources, files);
     }
+    drop(conn);
     log::info!(
         "empty_trash: deleted {} notes, cleaned {} attachment files",
         note_ids.len(),
@@ -2798,9 +3248,7 @@ fn read_vault_seed_material(
 fn require_unlocked_dek<'a>(
     guard: &'a parking_lot::MutexGuard<'_, Option<crate::vault::Dek>>,
 ) -> Result<&'a crate::vault::Dek, String> {
-    guard
-        .as_ref()
-        .ok_or_else(|| "vault is locked".to_string())
+    guard.as_ref().ok_or_else(|| "vault is locked".to_string())
 }
 
 #[tauri::command]
@@ -2821,8 +3269,16 @@ pub fn init_vault(state: State<'_, AppState>, password: String) -> Result<(), St
         return Err("vault already initialized".into());
     }
     let (init_data, dek) = crate::vault::init(&password).map_err(|e| e.to_string())?;
-    write_app_setting(&conn, KEY_VAULT_SALT, &crate::vault::to_hex(&init_data.salt))?;
-    write_app_setting(&conn, KEY_VAULT_NONCE, &crate::vault::to_hex(&init_data.dek_nonce))?;
+    write_app_setting(
+        &conn,
+        KEY_VAULT_SALT,
+        &crate::vault::to_hex(&init_data.salt),
+    )?;
+    write_app_setting(
+        &conn,
+        KEY_VAULT_NONCE,
+        &crate::vault::to_hex(&init_data.dek_nonce),
+    )?;
     write_app_setting(
         &conn,
         KEY_VAULT_WRAPPED,
@@ -2892,7 +3348,11 @@ pub fn change_vault_password(
         .map_err(|e| e.to_string())?;
     let dek = dek_opt.ok_or_else(|| "incorrect current vault password".to_string())?;
     let rewrapped = crate::vault::rewrap(&dek, &new_password).map_err(|e| e.to_string())?;
-    write_app_setting(&conn, KEY_VAULT_SALT, &crate::vault::to_hex(&rewrapped.salt))?;
+    write_app_setting(
+        &conn,
+        KEY_VAULT_SALT,
+        &crate::vault::to_hex(&rewrapped.salt),
+    )?;
     write_app_setting(
         &conn,
         KEY_VAULT_NONCE,
@@ -2953,7 +3413,11 @@ pub fn setup_vault_recovery_seed(
         .map_err(|e| e.to_string())?;
     let dek = dek_opt.ok_or_else(|| "incorrect current vault password".to_string())?;
     let (phrase, envelope) = crate::vault::seed_init(&dek).map_err(|e| e.to_string())?;
-    write_app_setting(&conn, KEY_VAULT_SEED_SALT, &crate::vault::to_hex(&envelope.salt))?;
+    write_app_setting(
+        &conn,
+        KEY_VAULT_SEED_SALT,
+        &crate::vault::to_hex(&envelope.salt),
+    )?;
     write_app_setting(
         &conn,
         KEY_VAULT_SEED_NONCE,
@@ -2985,7 +3449,11 @@ pub fn remove_vault_recovery_seed(state: State<'_, AppState>) -> Result<(), Stri
     // here directly so the column is truly absent.
     conn.execute(
         "DELETE FROM app_settings WHERE key IN (?1, ?2, ?3)",
-        params![KEY_VAULT_SEED_SALT, KEY_VAULT_SEED_NONCE, KEY_VAULT_SEED_WRAPPED],
+        params![
+            KEY_VAULT_SEED_SALT,
+            KEY_VAULT_SEED_NONCE,
+            KEY_VAULT_SEED_WRAPPED
+        ],
     )
     .map_err(err)?;
     Ok(())
@@ -3022,7 +3490,11 @@ pub fn recover_vault_with_seed(
         .map_err(|e| e.to_string())?;
     let dek = dek_opt.ok_or_else(|| "recovery phrase did not match this vault".to_string())?;
     let rewrapped = crate::vault::rewrap(&dek, &new_password).map_err(|e| e.to_string())?;
-    write_app_setting(&conn, KEY_VAULT_SALT, &crate::vault::to_hex(&rewrapped.salt))?;
+    write_app_setting(
+        &conn,
+        KEY_VAULT_SALT,
+        &crate::vault::to_hex(&rewrapped.salt),
+    )?;
     write_app_setting(
         &conn,
         KEY_VAULT_NONCE,
@@ -3218,8 +3690,8 @@ pub fn list_snapshots(
     let snaps = stmt
         .query_map(params![note_id], |row| {
             let checklist_json: String = row.get(7)?;
-            let checklist: Vec<ChecklistItem> = serde_json::from_str(&checklist_json)
-                .unwrap_or_default();
+            let checklist: Vec<ChecklistItem> =
+                serde_json::from_str(&checklist_json).unwrap_or_default();
             Ok(NoteSnapshot {
                 id: row.get(0)?,
                 note_id: row.get(1)?,
@@ -3240,10 +3712,7 @@ pub fn list_snapshots(
 }
 
 #[tauri::command]
-pub fn restore_snapshot(
-    state: State<'_, AppState>,
-    snapshot_id: String,
-) -> Result<Note, String> {
+pub fn restore_snapshot(state: State<'_, AppState>, snapshot_id: String) -> Result<Note, String> {
     if state.importing.load(std::sync::atomic::Ordering::SeqCst) {
         return Err("a restore is currently in progress".into());
     }
@@ -3251,17 +3720,7 @@ pub fn restore_snapshot(
     let mut conn = state.db.lock();
     let tx = conn.transaction().map_err(err)?;
     let now = now_iso();
-    let (
-        note_id,
-        kind,
-        title,
-        body,
-        color,
-        pinned,
-        checklist_json,
-        snap_vault,
-        snap_ciphertext,
-    ): (
+    let (note_id, kind, title, body, color, pinned, checklist_json, snap_vault, snap_ciphertext): (
         String,
         String,
         String,
@@ -3319,13 +3778,19 @@ pub fn restore_snapshot(
     )
     .map_err(err)?;
     if snap_vault == "plain" {
-        let items: Vec<ChecklistItem> =
-            serde_json::from_str(&checklist_json).unwrap_or_default();
+        let items: Vec<ChecklistItem> = serde_json::from_str(&checklist_json).unwrap_or_default();
         for item in &items {
             tx.execute(
                 "INSERT INTO checklist_items (id, note_id, text, checked, position, parent_id) \
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                params![item.id, note_id, item.text, item.checked as i64, item.position, item.parent_id],
+                params![
+                    item.id,
+                    note_id,
+                    item.text,
+                    item.checked as i64,
+                    item.position,
+                    item.parent_id
+                ],
             )
             .map_err(err)?;
         }
@@ -3358,8 +3823,7 @@ pub fn move_note_out_of_vault(state: State<'_, AppState>, id: String) -> Result<
     if vault_state != "vault" {
         return Err("note is not in the vault".into());
     }
-    let bundle_hex = ciphertext_hex
-        .ok_or_else(|| "vault note missing ciphertext".to_string())?;
+    let bundle_hex = ciphertext_hex.ok_or_else(|| "vault note missing ciphertext".to_string())?;
     let bundle = crate::vault::from_hex(&bundle_hex).map_err(|e| e.to_string())?;
     let payload = crate::vault::decrypt_note(dek, &id, &bundle).map_err(|e| e.to_string())?;
     let now = chrono::Utc::now().to_rfc3339();
@@ -3579,10 +4043,7 @@ pub fn prune_auto_backups(folder: String, keep: u32) -> Result<u32, String> {
 /// is acceptable — each per-note call commits its own transaction
 /// already). Returns the count successfully moved. v0.20.2.
 #[tauri::command]
-pub fn move_notes_to_vault(
-    state: State<'_, AppState>,
-    ids: Vec<String>,
-) -> Result<u32, String> {
+pub fn move_notes_to_vault(state: State<'_, AppState>, ids: Vec<String>) -> Result<u32, String> {
     let mut moved: u32 = 0;
     for id in ids {
         move_note_to_vault(state.clone(), id)?;
@@ -3661,10 +4122,7 @@ fn validate_zip_archive<R: std::io::Read + std::io::Seek>(
 }
 
 #[tauri::command]
-pub fn export_zip(
-    state: State<'_, AppState>,
-    dest: String,
-) -> Result<String, String> {
+pub fn export_zip(state: State<'_, AppState>, dest: String) -> Result<String, String> {
     if state.importing.load(std::sync::atomic::Ordering::SeqCst) {
         return Err("a restore is currently in progress".into());
     }
@@ -3672,7 +4130,10 @@ pub fn export_zip(
     let dest_path = PathBuf::from(&dest);
     if let Some(parent) = dest_path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| {
-            log::error!("export_zip: could not create parent dir {}: {e}", parent.display());
+            log::error!(
+                "export_zip: could not create parent dir {}: {e}",
+                parent.display()
+            );
             err(e)
         })?;
     }
@@ -3759,10 +4220,7 @@ pub fn export_zip(
 }
 
 #[tauri::command]
-pub fn import_zip(
-    state: State<'_, AppState>,
-    src: String,
-) -> Result<(), String> {
+pub fn import_zip(state: State<'_, AppState>, src: String) -> Result<(), String> {
     // EI-03 — busy gate. swap() returns the previous value; if it was already
     // true, another import is in flight and we must refuse rather than race.
     if state
@@ -3982,9 +4440,7 @@ pub struct SpeechModelStatus {
 /// transcription uses this to decide whether to show "Download" or
 /// "Delete + Re-download".
 #[tauri::command]
-pub fn get_speech_model_status(
-    state: State<'_, AppState>,
-) -> Result<SpeechModelStatus, String> {
+pub fn get_speech_model_status(state: State<'_, AppState>) -> Result<SpeechModelStatus, String> {
     let path = crate::transcribe::model_path(&state.data_dir);
     Ok(SpeechModelStatus {
         downloaded: path.exists(),
@@ -4079,21 +4535,31 @@ pub async fn transcribe_audio_attachment(
     // Resolve the audio path + verify it's an audio kind.
     let (note_id, audio_path) = {
         let conn = state.db.lock();
-        let (note_id, kind, mime): (String, String, String) = conn
+        let (note_id, kind, files): (String, String, AttachmentFiles) = conn
             .query_row(
-                "SELECT note_id, kind, mime FROM attachments WHERE id = ?1",
-                params![attachment_id],
-                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                "SELECT note_id, kind, id, mime, resource_path, thumb_path FROM attachments WHERE id = ?1",
+                params![&attachment_id],
+                |r| {
+                    Ok((
+                        r.get(0)?,
+                        r.get(1)?,
+                        AttachmentFiles {
+                            id: r.get(2)?,
+                            mime: r.get(3)?,
+                            resource_path: r.get(4)?,
+                            thumb_path: r.get(5)?,
+                        },
+                    ))
+                },
             )
             .map_err(|_| format!("attachment {attachment_id} not found"))?;
         if kind != "audio" {
             return Err(format!("attachment {attachment_id} is not an audio kind"));
         }
-        let ext = mime_to_ext(&mime);
         let path = state
             .data_dir
             .join(RESOURCES_DIR)
-            .join(format!("{attachment_id}.{ext}"));
+            .join(attachment_resource_path(&files));
         (note_id, path)
     };
     if !audio_path.exists() {
@@ -4152,7 +4618,9 @@ pub async fn transcribe_audio_attachment(
         })();
         let _ = tx.send(work);
     });
-    let text = rx.await.map_err(|e| format!("worker thread crashed: {e}"))??;
+    let text = rx
+        .await
+        .map_err(|e| format!("worker thread crashed: {e}"))??;
 
     // Persist (upsert by attachment_id).
     let now = now_iso();
@@ -4175,7 +4643,10 @@ pub async fn transcribe_audio_attachment(
             params![now, note_id],
         );
     }
-    log::info!("transcribe: completed for {attachment_id} ({} chars)", text.len());
+    log::info!(
+        "transcribe: completed for {attachment_id} ({} chars)",
+        text.len()
+    );
     Ok(text)
 }
 
@@ -4252,10 +4723,7 @@ mod tests {
         // Non-alphanumeric characters dropped
         assert_eq!(sanitize_extension(Path::new("foo.t!@#xt")), "txt");
         // Truncated at 8 chars
-        assert_eq!(
-            sanitize_extension(Path::new("foo.abcdefghij")),
-            "abcdefgh"
-        );
+        assert_eq!(sanitize_extension(Path::new("foo.abcdefghij")), "abcdefgh");
     }
 
     #[test]
@@ -4272,20 +4740,23 @@ mod tests {
             "note-abc12345",
         );
         // Trims leading dots/spaces
-        assert_eq!(
-            sanitize_vault_filename("  .hidden  ", "xyz"),
-            "hidden",
-        );
+        assert_eq!(sanitize_vault_filename("  .hidden  ", "xyz"), "hidden",);
     }
 
     #[test]
     fn yaml_quote_if_needed_quotes_special() {
         assert_eq!(yaml_quote_if_needed("safe"), "safe");
         assert_eq!(yaml_quote_if_needed("with: colon"), "\"with: colon\"");
-        assert_eq!(yaml_quote_if_needed("- starts-with-dash"), "\"- starts-with-dash\"");
+        assert_eq!(
+            yaml_quote_if_needed("- starts-with-dash"),
+            "\"- starts-with-dash\""
+        );
         assert_eq!(yaml_quote_if_needed(""), "\"\"");
         // Backslash + quote escape
-        assert_eq!(yaml_quote_if_needed("she said \"hi\""), "\"she said \\\"hi\\\"\"");
+        assert_eq!(
+            yaml_quote_if_needed("she said \"hi\""),
+            "\"she said \\\"hi\\\"\""
+        );
     }
 
     #[test]
@@ -4427,6 +4898,34 @@ mod tests {
         assert_eq!(guess_mime_for_ext("unknown"), "application/octet-stream");
     }
 
+    #[test]
+    fn content_addressed_paths_use_two_level_hash_fanout() {
+        let hash = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789";
+        assert_eq!(
+            content_addressed_rel_path(hash, "png"),
+            format!("ab/cd/{hash}.png")
+        );
+        assert_eq!(
+            content_addressed_thumb_path(hash),
+            format!("ab/cd/{hash}.thumb.jpg")
+        );
+    }
+
+    #[test]
+    fn store_content_addressed_bytes_deduplicates_identical_payloads() {
+        let tmp = tempfile::tempdir().unwrap();
+        let first = store_content_addressed_bytes(tmp.path(), b"same image", "png").unwrap();
+        let second = store_content_addressed_bytes(tmp.path(), b"same image", "png").unwrap();
+
+        assert_eq!(first.rel_path, second.rel_path);
+        assert!(first.created);
+        assert!(!second.created);
+        assert_eq!(
+            std::fs::read(tmp.path().join(first.rel_path)).unwrap(),
+            b"same image"
+        );
+    }
+
     // --- Direct-AppState integration tests ---
     //
     // These construct an AppState manually with an in-memory SQLite
@@ -4468,6 +4967,111 @@ mod tests {
     }
 
     #[test]
+    fn resource_sweep_moves_unreferenced_files_to_trash() {
+        let state = test_state();
+        insert_test_note(&state, "n1", "has attachment");
+        let resources = state.data_dir.join("resources");
+        let referenced =
+            "ab/cd/abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789.png";
+        let orphan = "de/ad/deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef.png";
+        let referenced_path = resources.join(referenced);
+        let orphan_path = resources.join(orphan);
+        std::fs::create_dir_all(referenced_path.parent().unwrap()).unwrap();
+        std::fs::create_dir_all(orphan_path.parent().unwrap()).unwrap();
+        std::fs::write(&referenced_path, b"kept").unwrap();
+        std::fs::write(&orphan_path, b"moved").unwrap();
+
+        {
+            let conn = state.db.lock();
+            conn.execute(
+                "INSERT INTO attachments (id, note_id, kind, mime, filename, byte_size, position, created_at, resource_path)
+                 VALUES ('a1', 'n1', 'image', 'image/png', 'kept.png', 4, 0, '2026-01-01T00:00:00Z', ?1)",
+                params![referenced],
+            )
+            .unwrap();
+            let stats = sweep_orphaned_resources_with_clock(
+                &conn,
+                &resources,
+                std::time::SystemTime::now() + std::time::Duration::from_secs(1),
+                std::time::Duration::ZERO,
+                std::time::Duration::from_secs(30 * 24 * 60 * 60),
+            )
+            .unwrap();
+            assert_eq!(stats.moved_to_trash, 1);
+            assert_eq!(stats.purged, 0);
+        }
+
+        assert!(referenced_path.exists());
+        assert!(!orphan_path.exists());
+        assert!(resources.join(".trash").join(orphan).exists());
+    }
+
+    #[test]
+    fn content_addressed_delete_keeps_shared_blob_until_last_reference() {
+        let state = test_state();
+        insert_test_note(&state, "n1", "first");
+        insert_test_note(&state, "n2", "second");
+        let resources = state.data_dir.join("resources");
+        let rel = "ab/cd/abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789.png";
+        let thumb =
+            "ab/cd/abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789.thumb.jpg";
+        let path = resources.join(rel);
+        let thumb_path = resources.join(thumb);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, b"shared").unwrap();
+        std::fs::write(&thumb_path, b"thumb").unwrap();
+
+        let conn = state.db.lock();
+        for (id, note_id) in [("a1", "n1"), ("a2", "n2")] {
+            conn.execute(
+                "INSERT INTO attachments (id, note_id, kind, mime, filename, byte_size, position, created_at, resource_path, thumb_path)
+                 VALUES (?1, ?2, 'image', 'image/png', 'shared.png', 6, 0, '2026-01-01T00:00:00Z', ?3, ?4)",
+                params![id, note_id, rel, thumb],
+            )
+            .unwrap();
+        }
+
+        conn.execute("DELETE FROM attachments WHERE id = 'a1'", [])
+            .unwrap();
+        delete_attachment_files(
+            &conn,
+            &resources,
+            &AttachmentFiles {
+                id: "a1".into(),
+                mime: "image/png".into(),
+                resource_path: Some(rel.into()),
+                thumb_path: Some(thumb.into()),
+            },
+        );
+        assert!(
+            path.exists(),
+            "shared resource deleted while a2 still references it"
+        );
+        assert!(
+            thumb_path.exists(),
+            "shared thumbnail deleted while a2 still references it"
+        );
+
+        conn.execute("DELETE FROM attachments WHERE id = 'a2'", [])
+            .unwrap();
+        delete_attachment_files(
+            &conn,
+            &resources,
+            &AttachmentFiles {
+                id: "a2".into(),
+                mime: "image/png".into(),
+                resource_path: Some(rel.into()),
+                thumb_path: Some(thumb.into()),
+            },
+        );
+        assert!(!path.exists(), "last reference should remove resource");
+        assert!(
+            !thumb_path.exists(),
+            "last reference should remove shared thumbnail"
+        );
+    }
+
+    #[test]
     fn peek_due_reminders_returns_only_pending_and_due() {
         let state = test_state();
         insert_test_note(&state, "n1", "due note");
@@ -4499,11 +5103,8 @@ mod tests {
         let state = test_state();
         insert_test_note(&state, "n_trash", "trashed");
         let conn = state.db.lock();
-        conn.execute(
-            "UPDATE notes SET trashed = 1 WHERE id = 'n_trash'",
-            [],
-        )
-        .unwrap();
+        conn.execute("UPDATE notes SET trashed = 1 WHERE id = 'n_trash'", [])
+            .unwrap();
         conn.execute(
             "INSERT INTO reminders (note_id, fire_at, created_at) VALUES ('n_trash', '2026-05-26T11:00:00Z', '2026-05-26T11:00:00Z')",
             [],
@@ -4584,7 +5185,10 @@ mod tests {
         assert_eq!(build_fts5_query("foo(bar)"), "\"foo(bar)\"*");
         assert_eq!(build_fts5_query("ab\"cd"), "\"ab\"\"cd\"*");
         // AND / OR / NEAR — FTS5 keywords. Quoting neutralizes them.
-        assert_eq!(build_fts5_query("milk OR eggs"), "\"milk\"* \"OR\"* \"eggs\"*");
+        assert_eq!(
+            build_fts5_query("milk OR eggs"),
+            "\"milk\"* \"OR\"* \"eggs\"*"
+        );
     }
 
     #[test]
@@ -4618,9 +5222,11 @@ mod tests {
             true,
         );
         // Yearly (with leap-day clamp)
-        assert!(next_fire_at("2024-02-29T08:00:00+00:00", Some("FREQ=YEARLY"))
-            .unwrap()
-            .starts_with("2025-02-28"));
+        assert!(
+            next_fire_at("2024-02-29T08:00:00+00:00", Some("FREQ=YEARLY"))
+                .unwrap()
+                .starts_with("2025-02-28")
+        );
         // None for single-shot
         assert_eq!(next_fire_at("2026-05-26T08:00:00+00:00", None), None);
         // Unsupported rrule
@@ -4664,8 +5270,14 @@ mod tests {
                 |r| Ok((r.get(0)?, r.get(1)?)),
             )
             .unwrap();
-        assert!(fire_at.starts_with("2026-05-27T08:00:00"), "got fire_at: {fire_at}");
-        assert!(fired_at.is_none(), "fired_at should be NULL after recurring advance");
+        assert!(
+            fire_at.starts_with("2026-05-27T08:00:00"),
+            "got fire_at: {fire_at}"
+        );
+        assert!(
+            fired_at.is_none(),
+            "fired_at should be NULL after recurring advance"
+        );
     }
 
     #[test]
@@ -4702,9 +5314,21 @@ mod tests {
         // Mutate updated_at so the ROW_NUMBER OVER (ORDER BY updated_at DESC) sees
         // a deterministic order.
         let conn = state.db.lock();
-        conn.execute("UPDATE notes SET updated_at = '2026-05-01' WHERE id = 'a'", []).unwrap();
-        conn.execute("UPDATE notes SET updated_at = '2026-05-03' WHERE id = 'b'", []).unwrap();
-        conn.execute("UPDATE notes SET updated_at = '2026-05-02' WHERE id = 'c'", []).unwrap();
+        conn.execute(
+            "UPDATE notes SET updated_at = '2026-05-01' WHERE id = 'a'",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE notes SET updated_at = '2026-05-03' WHERE id = 'b'",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE notes SET updated_at = '2026-05-02' WHERE id = 'c'",
+            [],
+        )
+        .unwrap();
         // Re-run the v4 migration body directly.
         conn.execute_batch(
             "WITH ordered AS (

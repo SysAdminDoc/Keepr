@@ -73,7 +73,9 @@ pub fn verify_model_sha1(path: &Path) -> Result<()> {
     let mut buf = [0u8; 64 * 1024];
     loop {
         let n = reader.read(&mut buf)?;
-        if n == 0 { break; }
+        if n == 0 {
+            break;
+        }
         hasher.update(&buf[..n]);
     }
     let got = hex_lower(&hasher.finalize());
@@ -158,9 +160,7 @@ pub async fn download_model(app: AppHandle, data_dir: PathBuf) -> Result<()> {
     let got = hex_lower(&hasher.finalize());
     if got != MODEL_SHA1_HEX {
         let _ = std::fs::remove_file(&partial);
-        bail!(
-            "downloaded model SHA-1 mismatch: expected {MODEL_SHA1_HEX}, got {got}"
-        );
+        bail!("downloaded model SHA-1 mismatch: expected {MODEL_SHA1_HEX}, got {got}");
     }
     std::fs::rename(&partial, &final_path)
         .with_context(|| format!("rename {} to {}", partial.display(), final_path.display()))?;
@@ -195,8 +195,8 @@ pub fn delete_model(data_dir: &Path) -> Result<()> {
 /// recorder produces 48 kHz, but we don't hardcode that — the WAV
 /// header is the source of truth).
 pub fn wav_to_whisper_samples(wav_path: &Path) -> Result<Vec<f32>> {
-    let reader = hound::WavReader::open(wav_path)
-        .with_context(|| format!("open {}", wav_path.display()))?;
+    let reader =
+        hound::WavReader::open(wav_path).with_context(|| format!("open {}", wav_path.display()))?;
     let spec = reader.spec();
     if spec.channels != 1 {
         bail!("expected mono WAV, got {} channels", spec.channels);
@@ -225,10 +225,10 @@ pub fn wav_to_whisper_samples(wav_path: &Path) -> Result<Vec<f32>> {
     // Resample to 16 kHz mono with rubato's FFT polyphase resampler.
     use rubato::{FftFixedIn, Resampler};
     let chunk_size = 1024;
-    let mut resampler =
-        FftFixedIn::<f32>::new(source_rate as usize, 16_000, chunk_size, 2, 1)?;
+    let mut resampler = FftFixedIn::<f32>::new(source_rate as usize, 16_000, chunk_size, 2, 1)?;
 
-    let mut output: Vec<f32> = Vec::with_capacity(samples_f32.len() * 16_000 / source_rate as usize);
+    let mut output: Vec<f32> =
+        Vec::with_capacity(samples_f32.len() * 16_000 / source_rate as usize);
     let mut pos = 0;
     while pos + chunk_size <= samples_f32.len() {
         let in_buf = vec![samples_f32[pos..pos + chunk_size].to_vec()];
@@ -288,7 +288,9 @@ pub fn transcribe_samples_blocking(model_path: &Path, samples: &[f32]) -> Result
             .to_str_lossy()
             .map_err(|e| anyhow!("whisper segment {i} read failed: {e:?}"))?;
         let trimmed = text.trim();
-        if trimmed.is_empty() { continue; }
+        if trimmed.is_empty() {
+            continue;
+        }
         if !out.is_empty() {
             out.push(' ');
         }
@@ -306,7 +308,9 @@ pub fn wav_crc32(wav_path: &Path) -> Result<u32> {
     let mut buf = [0u8; 64 * 1024];
     loop {
         let n = f.read(&mut buf)?;
-        if n == 0 { break; }
+        if n == 0 {
+            break;
+        }
         hasher.update(&buf[..n]);
     }
     Ok(hasher.finalize())

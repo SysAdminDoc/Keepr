@@ -109,7 +109,7 @@ function AudioRow({
   const src = useMemo(
     () => convertFileSrc(srcForAttachment(attachment), "keepr-resource"),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [attachment.id, attachment.mime],
+    [attachment.id, attachment.mime, attachment.resourcePath],
   );
   // v0.23.0 — opt-in whisper transcription. Each audio row lazily checks
   // whether a transcript exists, and exposes a Transcribe button when
@@ -254,7 +254,7 @@ function AttachmentTile({
     // Keyed on the attachment fields that actually change the URL, not the
     // wrapper object itself (which gets a new identity on every store patch).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [attachment.id, attachment.mime, useThumb],
+    [attachment.id, attachment.mime, attachment.resourcePath, attachment.thumbPath, useThumb],
   );
   return (
     <figure
@@ -304,6 +304,7 @@ function AttachmentTile({
 /** Build the relative path the keepr-resource:// protocol expects:
  *  `<id>.<ext>` where ext is derived from the MIME's known list. */
 function srcForAttachment(a: Attachment): string {
+  if (a.resourcePath) return a.resourcePath;
   const ext = mimeToExt(a.mime);
   return `${a.id}.${ext}`;
 }
@@ -312,6 +313,7 @@ function srcForAttachment(a: Attachment): string {
  *  of source format; the Rust add_image_attachment writes JPEG for the
  *  smallest size. */
 function thumbFilename(a: Attachment): string {
+  if (a.thumbPath) return a.thumbPath;
   return `${a.id}.thumb.jpg`;
 }
 
