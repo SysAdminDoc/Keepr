@@ -1,22 +1,22 @@
-mod db;
 mod commands;
+mod db;
 mod lock;
 // v0.22.1 — vault module is `pub` so the standalone `keepr-verify`
 // binary in src/bin/keepr-verify.rs can re-derive the KEK and decrypt
 // vault notes from outside the Tauri runtime. No private fields are
 // exposed beyond what was already accessible to commands.rs.
-pub mod vault;
 pub mod transcribe;
+pub mod vault;
 pub mod web_clipper;
 
 use parking_lot::Mutex;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
-use tauri::{Emitter, Manager, UriSchemeContext, UriSchemeResponder};
 use tauri::http::{Request, Response, StatusCode};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+use tauri::{Emitter, Manager, UriSchemeContext, UriSchemeResponder};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
 /// Sentinel filename that, when present next to the running EXE, switches
@@ -141,18 +141,28 @@ fn build_resource_response<R: tauri::Runtime>(
     let make = |status: StatusCode, body: Vec<u8>, content_type: &str| -> Response<Vec<u8>> {
         let mut resp = Response::new(body);
         *resp.status_mut() = status;
-        if let Ok(v) = content_type.parse() { resp.headers_mut().insert("Content-Type", v); }
-        if let Ok(v) = "*".parse() { resp.headers_mut().insert("Access-Control-Allow-Origin", v); }
-        if let Ok(v) = "bytes".parse() { resp.headers_mut().insert("Accept-Ranges", v); }
+        if let Ok(v) = content_type.parse() {
+            resp.headers_mut().insert("Content-Type", v);
+        }
+        if let Ok(v) = "*".parse() {
+            resp.headers_mut().insert("Access-Control-Allow-Origin", v);
+        }
+        if let Ok(v) = "bytes".parse() {
+            resp.headers_mut().insert("Accept-Ranges", v);
+        }
         resp
     };
 
     let id_part = req.uri().path().trim_start_matches('/').to_string();
-    // Reject anything that smells like a traversal attempt. We check the
-    // raw, the percent-decoded, and the canonicalized form to defeat
-    // bypasses via `%2e%2e%2f`, `%5c` (encoded backslash), or NUL bytes.
+    // Reject anything that smells like a traversal attempt. Keepr never
+    // writes percent signs into resource names, so encoded payloads such as
+    // `%2e%2e%2f`, `%5c`, or `%00` are rejected before filesystem access.
     if !is_safe_resource_id(&id_part) {
-        return make(StatusCode::BAD_REQUEST, b"bad resource id".to_vec(), "text/plain");
+        return make(
+            StatusCode::BAD_REQUEST,
+            b"bad resource id".to_vec(),
+            "text/plain",
+        );
     }
 
     let state: tauri::State<'_, AppState> = ctx.app_handle().state();
@@ -166,8 +176,14 @@ fn build_resource_response<R: tauri::Runtime>(
     // would replace the prefix; the safety check above blocks that, this
     // check catches anything we missed.
     match target.parent() {
-        Some(p) if p == resources_dir.as_path() => {}
-        _ => return make(StatusCode::BAD_REQUEST, b"bad resource id".to_vec(), "text/plain"),
+        Some(p) if p.starts_with(&resources_dir) => {}
+        _ => {
+            return make(
+                StatusCode::BAD_REQUEST,
+                b"bad resource id".to_vec(),
+                "text/plain",
+            )
+        }
     }
 
     let bytes = match std::fs::read(&target) {
@@ -189,9 +205,13 @@ fn build_resource_response<R: tauri::Runtime>(
             let slice = bytes[start..=end].to_vec();
             let mut resp = make(StatusCode::PARTIAL_CONTENT, slice, ct);
             let cr = format!("bytes {start}-{end}/{total}");
-            if let Ok(v) = cr.parse() { resp.headers_mut().insert("Content-Range", v); }
+            if let Ok(v) = cr.parse() {
+                resp.headers_mut().insert("Content-Range", v);
+            }
             let len = (end - start + 1).to_string();
-            if let Ok(v) = len.parse() { resp.headers_mut().insert("Content-Length", v); }
+            if let Ok(v) = len.parse() {
+                resp.headers_mut().insert("Content-Length", v);
+            }
             return resp;
         }
         // Malformed range header — fall through to a full 200 response.
@@ -199,50 +219,74 @@ fn build_resource_response<R: tauri::Runtime>(
 
     let mut resp = make(StatusCode::OK, bytes, ct);
     let len = total.to_string();
-    if let Ok(v) = len.parse() { resp.headers_mut().insert("Content-Length", v); }
+    if let Ok(v) = len.parse() {
+        resp.headers_mut().insert("Content-Length", v);
+    }
     resp
 }
 
-/// Validate a `keepr-resource://` path component before joining it onto the
-/// resources directory. Rejects path-traversal attempts (literal `..`, `/`,
-/// `\\`, NUL bytes), URL-encoded equivalents (`%2e%2e`, `%2f`, `%5c`, `%00`),
-/// and anything that looks absolute or drive-prefixed on Windows (`C:`,
-/// `\\?\`). The renderer-side `convertFileSrc(<id>.<ext>, "keepr-resource")`
-/// only ever produces filenames of the form `<uuid>.<ext>` or `<uuid>.thumb.jpg`,
-/// so a strict allow-list (alphanumeric + `-`, `_`, `.`) would also work; we
-/// stay slightly looser to tolerate future filename schemes while still
-/// rejecting traversal vectors.
+/// Validate a `keepr-resource://` relative path before joining it onto the
+/// resources directory. Legacy attachments use one filename
+/// (`<uuid>.<ext>`). v0.25+ content-addressed attachments use exactly
+/// `ab/cd/<64-hex-hash>.<ext>` or `ab/cd/<64-hex-hash>.thumb.jpg`.
+/// Everything else is rejected before filesystem access.
 fn is_safe_resource_id(s: &str) -> bool {
     if s.is_empty() || s.len() > 1024 {
         return false;
     }
-    if s.contains('\0') || s.contains('/') || s.contains('\\') || s.contains("..") {
+    if s.contains('\0') || s.contains('\\') || s.contains("..") || s.contains('%') {
         return false;
     }
-    // Reject ANY percent-encoded character. Filenames Keepr writes never
-    // contain percent signs, so this only blocks attacker payloads.
-    if s.contains('%') {
+    let parts: Vec<&str> = s.split('/').collect();
+    if parts.len() != 1 && parts.len() != 3 {
         return false;
     }
     // Reject Windows reserved device names: CON, PRN, AUX, NUL, COM1-9,
     // LPT1-9. Opening any of these as a file resolves to the actual
     // device on Windows even from non-Windows-aware code paths.
-    let lower = s.to_ascii_lowercase();
-    let stem: &str = lower.split('.').next().unwrap_or(&lower);
-    let stem = stem.split(':').next().unwrap_or(stem);
-    let is_reserved = matches!(stem, "con" | "prn" | "aux" | "nul")
-        || (stem.len() == 4
-            && (stem.starts_with("com") || stem.starts_with("lpt"))
-            && stem.as_bytes()[3].is_ascii_digit()
-            && stem.as_bytes()[3] != b'0');
-    if is_reserved {
-        return false;
+    for part in &parts {
+        if part.is_empty()
+            || part.contains(':')
+            || !part
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.')
+        {
+            return false;
+        }
+        let lower = part.to_ascii_lowercase();
+        let stem: &str = lower.split('.').next().unwrap_or(&lower);
+        let stem = stem.split(':').next().unwrap_or(stem);
+        let is_reserved = matches!(stem, "con" | "prn" | "aux" | "nul")
+            || (stem.len() == 4
+                && (stem.starts_with("com") || stem.starts_with("lpt"))
+                && stem.as_bytes()[3].is_ascii_digit()
+                && stem.as_bytes()[3] != b'0');
+        if is_reserved {
+            return false;
+        }
     }
-    if s.len() >= 2 && s.as_bytes()[1] == b':' {
-        // `C:foo` would resolve to "current dir on C:" — reject.
-        return false;
+    if parts.len() == 3 {
+        if !is_two_hex(parts[0]) || !is_two_hex(parts[1]) {
+            return false;
+        }
+        let stem = parts[2].split('.').next().unwrap_or("");
+        if stem.len() != 64 || !stem.chars().all(|c| c.is_ascii_hexdigit()) {
+            return false;
+        }
+        let expected = format!(
+            "{}{}",
+            parts[0].to_ascii_lowercase(),
+            parts[1].to_ascii_lowercase()
+        );
+        if !stem.to_ascii_lowercase().starts_with(&expected) {
+            return false;
+        }
     }
     true
+}
+
+fn is_two_hex(s: &str) -> bool {
+    s.len() == 2 && s.chars().all(|c| c.is_ascii_hexdigit())
 }
 
 /// Parse an HTTP `Range: bytes=...` header. Returns `(start, end)` inclusive
@@ -289,7 +333,11 @@ fn parse_byte_range(raw: &str, total: usize) -> Option<(usize, usize)> {
 }
 
 fn guess_content_type(path: &Path) -> &'static str {
-    match path.extension().and_then(|s| s.to_str()).map(|s| s.to_ascii_lowercase()) {
+    match path
+        .extension()
+        .and_then(|s| s.to_str())
+        .map(|s| s.to_ascii_lowercase())
+    {
         Some(ref e) if e == "png" => "image/png",
         Some(ref e) if e == "jpg" || e == "jpeg" => "image/jpeg",
         Some(ref e) if e == "gif" => "image/gif",
@@ -333,10 +381,7 @@ pub fn run() {
     // NF-06 — register the global "new quick note" shortcut. The handler
     // shows the main window and emits a `keepr://quick-capture` event the
     // renderer subscribes to (App.tsx) to open a blank editor.
-    let quick_shortcut = Shortcut::new(
-        Some(Modifiers::CONTROL | Modifiers::ALT),
-        Code::KeyN,
-    );
+    let quick_shortcut = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::KeyN);
 
     tauri::Builder::default()
         // EI-V0.5-4 — register single-instance BEFORE any other plugin so
@@ -369,9 +414,9 @@ pub fn run() {
             tauri_plugin_log::Builder::new()
                 .level(log::LevelFilter::Info)
                 .targets([
-                    tauri_plugin_log::Target::new(
-                        tauri_plugin_log::TargetKind::LogDir { file_name: Some("Keepr".to_string()) },
-                    ),
+                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir {
+                        file_name: Some("Keepr".to_string()),
+                    }),
                     tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
                 ])
                 .max_file_size(1024 * 1024)
@@ -388,10 +433,7 @@ pub fn run() {
                 })
                 .build(),
         )
-        .register_asynchronous_uri_scheme_protocol(
-            "keepr-resource",
-            handle_resource_request,
-        )
+        .register_asynchronous_uri_scheme_protocol("keepr-resource", handle_resource_request)
         .on_window_event(|window, event| {
             // NF-06 — closing the window minimizes to tray instead of
             // killing the process so the app continues to receive global
@@ -422,6 +464,7 @@ pub fn run() {
                 }
             };
             let db_arc = Arc::new(Mutex::new(conn));
+            let shutdown = Arc::new(AtomicBool::new(false));
             let web_clipper_info: web_clipper::WebClipperState =
                 Arc::new(Mutex::new(web_clipper::WebClipperInfo::default()));
 
@@ -455,12 +498,46 @@ pub fn run() {
                 });
             });
 
+            // v0.25.0 — content-addressed resources can leave harmless
+            // zero-reference files behind if a crash lands between file
+            // write and DB insert. Sweep once on startup, then daily.
+            let db_for_sweep = db_arc.clone();
+            let resources_for_sweep = data_dir.join("resources");
+            let shutdown_for_sweep = shutdown.clone();
+            std::thread::spawn(move || {
+                use std::thread::sleep;
+                use std::time::Duration;
+                loop {
+                    {
+                        let conn = db_for_sweep.lock();
+                        match commands::sweep_orphaned_resources(&conn, &resources_for_sweep) {
+                            Ok(stats) if stats.moved_to_trash > 0 || stats.purged > 0 => {
+                                log::info!(
+                                    "resource sweep: moved {} orphan(s), purged {} trash file(s)",
+                                    stats.moved_to_trash,
+                                    stats.purged
+                                )
+                            }
+                            Ok(_) => {}
+                            Err(e) => log::warn!("resource sweep failed: {e}"),
+                        }
+                    }
+                    for _ in 0..(24 * 60 * 60) {
+                        if shutdown_for_sweep.load(std::sync::atomic::Ordering::SeqCst) {
+                            log::info!("resource sweep shutting down");
+                            return;
+                        }
+                        sleep(Duration::from_secs(1));
+                    }
+                }
+            });
+
             app.manage(AppState {
                 db: db_arc,
                 importing: Arc::new(AtomicBool::new(false)),
                 data_dir,
                 vault_dek: Arc::new(Mutex::new(None)),
-                shutdown: Arc::new(AtomicBool::new(false)),
+                shutdown,
                 web_clipper: web_clipper_info,
             });
 
@@ -469,7 +546,8 @@ pub fn run() {
             // quick-capture event; "Quit" actually exits the process
             // (this is the only path that bypasses the "minimize to tray"
             // on close behavior above).
-            let show_item = MenuItem::with_id(app, "show", "Show / hide Keepr", true, None::<&str>)?;
+            let show_item =
+                MenuItem::with_id(app, "show", "Show / hide Keepr", true, None::<&str>)?;
             let new_item = MenuItem::with_id(app, "new", "New note", true, None::<&str>)?;
             let quit_item = MenuItem::with_id(app, "quit", "Quit Keepr", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&show_item, &new_item, &quit_item])?;
@@ -551,13 +629,14 @@ pub fn run() {
                     match commands::peek_due_reminders(&state, &now) {
                         Ok(items) if !items.is_empty() => {
                             for (rem, preview) in &items {
-                                let show_result = tauri_plugin_notification::NotificationExt::notification(
-                                    &app_handle,
-                                )
-                                .builder()
-                                .title("Keepr reminder")
-                                .body(preview)
-                                .show();
+                                let show_result =
+                                    tauri_plugin_notification::NotificationExt::notification(
+                                        &app_handle,
+                                    )
+                                    .builder()
+                                    .title("Keepr reminder")
+                                    .body(preview)
+                                    .show();
                                 match show_result {
                                     Ok(_) => {
                                         // Toast surfaced — safe to mark fired.
@@ -573,8 +652,8 @@ pub fn run() {
                                         }
                                         // Payload is the note id — the renderer opens
                                         // the editor on it via the View-note toast.
-                                        let _ = app_handle
-                                            .emit("keepr://reminder-fired", &rem.note_id);
+                                        let _ =
+                                            app_handle.emit("keepr://reminder-fired", &rem.note_id);
                                     }
                                     Err(e) => {
                                         // Permission denied / COM error / Focus Assist —
@@ -701,9 +780,22 @@ mod tests {
 
     #[test]
     fn safe_id_accepts_uuid_filename() {
-        assert!(is_safe_resource_id("550e8400-e29b-41d4-a716-446655440000.png"));
-        assert!(is_safe_resource_id("550e8400-e29b-41d4-a716-446655440000.thumb.jpg"));
-        assert!(is_safe_resource_id("550e8400-e29b-41d4-a716-446655440000.wav"));
+        assert!(is_safe_resource_id(
+            "550e8400-e29b-41d4-a716-446655440000.png"
+        ));
+        assert!(is_safe_resource_id(
+            "550e8400-e29b-41d4-a716-446655440000.thumb.jpg"
+        ));
+        assert!(is_safe_resource_id(
+            "550e8400-e29b-41d4-a716-446655440000.wav"
+        ));
+    }
+
+    #[test]
+    fn safe_id_accepts_content_addressed_paths() {
+        let hash = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789";
+        assert!(is_safe_resource_id(&format!("ab/cd/{hash}.png")));
+        assert!(is_safe_resource_id(&format!("ab/cd/{hash}.thumb.jpg")));
     }
 
     #[test]
@@ -721,6 +813,7 @@ mod tests {
     #[test]
     fn safe_id_rejects_separators() {
         assert!(!is_safe_resource_id("a/b"));
+        assert!(!is_safe_resource_id("aa/bb/not-a-hash.png"));
         assert!(!is_safe_resource_id("a\\b"));
     }
 
@@ -815,7 +908,6 @@ mod tests {
     }
 
     // parse_byte_range —
-
 
     #[test]
     fn parse_full_range() {

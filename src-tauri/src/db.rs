@@ -4,7 +4,7 @@ use std::path::Path;
 
 /// Current schema version. Bump and add a new arm to `apply_migration` for every
 /// schema change. Migrations are forward-only and ordered.
-pub const SCHEMA_VERSION: i32 = 13;
+pub const SCHEMA_VERSION: i32 = 14;
 
 pub fn open(path: &Path) -> Result<Connection> {
     let mut conn = Connection::open(path)?;
@@ -58,6 +58,7 @@ fn apply_migration(tx: &rusqlite::Transaction, version: i32) -> Result<()> {
         11 => tx.execute_batch(MIGRATION_V11)?,
         12 => tx.execute_batch(MIGRATION_V12)?,
         13 => tx.execute_batch(MIGRATION_V13)?,
+        14 => tx.execute_batch(MIGRATION_V14)?,
         v => bail!("no migration defined for schema v{v}"),
     }
     Ok(())
@@ -413,6 +414,24 @@ CREATE TABLE IF NOT EXISTS transcripts (
 CREATE INDEX IF NOT EXISTS idx_transcripts_note ON transcripts(note_id);
 "#;
 
+/// v14 — Content-addressed attachment resources.
+///
+/// Existing installs used `<attachment_id>.<ext>` resource filenames. New
+/// attachment writes store BLAKE3-addressed files under
+/// `resources/ab/cd/<hash>.<ext>` and persist the relative path here so
+/// duplicate blobs can share one file. Null keeps old rows on the legacy
+/// id-based lookup path.
+const MIGRATION_V14: &str = r#"
+ALTER TABLE attachments ADD COLUMN resource_path TEXT;
+ALTER TABLE attachments ADD COLUMN thumb_path TEXT;
+CREATE INDEX IF NOT EXISTS idx_attachments_resource_path
+    ON attachments(resource_path)
+    WHERE resource_path IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_attachments_thumb_path
+    ON attachments(thumb_path)
+    WHERE thumb_path IS NOT NULL;
+"#;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -495,6 +514,43 @@ mod tests {
     }
 
     #[test]
+    fn migration_v14_adds_content_addressed_attachment_paths() {
+        let conn = fresh_conn();
+        let cols: Vec<String> = conn
+            .prepare("PRAGMA table_info(attachments)")
+            .unwrap()
+            .query_map([], |r| r.get::<_, String>(1))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        assert!(cols.contains(&"resource_path".to_string()), "got {cols:?}");
+        assert!(cols.contains(&"thumb_path".to_string()), "got {cols:?}");
+
+        conn.execute(
+            "INSERT INTO notes (id, kind, title, body, color, pinned, archived, trashed, \
+                                position, created_at, updated_at) \
+             VALUES ('n1', 'text', '', '', 'default', 0, 0, 0, 0, \
+                     '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO attachments (id, note_id, kind, mime, filename, byte_size, position, created_at) \
+             VALUES ('a1', 'n1', 'image', 'image/png', 'old.png', 3, 0, '2026-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+        let paths: (Option<String>, Option<String>) = conn
+            .query_row(
+                "SELECT resource_path, thumb_path FROM attachments WHERE id = 'a1'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(paths, (None, None));
+    }
+
+    #[test]
     fn migration_v11_adds_background_pattern_column() {
         let conn = fresh_conn();
         let cols: Vec<String> = conn
@@ -504,7 +560,10 @@ mod tests {
             .unwrap()
             .collect::<rusqlite::Result<Vec<_>>>()
             .unwrap();
-        assert!(cols.contains(&"background_pattern".to_string()), "got {cols:?}");
+        assert!(
+            cols.contains(&"background_pattern".to_string()),
+            "got {cols:?}"
+        );
         // Defaults to empty string for existing rows.
         conn.execute(
             "INSERT INTO notes (id, kind, title, body, color, pinned, archived, trashed, \
@@ -515,7 +574,11 @@ mod tests {
         )
         .unwrap();
         let bg: String = conn
-            .query_row("SELECT background_pattern FROM notes WHERE id = 'n1'", [], |r| r.get(0))
+            .query_row(
+                "SELECT background_pattern FROM notes WHERE id = 'n1'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(bg, "");
     }
@@ -556,7 +619,11 @@ mod tests {
         conn.execute("DELETE FROM checklist_items WHERE id = 'parent'", [])
             .unwrap();
         let n: i64 = conn
-            .query_row("SELECT COUNT(*) FROM checklist_items WHERE id = 'child'", [], |r| r.get(0))
+            .query_row(
+                "SELECT COUNT(*) FROM checklist_items WHERE id = 'child'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(n, 0, "child should cascade-delete with parent");
     }
@@ -592,11 +659,8 @@ mod tests {
             .unwrap();
         assert_eq!(hits, vec!["n1"]);
         // Update title; trigger should refresh.
-        conn.execute(
-            "UPDATE notes SET title = 'Shopping' WHERE id = 'n1'",
-            [],
-        )
-        .unwrap();
+        conn.execute("UPDATE notes SET title = 'Shopping' WHERE id = 'n1'", [])
+            .unwrap();
         let hits: Vec<String> = conn
             .prepare("SELECT note_id FROM notes_fts WHERE notes_fts MATCH 'shopping'")
             .unwrap()
@@ -669,7 +733,10 @@ mod tests {
             .collect::<rusqlite::Result<Vec<_>>>()
             .unwrap();
         let names: Vec<&str> = cols.iter().map(|(n, _)| n.as_str()).collect();
-        assert!(!names.contains(&"id"), "v8 should drop reminders.id; got {names:?}");
+        assert!(
+            !names.contains(&"id"),
+            "v8 should drop reminders.id; got {names:?}"
+        );
         let note_id_pk = cols.iter().find(|(n, _)| n == "note_id").unwrap().1;
         assert_eq!(note_id_pk, 1, "note_id should be the PK");
         // CHECK on fire_at rejects empty strings.
@@ -725,7 +792,10 @@ mod tests {
             conn.execute(
                 "INSERT INTO note_snapshots (id, note_id, kind, taken_at) \
                  VALUES (?1, 'parent', 'text', ?2)",
-                rusqlite::params![format!("s{i:02}"), format!("2026-01-{:02}T00:00:00Z", i + 1)],
+                rusqlite::params![
+                    format!("s{i:02}"),
+                    format!("2026-01-{:02}T00:00:00Z", i + 1)
+                ],
             )
             .unwrap();
         }
@@ -766,14 +836,15 @@ mod tests {
             .unwrap();
         assert_eq!(vault, "plain");
         let ct: Option<String> = conn
-            .query_row("SELECT vault_ciphertext FROM notes WHERE id = 'n1'", [], |r| r.get(0))
+            .query_row(
+                "SELECT vault_ciphertext FROM notes WHERE id = 'n1'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert!(ct.is_none());
         // CHECK constraint should reject bogus values.
-        let bad = conn.execute(
-            "UPDATE notes SET vault = 'whatever' WHERE id = 'n1'",
-            [],
-        );
+        let bad = conn.execute("UPDATE notes SET vault = 'whatever' WHERE id = 'n1'", []);
         assert!(bad.is_err(), "CHECK should reject unknown vault state");
     }
 
@@ -790,17 +861,12 @@ mod tests {
             .unwrap();
         assert_eq!(count, 1, "app_settings table should exist after migration");
         // Roundtrip a key to prove the schema is actually usable.
-        conn.execute(
-            "INSERT INTO app_settings(key, value) VALUES('k', 'v')",
-            [],
-        )
-        .unwrap();
+        conn.execute("INSERT INTO app_settings(key, value) VALUES('k', 'v')", [])
+            .unwrap();
         let v: String = conn
-            .query_row(
-                "SELECT value FROM app_settings WHERE key = 'k'",
-                [],
-                |r| r.get(0),
-            )
+            .query_row("SELECT value FROM app_settings WHERE key = 'k'", [], |r| {
+                r.get(0)
+            })
             .unwrap();
         assert_eq!(v, "v");
     }

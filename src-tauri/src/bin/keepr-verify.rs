@@ -120,9 +120,8 @@ fn run() -> Result<()> {
         print_help();
         return Ok(());
     }
-    let conn = Connection::open(&args.db).with_context(|| {
-        format!("open SQLite at {}", args.db.display())
-    })?;
+    let conn = Connection::open(&args.db)
+        .with_context(|| format!("open SQLite at {}", args.db.display()))?;
 
     if args.seed {
         let phrase = prompt("Enter your 12-word recovery phrase: ")?;
@@ -178,11 +177,7 @@ fn read_envelope(
     ))
 }
 
-fn verify_with_password(
-    conn: &Connection,
-    password: &str,
-    note_id: Option<&str>,
-) -> Result<()> {
+fn verify_with_password(conn: &Connection, password: &str, note_id: Option<&str>) -> Result<()> {
     let (salt, nonce, wrapped) = read_envelope(
         conn,
         "vault_kdf_salt",
@@ -205,11 +200,7 @@ fn verify_with_password(
     sample_decrypt(conn, &dek, note_id)
 }
 
-fn verify_with_seed(
-    conn: &Connection,
-    phrase: &str,
-    note_id: Option<&str>,
-) -> Result<()> {
+fn verify_with_seed(conn: &Connection, phrase: &str, note_id: Option<&str>) -> Result<()> {
     let (salt, nonce, wrapped) = read_envelope(
         conn,
         "vault_seed_salt",
@@ -232,11 +223,7 @@ fn verify_with_seed(
     sample_decrypt(conn, &dek, note_id)
 }
 
-fn sample_decrypt(
-    conn: &Connection,
-    dek: &vault::Dek,
-    note_id: Option<&str>,
-) -> Result<()> {
+fn sample_decrypt(conn: &Connection, dek: &vault::Dek, note_id: Option<&str>) -> Result<()> {
     // Either decrypt the requested note, or pick the first vault note.
     let (id, ct_hex): (String, String) = if let Some(id) = note_id {
         conn.query_row(
@@ -268,8 +255,8 @@ fn sample_decrypt(
         }
     };
     let bundle = vault::from_hex(&ct_hex).context("decode ciphertext hex")?;
-    let payload = vault::decrypt_note(dek, &id, &bundle)
-        .map_err(|e| anyhow!("decrypt failed: {e}"))?;
+    let payload =
+        vault::decrypt_note(dek, &id, &bundle).map_err(|e| anyhow!("decrypt failed: {e}"))?;
     println!("\nSample note decrypted (id={id}):");
     println!("  title: {}", short_repr(&payload.title));
     println!("  body:  {}", short_repr(&payload.body));

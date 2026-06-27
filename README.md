@@ -1,5 +1,9 @@
 # Keepr
 
+![Version](https://img.shields.io/badge/version-0.25.0-blue)
+![License](https://img.shields.io/badge/license-MIT-green)
+![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
+
 A pixel-close, offline-first clone of Google Keep. Built with Tauri 2 + React + Rust + SQLite. Your notes stay on your machine; back them up to any folder you sync to a cloud provider.
 
 ## Why
@@ -22,7 +26,7 @@ Google Keep is great until the internet goes out. Keepr gives you the same look,
 
 **Theme** — Light / Dark / System (follows OS), masonry grid, full keyboard accessibility, WCAG AAA contrast across all 24 color combinations.
 
-**Distribution** — Unsigned NSIS / MSI installer + portable `.zip` published to GitHub Releases on every tag. See [Install](#install).
+**Distribution** — Unsigned NSIS / MSI installer + portable `.zip` built locally and attached to GitHub Releases. See [Install](#install).
 
 ## Where Keepr stores your data
 
@@ -32,7 +36,7 @@ Keepr uses Tauri's per-app data directory:
 - **macOS:** `~/Library/Application Support/com.sysadmindoc.keepr/keepr.db` (best-effort builds since v0.10).
 - **Linux:** `$XDG_DATA_HOME/com.sysadmindoc.keepr/keepr.db` (best-effort builds since v0.10).
 
-The schema is versioned (`PRAGMA user_version`), so a newer Keepr can upgrade an older database in place. A backup is just a regular ZIP — `keepr.db` at the root plus any future attachments.
+The schema is versioned (`PRAGMA user_version`), so a newer Keepr can upgrade an older database in place. A backup is just a regular ZIP — `keepr.db` at the root plus attachment resources under `resources/`.
 
 ### Portable mode
 
@@ -42,7 +46,7 @@ Drop an empty file named `portable.flag` next to `keepr.exe`. On startup Keepr d
 
 - [ROADMAP.md](ROADMAP.md) — the live task list
 - [CHANGELOG.md](CHANGELOG.md) — what shipped in each release
-- [RESEARCH_FEATURE_PLAN.md](RESEARCH_FEATURE_PLAN.md) — the long-form research that backs the roadmap
+- [`docs/research-archive/`](docs/research-archive/) — archived long-form research that backs prior roadmap cycles
 
 ## Install
 
@@ -82,7 +86,7 @@ npm test                   # vitest (frontend)
 cargo test --manifest-path src-tauri/Cargo.toml --lib   # rust unit tests
 ```
 
-The GitHub Actions workflow at [`.github/workflows/release.yml`](.github/workflows/release.yml) builds + uploads a release on every `v*.*.*` tag push.
+Releases are built locally on this machine and attached to GitHub Releases manually.
 
 ## Contributing
 
