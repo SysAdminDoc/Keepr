@@ -8,12 +8,6 @@
 
 ---
 
-## Open: Housekeeping (v0.23+)
-
-- [ ] **P2 — `commands.rs` split** *(now ~4500 lines)*
-  - Split into `commands/notes.rs`, `commands/io.rs`, `commands/security.rs`, `commands/attachments.rs`, `commands/reminders.rs`, `commands/history.rs`, `commands/labels.rs`. Re-exported from `commands/mod.rs`.
-  - **Why deferred:** high merge-conflict risk during an active feature cycle. Schedule for a quiet "no other open PRs" day.
-
 ## Open: Larger bets (v0.25.x and later)
 - [ ] **P3 — MSIX packaging + Microsoft Store** — free signing, Windows Share Target contract, auto-update via Store.
 - [ ] **P3 — Document scanner** (OpenCV WASM, ~7 MB renderer payload) — Apple Notes parity, lower-priority capture path.
@@ -63,15 +57,15 @@ Carried forward across every research cycle:
 
 - [ ] P0 - Encrypt or quarantine vaulted attachments
   Why: Private Vault encrypts note text/checklists, but `SECURITY.md` documents that attachments remain plaintext under `resources/`.
-  Evidence: `SECURITY.md`; `src-tauri/src/commands/mod.rs::move_note_to_vault`; Notesnook private-vault positioning.
-  Touches: `src-tauri/src/commands/mod.rs`, `src-tauri/src/commands/attachments.rs`, `src-tauri/src/lib.rs`, `src/components/AttachmentGrid.tsx`, `src/components/NoteEditor.tsx`, `SECURITY.md`.
+  Evidence: `SECURITY.md`; `src-tauri/src/commands/security.rs::move_note_to_vault`; Notesnook private-vault positioning.
+  Touches: `src-tauri/src/commands/security.rs`, `src-tauri/src/commands/attachments.rs`, `src-tauri/src/lib.rs`, `src/components/AttachmentGrid.tsx`, `src/components/NoteEditor.tsx`, `SECURITY.md`.
   Acceptance: moving an attached note into the vault either encrypts every attachment resource and serves it only while the vault is unlocked, or blocks the move with clear UI; existing vaulted notes with attachments are detected and migrated or flagged.
   Complexity: XL
 
 - [ ] P1 - Replace hardcoded Settings footer version
   Why: Settings still displays `Keepr v0.16.1` while package/app metadata is v0.25.0.
   Evidence: `src/components/SettingsModal.tsx`; `package.json`; `src-tauri/tauri.conf.json`.
-  Touches: `src/components/SettingsModal.tsx`, `src/api.ts`, `src-tauri/src/commands/mod.rs` or a shared generated version constant.
+  Touches: `src/components/SettingsModal.tsx`, `src/api.ts`, `src-tauri/src/commands/io.rs` or a shared generated version constant.
   Acceptance: Settings displays the current app version from one source of truth, and a version bump updates README badge, package metadata, Tauri config, and Settings without manual string edits.
   Complexity: S
 
@@ -105,8 +99,8 @@ Carried forward across every research cycle:
 
 - [ ] P2 - Import Markdown vault folders
   Why: Keepr exports Markdown vaults, but migration is one-way; Obsidian/Joplin users expect folder import with resources.
-  Evidence: `src-tauri/src/commands/mod.rs::export_vault`; README migration claims; Joplin attachments docs; Obsidian local-vault model.
-  Touches: `src-tauri/src/commands/mod.rs`, `src-tauri/src/commands/attachments.rs`, `src/components/SettingsModal.tsx`, tests with Markdown frontmatter and `_resources`.
+  Evidence: `src-tauri/src/commands/io.rs::export_vault`; README migration claims; Joplin attachments docs; Obsidian local-vault model.
+  Touches: `src-tauri/src/commands/io.rs`, `src-tauri/src/commands/attachments.rs`, `src/components/SettingsModal.tsx`, tests with Markdown frontmatter and `_resources`.
   Acceptance: importing a folder of `.md` files with YAML frontmatter and sibling resources creates notes, labels, colors where present, attachments, and a collision report without deleting existing notes.
   Complexity: L
 
