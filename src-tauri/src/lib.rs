@@ -716,6 +716,7 @@ pub fn run() {
             commands::notes::empty_trash,
             commands::io::export_zip,
             commands::io::import_zip,
+            commands::io::get_app_version,
             commands::io::get_data_dir,
             commands::io::get_log_dir,
             commands::io::open_app_dir,

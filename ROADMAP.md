@@ -4,7 +4,7 @@
 
 **Priority legend:** P0 = data loss / crash / security / distribution-blocker · P1 = visible bug / high user value · P2 = polish / nice-to-have · P3 = future / experimental.
 
-**Status (2026-06-27):** v0.25.0 ships content-addressed attachment resources. Blocked signing/biometric/notarization items live in [Roadmap_Blocked.md](Roadmap_Blocked.md). This file lists only actionable open work.
+**Status (2026-06-28):** v0.25.1 ships the command-module split, Private Vault attachment guardrails, and Settings version source-of-truth. Blocked signing/biometric/notarization items live in [Roadmap_Blocked.md](Roadmap_Blocked.md). This file lists only actionable open work.
 
 ---
 
@@ -55,13 +55,6 @@ Carried forward across every research cycle:
 
 ## Research-Driven Additions
 
-- [ ] P1 - Replace hardcoded Settings footer version
-  Why: Settings still displays `Keepr v0.16.1` while package/app metadata is v0.25.0.
-  Evidence: `src/components/SettingsModal.tsx`; `package.json`; `src-tauri/tauri.conf.json`.
-  Touches: `src/components/SettingsModal.tsx`, `src/api.ts`, `src-tauri/src/commands/io.rs` or a shared generated version constant.
-  Acceptance: Settings displays the current app version from one source of truth, and a version bump updates README badge, package metadata, Tauri config, and Settings without manual string edits.
-  Complexity: S
-
 - [ ] P1 - Harden speech model provenance and network disclosure
   Why: Keepr now has one explicit outbound download path, but `SECURITY.md` still says no outbound network and the model is verified with SHA-1.
   Evidence: `SECURITY.md`; `src-tauri/src/transcribe.rs::MODEL_SHA1_HEX`; `src-tauri/src/transcribe.rs::download_model`; RustSec/source review.
@@ -70,7 +63,7 @@ Carried forward across every research cycle:
   Complexity: M
 
 - [ ] P1 - Package Web Clipper as a release artifact
-  Why: The clipper is developer-mode only, has no packaging script, and its manifest version is v0.1.0 while Keepr is v0.25.0.
+  Why: The clipper is developer-mode only, has no packaging script, and its manifest version is v0.1.0 while Keepr is v0.25.1.
   Evidence: `web-clipper/manifest.json`; `web-clipper/README.md`; Chrome MV3 packaging constraints; Chrome-extension memory guidance.
   Touches: `web-clipper/manifest.json`, `web-clipper/README.md`, release scripts/docs, `README.md`.
   Acceptance: a local build creates a POSIX-path ZIP for Load unpacked install, optionally creates a secondary CRX3 for enterprise/manual tooling, verifies archive contents/icons/manifest load, and documents install/update steps in the release notes.

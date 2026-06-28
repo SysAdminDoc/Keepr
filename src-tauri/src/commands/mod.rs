@@ -159,6 +159,11 @@ mod tests {
     }
 
     #[test]
+    fn app_version_comes_from_package_metadata() {
+        assert_eq!(get_app_version(), env!("CARGO_PKG_VERSION"));
+    }
+
+    #[test]
     fn validate_accepts_a_normal_backup() {
         let bytes = build_zip(|zw| {
             let opts = SimpleFileOptions::default();

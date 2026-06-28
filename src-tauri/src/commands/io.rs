@@ -597,6 +597,11 @@ pub(super) fn takeout_reminder_fire_at(r: &serde_json::Value) -> Option<String> 
 }
 
 #[tauri::command]
+pub fn get_app_version() -> String {
+    env!("CARGO_PKG_VERSION").to_string()
+}
+
+#[tauri::command]
 pub fn get_data_dir(state: State<'_, AppState>) -> Result<String, String> {
     Ok(state.data_dir.to_string_lossy().to_string())
 }

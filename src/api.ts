@@ -69,6 +69,7 @@ export const api = {
   emptyTrash: () => invoke<void>("empty_trash"),
   exportZip: (dest: string) => invoke<string>("export_zip", { dest }),
   importZip: (src: string) => invoke<void>("import_zip", { src }),
+  getAppVersion: () => invoke<string>("get_app_version"),
   getDataDir: () => invoke<string>("get_data_dir"),
   getLogDir: () => invoke<string>("get_log_dir"),
   openAppDir: (kind: "data" | "log") => invoke<void>("open_app_dir", { kind }),
