@@ -160,6 +160,7 @@ pub(super) fn load_note_with_vault(
                     checklist: vec![],
                     labels: vec![],
                     attachments: vec![],
+                    vault_attachment_count: 0,
                     vault: vault_state.clone(),
                     background_pattern,
                 },
@@ -222,7 +223,12 @@ pub(super) fn load_note_with_vault(
             })
         })?
         .collect::<Result<Vec<_>, _>>()?;
-    note.attachments = attachments;
+    if vault_state == "vault" {
+        note.vault_attachment_count = attachments.len();
+        note.attachments = Vec::new();
+    } else {
+        note.attachments = attachments;
+    }
     Ok(Some(note))
 }
 
@@ -293,6 +299,7 @@ pub fn list_notes(state: State<'_, AppState>) -> Result<Vec<Note>, String> {
             checklist: Vec::new(),
             labels: Vec::new(),
             attachments: Vec::new(),
+            vault_attachment_count: 0,
             vault: vault_label,
             background_pattern: row.get(14).map_err(err)?,
         });
@@ -400,6 +407,10 @@ pub fn list_notes(state: State<'_, AppState>) -> Result<Vec<Note>, String> {
     while let Some(row) = arows.next().map_err(err)? {
         let note_id: String = row.get(0).map_err(err)?;
         if let Some(&i) = idx.get(&note_id) {
+            if notes[i].vault == "vault" {
+                notes[i].vault_attachment_count += 1;
+                continue;
+            }
             notes[i].attachments.push(Attachment {
                 id: row.get(1).map_err(err)?,
                 note_id: note_id.clone(),
@@ -568,6 +579,7 @@ pub fn create_note(state: State<'_, AppState>, input: NoteInput) -> Result<Note,
         checklist: checklist_out,
         labels: input.labels,
         attachments: Vec::new(),
+        vault_attachment_count: 0,
         vault: "plain".to_string(),
         background_pattern: input.background_pattern,
     })
@@ -729,6 +741,16 @@ pub fn update_note(
     // returned Note. Cheap — one indexed SELECT.
     let conn = state.db.lock();
     let attachments = load_attachments(&conn, &id).map_err(err)?;
+    let vault_attachment_count = if vault_state == "vault" {
+        attachments.len()
+    } else {
+        0
+    };
+    let attachments = if vault_state == "vault" {
+        Vec::new()
+    } else {
+        attachments
+    };
     drop(conn);
     Ok(Note {
         id,
@@ -746,6 +768,7 @@ pub fn update_note(
         checklist: checklist_out,
         labels: input.labels,
         attachments,
+        vault_attachment_count,
         vault: vault_state,
         background_pattern: input.background_pattern,
     })
@@ -878,6 +901,7 @@ pub fn duplicate_note(state: State<'_, AppState>, id: String) -> Result<Note, St
         // user can manually re-attach if they really want a copy. Calling
         // it out so the absence isn't a bug.
         attachments: Vec::new(),
+        vault_attachment_count: 0,
         vault: "plain".to_string(),
         background_pattern: source.background_pattern,
     })

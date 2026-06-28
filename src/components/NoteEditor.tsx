@@ -21,6 +21,7 @@ import {
   Unlock,
   History,
   MoreVertical,
+  AlertTriangle,
 } from "lucide-react";
 import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import type { Attachment } from "../types";
@@ -190,6 +191,9 @@ export function NoteEditor() {
   const [existing, setExisting] = useState<Note | null>(null);
   const noteReminder =
     existing ? reminders.find((r) => r.noteId === existing.id) ?? null : null;
+  const noteInVault = existing?.vault === "vault";
+  const vaultAttachmentCount = existing?.vault_attachment_count ?? 0;
+  const vaultHasWithheldAttachments = noteInVault && vaultAttachmentCount > 0;
 
   const [draft, setDraft] = useState<Draft>(emptyDraft());
   const [colorOpen, setColorOpen] = useState(false);
@@ -540,10 +544,9 @@ export function NoteEditor() {
       showToast(
         next.vault === "vault" ? "Moved to vault" : "Moved out of vault",
       );
+      closeEditor();
     } catch (e) {
       showToast("Could not toggle vault: " + String(e));
-    } finally {
-      closeEditor();
     }
   };
 
@@ -598,6 +601,10 @@ export function NoteEditor() {
   };
 
   const addImage = async () => {
+    if (noteInVault) {
+      showToast("Vault notes cannot have attachments because attachment files are not encrypted");
+      return;
+    }
     try {
       const picked = await openFileDialog({
         title: "Add image to note",
@@ -634,6 +641,10 @@ export function NoteEditor() {
   ]);
 
   const addImageBlob = async (file: File | Blob, hint?: string) => {
+    if (noteInVault) {
+      showToast("Vault notes cannot have attachments because attachment files are not encrypted");
+      return;
+    }
     const mime = file.type;
     if (!SUPPORTED_PASTE_MIME.has(mime)) {
       showToast(`Unsupported image type: ${mime || "unknown"}`);
@@ -789,7 +800,18 @@ export function NoteEditor() {
             chips. Toolbar lives outside this wrapper so it stays
             pinned at the bottom even on long notes. */}
         <div className="flex-1 min-h-0 overflow-y-auto flex flex-col">
-        {attachments.length > 0 && (
+        {vaultHasWithheldAttachments && (
+          <div className="mx-4 mt-3 rounded border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-700 dark:text-red-300">
+            <div className="flex items-center gap-2 font-medium">
+              <AlertTriangle size={16} aria-hidden />
+              {vaultAttachmentCount} plaintext attachment{vaultAttachmentCount === 1 ? "" : "s"} withheld
+            </div>
+            <div className="mt-1 text-xs opacity-80">
+              Move this note out of the vault to remove or export those files.
+            </div>
+          </div>
+        )}
+        {!noteInVault && attachments.length > 0 && (
           <AttachmentGrid
             attachments={attachments}
             onRemove={removeAttachment}
@@ -940,6 +962,10 @@ export function NoteEditor() {
           <IconBtn
             ariaLabel="Record voice note"
             onClick={async () => {
+              if (noteInVault) {
+                showToast("Vault notes cannot have attachments because attachment files are not encrypted");
+                return;
+              }
               // Ensure the note exists on the Rust side first so we
               // have a noteId for the audio attachment (mirrors addImage).
               const id = await ensureExistingId();
@@ -1298,4 +1324,3 @@ function HashtagSuggestions({
     </div>
   );
 }
-

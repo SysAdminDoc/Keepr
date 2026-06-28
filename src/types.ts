@@ -79,6 +79,9 @@ export interface Note {
   checklist: ChecklistItem[];
   labels: string[];
   attachments: Attachment[];
+  /** Number of plaintext attachment rows withheld from a vault note.
+   *  Rust does not return the resource paths for vaulted attachments. */
+  vault_attachment_count?: number;
   /** NF-V0.5-C — "plain" (default) or "vault". When "vault" and the
    *  vault is locked, title/body/checklist arrive empty and the UI
    *  must show a "🔒 Locked vault note" placeholder. When unlocked,

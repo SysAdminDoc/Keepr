@@ -210,6 +210,36 @@ pub(super) fn collect_attachment_files(
     Ok(rows)
 }
 
+pub(super) fn attachment_count_for_note(conn: &Connection, note_id: &str) -> rusqlite::Result<i64> {
+    conn.query_row(
+        "SELECT COUNT(*) FROM attachments WHERE note_id = ?1",
+        params![note_id],
+        |r| r.get(0),
+    )
+}
+
+pub(super) fn ensure_note_accepts_attachment(
+    conn: &Connection,
+    note_id: &str,
+) -> Result<(), String> {
+    let vault_state: Option<String> = conn
+        .query_row(
+            "SELECT vault FROM notes WHERE id = ?1",
+            params![note_id],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(err)?;
+    match vault_state.as_deref() {
+        None => Err(format!("note {note_id} not found")),
+        Some("vault") => Err(
+            "Private Vault notes cannot have attachments because attachment files are stored unencrypted. Remove attachments before moving a note into the vault."
+                .into(),
+        ),
+        Some(_) => Ok(()),
+    }
+}
+
 // --- NF-01 attachments ---
 //
 // File model: bytes live under <data_dir>/resources/<id>.<ext>, served
@@ -522,6 +552,10 @@ pub fn add_image_attachment(
     if state.importing.load(std::sync::atomic::Ordering::SeqCst) {
         return Err("a restore is currently in progress".into());
     }
+    {
+        let conn = state.db.lock();
+        ensure_note_accepts_attachment(&conn, &note_id)?;
+    }
     let src = PathBuf::from(&src_path);
     let bytes = std::fs::read(&src).map_err(err)?;
     if bytes.len() as u64 > MAX_ATTACHMENT_BYTES {
@@ -564,6 +598,10 @@ pub(super) fn add_image_attachment_bytes_inner(
             bytes.len()
         ));
     }
+    {
+        let conn = state.db.lock();
+        ensure_note_accepts_attachment(&conn, &note_id)?;
+    }
     let ext = mime_to_ext(&mime);
     let resources_dir = state.data_dir.join(RESOURCES_DIR);
     std::fs::create_dir_all(&resources_dir).map_err(err)?;
@@ -594,6 +632,19 @@ pub(super) fn add_image_attachment_bytes_inner(
             .map_err(err)?;
         if exists == 0 {
             return Err(format!("note {note_id} not found"));
+        }
+        let vault_state: String = tx
+            .query_row(
+                "SELECT vault FROM notes WHERE id = ?1",
+                params![&note_id],
+                |r| r.get(0),
+            )
+            .map_err(err)?;
+        if vault_state == "vault" {
+            return Err(
+                "Private Vault notes cannot have attachments because attachment files are stored unencrypted. Remove attachments before moving a note into the vault."
+                    .into(),
+            );
         }
         let pos: i64 = tx
             .query_row(
@@ -714,6 +765,10 @@ pub fn add_audio_attachment_bytes(
             bytes.len()
         ));
     }
+    {
+        let conn = state.db.lock();
+        ensure_note_accepts_attachment(&conn, &note_id)?;
+    }
     let ext = match mime.as_str() {
         "audio/webm" => "webm",
         "audio/ogg" => "ogg",
@@ -741,6 +796,19 @@ pub fn add_audio_attachment_bytes(
             .map_err(err)?;
         if exists == 0 {
             return Err(format!("note {note_id} not found"));
+        }
+        let vault_state: String = tx
+            .query_row(
+                "SELECT vault FROM notes WHERE id = ?1",
+                params![&note_id],
+                |r| r.get(0),
+            )
+            .map_err(err)?;
+        if vault_state == "vault" {
+            return Err(
+                "Private Vault notes cannot have attachments because attachment files are stored unencrypted. Remove attachments before moving a note into the vault."
+                    .into(),
+            );
         }
         let pos: i64 = tx
             .query_row(

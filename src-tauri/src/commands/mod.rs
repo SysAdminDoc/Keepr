@@ -78,6 +78,11 @@ pub struct Note {
     pub checklist: Vec<ChecklistItem>,
     pub labels: Vec<String>, // label IDs
     pub attachments: Vec<Attachment>,
+    /// Count of legacy/plaintext attachment rows withheld from a vault
+    /// note. Vaulted attachments are not encrypted, so Rust never returns
+    /// their resource paths to the renderer.
+    #[serde(default)]
+    pub vault_attachment_count: usize,
     /// NF-V0.5-C — "plain" or "vault". When "vault" + DEK is unlocked,
     /// title/body/checklist are decrypted before being returned. When
     /// "vault" + DEK is locked, the renderer shows a "🔒 Locked" card.
@@ -454,6 +459,43 @@ mod tests {
             params![id, title, now],
         )
         .unwrap();
+    }
+
+    #[test]
+    fn vault_note_withholds_plaintext_attachment_metadata() {
+        let state = test_state();
+        insert_test_note(&state, "vaulted", "secret");
+        let conn = state.db.lock();
+        conn.execute("UPDATE notes SET vault = 'vault' WHERE id = 'vaulted'", [])
+            .unwrap();
+        conn.execute(
+            "INSERT INTO attachments (id, note_id, kind, mime, filename, byte_size, position, created_at, resource_path)
+             VALUES ('a1', 'vaulted', 'image', 'image/png', 'secret.png', 4, 0, '2026-01-01T00:00:00Z', 'ab/cd/abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789.png')",
+            [],
+        )
+        .unwrap();
+
+        let note = load_note(&conn, "vaulted").unwrap().unwrap();
+
+        assert_eq!(note.vault, "vault");
+        assert_eq!(note.vault_attachment_count, 1);
+        assert!(
+            note.attachments.is_empty(),
+            "vault notes must not expose plaintext resource paths"
+        );
+    }
+
+    #[test]
+    fn attachment_guard_rejects_vault_notes() {
+        let state = test_state();
+        insert_test_note(&state, "vaulted", "secret");
+        let conn = state.db.lock();
+        conn.execute("UPDATE notes SET vault = 'vault' WHERE id = 'vaulted'", [])
+            .unwrap();
+
+        let err = ensure_note_accepts_attachment(&conn, "vaulted").unwrap_err();
+
+        assert!(err.contains("Private Vault notes cannot have attachments"));
     }
 
     #[test]
