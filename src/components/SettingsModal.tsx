@@ -42,6 +42,7 @@ export function SettingsModal() {
 
   const [dataDir, setDataDir] = useState<string>("");
   const [logDir, setLogDir] = useState<string>("");
+  const [appVersion, setAppVersion] = useState<string>("");
   const [busy, setBusy] = useState(false);
   const [pendingRestoreSrc, setPendingRestoreSrc] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -51,6 +52,7 @@ export function SettingsModal() {
 
   useEffect(() => {
     if (!settingsOpen) return;
+    api.getAppVersion().then(setAppVersion).catch(() => setAppVersion(""));
     api.getDataDir().then(setDataDir).catch(() => {});
     api.getLogDir().then(setLogDir).catch(() => {});
   }, [settingsOpen]);
@@ -564,7 +566,7 @@ export function SettingsModal() {
           </div>
 
           <div className="px-5 py-3 border-t border-gray-200 dark:border-[#5f6368] text-xs text-gray-500 dark:text-gray-400">
-            Keepr v0.16.1 — offline-first Google Keep clone. MIT-licensed.
+            Keepr{appVersion ? ` v${appVersion}` : ""} — offline-first Google Keep clone. MIT-licensed.
           </div>
         </div>
       </div>
