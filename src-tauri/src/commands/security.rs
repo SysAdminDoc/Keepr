@@ -461,6 +461,12 @@ pub fn move_note_to_vault(state: State<'_, AppState>, id: String) -> Result<Note
     let dek_guard = state.vault_dek.lock();
     let dek = require_unlocked_dek(&dek_guard)?;
     let mut conn = state.db.lock();
+    let attachment_count = attachments::attachment_count_for_note(&conn, &id).map_err(err)?;
+    if attachment_count > 0 {
+        return Err(format!(
+            "Private Vault cannot accept this note because it has {attachment_count} unencrypted attachment(s). Remove the attachments before moving it into the vault."
+        ));
+    }
     let tx = conn.transaction().map_err(err)?;
     let (title, body, vault_state): (String, String, String) = tx
         .query_row(
@@ -569,6 +575,18 @@ pub fn move_note_out_of_vault(state: State<'_, AppState>, id: String) -> Result<
 
 #[tauri::command]
 pub fn move_notes_to_vault(state: State<'_, AppState>, ids: Vec<String>) -> Result<u32, String> {
+    {
+        let conn = state.db.lock();
+        for id in &ids {
+            let attachment_count =
+                attachments::attachment_count_for_note(&conn, id).map_err(err)?;
+            if attachment_count > 0 {
+                return Err(format!(
+                    "Private Vault cannot accept note {id} because it has {attachment_count} unencrypted attachment(s). Remove attachments before moving notes into the vault."
+                ));
+            }
+        }
+    }
     let mut moved: u32 = 0;
     for id in ids {
         move_note_to_vault(state.clone(), id)?;

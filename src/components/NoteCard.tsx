@@ -9,6 +9,7 @@ import {
   Check,
   Bell,
   Lock,
+  AlertTriangle,
 } from "lucide-react";
 import clsx from "clsx";
 import { useRef, useState } from "react";
@@ -78,6 +79,8 @@ export function NoteCard({ note }: Props) {
   const inArchive = section.kind === "archive";
   const vaultUnlocked = useStore((s) => s.vaultUnlocked);
   const lockedVault = note.vault === "vault" && !vaultUnlocked;
+  const vaultAttachmentCount = note.vault_attachment_count ?? 0;
+  const vaultHasWithheldAttachments = note.vault === "vault" && vaultAttachmentCount > 0;
 
   const bg = bgFor(note.color, dark);
   const border = borderFor(note.color, dark);
@@ -288,7 +291,7 @@ export function NoteCard({ note }: Props) {
         </button>
       )}
 
-      {note.attachments.length > 0 && (
+      {note.vault !== "vault" && note.attachments.length > 0 && (
         <AttachmentGrid
           attachments={note.attachments}
           maxVisible={4}
@@ -309,6 +312,15 @@ export function NoteCard({ note }: Props) {
           )
         )}
       </div>
+
+      {vaultHasWithheldAttachments && (
+        <div className="px-4 pb-2">
+          <div className="inline-flex items-center gap-1.5 rounded bg-red-500/10 px-2 py-1 text-xs text-red-700 dark:text-red-300">
+            <AlertTriangle size={13} aria-hidden />
+            {vaultAttachmentCount} plaintext attachment{vaultAttachmentCount === 1 ? "" : "s"} withheld
+          </div>
+        </div>
+      )}
 
       {!lockedVault && (
         note.kind === "text" ? (

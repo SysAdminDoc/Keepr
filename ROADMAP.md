@@ -55,13 +55,6 @@ Carried forward across every research cycle:
 
 ## Research-Driven Additions
 
-- [ ] P0 - Encrypt or quarantine vaulted attachments
-  Why: Private Vault encrypts note text/checklists, but `SECURITY.md` documents that attachments remain plaintext under `resources/`.
-  Evidence: `SECURITY.md`; `src-tauri/src/commands/security.rs::move_note_to_vault`; Notesnook private-vault positioning.
-  Touches: `src-tauri/src/commands/security.rs`, `src-tauri/src/commands/attachments.rs`, `src-tauri/src/lib.rs`, `src/components/AttachmentGrid.tsx`, `src/components/NoteEditor.tsx`, `SECURITY.md`.
-  Acceptance: moving an attached note into the vault either encrypts every attachment resource and serves it only while the vault is unlocked, or blocks the move with clear UI; existing vaulted notes with attachments are detected and migrated or flagged.
-  Complexity: XL
-
 - [ ] P1 - Replace hardcoded Settings footer version
   Why: Settings still displays `Keepr v0.16.1` while package/app metadata is v0.25.0.
   Evidence: `src/components/SettingsModal.tsx`; `package.json`; `src-tauri/tauri.conf.json`.
