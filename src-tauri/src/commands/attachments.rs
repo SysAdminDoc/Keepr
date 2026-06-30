@@ -910,11 +910,15 @@ pub fn delete_attachment(state: State<'_, AppState>, id: String) -> Result<(), S
 #[serde(rename_all = "camelCase")]
 pub struct SpeechModelStatus {
     pub downloaded: bool,
+    pub verified: bool,
     pub model_id: String,
     pub model_filename: String,
     pub model_size_bytes: u64,
     pub model_url: String,
+    pub model_digest_algorithm: String,
+    pub model_digest_hex: String,
     pub on_disk_path: String,
+    pub verification_error: Option<String>,
 }
 
 /// Renderer-facing status of the speech model. Settings → Voice
@@ -923,19 +927,31 @@ pub struct SpeechModelStatus {
 #[tauri::command]
 pub fn get_speech_model_status(state: State<'_, AppState>) -> Result<SpeechModelStatus, String> {
     let path = crate::transcribe::model_path(&state.data_dir);
+    let verification_error = if path.exists() {
+        crate::transcribe::verify_model_sha256(&path)
+            .err()
+            .map(|e| e.to_string())
+    } else {
+        None
+    };
+    let verified = path.exists() && verification_error.is_none();
     Ok(SpeechModelStatus {
-        downloaded: path.exists(),
+        downloaded: verified,
+        verified,
         model_id: crate::transcribe::MODEL_ID.to_string(),
         model_filename: crate::transcribe::MODEL_FILENAME.to_string(),
         model_size_bytes: crate::transcribe::MODEL_BYTES,
         model_url: crate::transcribe::MODEL_URL.to_string(),
+        model_digest_algorithm: "SHA-256".to_string(),
+        model_digest_hex: crate::transcribe::MODEL_SHA256_HEX.to_string(),
         on_disk_path: path.to_string_lossy().to_string(),
+        verification_error,
     })
 }
 
 /// Download the whisper model from Hugging Face. Streams ~57 MB with
 /// progress events on `transcribe://model-progress`. Idempotent: if the
-/// model is already on disk and its SHA-1 matches the published digest,
+/// model is already on disk and its SHA-256 matches the expected digest,
 /// this returns without any network activity.
 ///
 /// This is the ONLY outbound HTTP call in Keepr — explicitly opt-in via
@@ -1057,6 +1073,10 @@ pub async fn transcribe_audio_attachment(
             "Speech model not downloaded. Open Settings → Voice transcription to download it (~57 MB, one time, then fully offline)."
                 .into(),
         );
+    }
+
+    if let Err(e) = crate::transcribe::verify_model_sha256(&model_path) {
+        return Err(format!("Speech model failed integrity check: {e}"));
     }
 
     // Short-circuit: if we have a transcript for the same CRC32, reuse it.

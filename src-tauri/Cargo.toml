@@ -1,6 +1,6 @@
 [package]
 name = "keepr"
-version = "0.25.1"
+version = "0.25.2"
 description = "Offline-first Google Keep clone"
 authors = ["Matthew Ashton"]
 edition = "2021"
@@ -71,9 +71,9 @@ rubato = "0.16.2"
 # default for HF served content. No `default-features = false` — we
 # want connection pooling, redirects, etc.
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }
-# SHA-1 verification of the downloaded model bytes against the digest
-# Hugging Face publishes for each whisper.cpp weight.
-sha1 = "0.11.0"
+# SHA-256 verification of the downloaded model bytes against the Git
+# LFS object digest Hugging Face serves for each whisper.cpp weight.
+sha2 = "0.10"
 # Async runtime for the Tauri command + the model download task.
 # Tauri 2 commands declared `async fn` integrate with whatever runtime
 # is present; we keep features minimal.

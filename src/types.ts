@@ -188,11 +188,15 @@ export interface SmartLabel {
 /** v0.23.0 — opt-in offline speech-to-text via whisper.cpp. */
 export interface SpeechModelStatus {
   downloaded: boolean;
+  verified: boolean;
   modelId: string;
   modelFilename: string;
   modelSizeBytes: number;
   modelUrl: string;
+  modelDigestAlgorithm: string;
+  modelDigestHex: string;
   onDiskPath: string;
+  verificationError: string | null;
 }
 
 /** v0.23.0 — persisted transcript for a single audio attachment. */

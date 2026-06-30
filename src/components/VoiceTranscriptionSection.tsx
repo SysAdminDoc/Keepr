@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Download, Trash2, MicVocal, CheckCircle2, Loader2 } from "lucide-react";
+import { AlertTriangle, Download, Trash2, MicVocal, CheckCircle2, Loader2 } from "lucide-react";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { api } from "../api";
 import { useStore } from "../store";
@@ -96,6 +96,17 @@ export function VoiceTranscriptionSection() {
     progress && progress.total > 0
       ? Math.min(100, Math.round((progress.downloaded / progress.total) * 100))
       : null;
+  const provenance = status ? (
+    <div className="mt-2 space-y-1 text-[11px] text-gray-500 dark:text-gray-400">
+      <div className="break-all">
+        Source: <span className="font-mono">{status.modelUrl}</span>
+      </div>
+      <div className="break-all">
+        Expected {status.modelDigestAlgorithm}:{" "}
+        <span className="font-mono">{status.modelDigestHex}</span>
+      </div>
+    </div>
+  ) : null;
 
   return (
     <div>
@@ -145,6 +156,7 @@ export function VoiceTranscriptionSection() {
           <div className="text-[11px] text-gray-500 dark:text-gray-400 mt-1 break-all font-mono">
             {status.onDiskPath}
           </div>
+          {provenance}
           <div className="flex gap-2 mt-3">
             <button
               disabled={busy}
@@ -165,9 +177,16 @@ export function VoiceTranscriptionSection() {
             <Download size={16} aria-hidden /> Download model (
             {mb(status.modelSizeBytes)} MB)
           </button>
-          <p className="text-[11px] text-gray-500 dark:text-gray-400">
-            Source: {status.modelUrl}
-          </p>
+          {status.verificationError ? (
+            <div className="text-xs text-amber-700 dark:text-amber-300 flex items-start gap-2">
+              <AlertTriangle size={14} className="mt-0.5 shrink-0" aria-hidden />
+              <span>
+                Existing model failed verification. Downloading again will
+                remove the bad file and fetch a fresh copy.
+              </span>
+            </div>
+          ) : null}
+          {provenance}
         </div>
       )}
     </div>

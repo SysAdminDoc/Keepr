@@ -9,7 +9,7 @@
 //!
 //! The whisper model is NOT bundled. `download_model` streams ~57 MB
 //! (base.en-q5_1) from Hugging Face on first use with explicit consent.
-//! SHA-1 verification against the digest baked in this file ensures we
+//! SHA-256 verification against the digest baked in this file ensures
 //! don't run on tampered weights. Model lives at
 //! `<app_data_dir>/models/<MODEL_FILENAME>`.
 //!
@@ -24,7 +24,7 @@
 
 use anyhow::{anyhow, bail, Context, Result};
 use futures_util::StreamExt;
-use sha1::{Digest, Sha1};
+use sha2::{Digest, Sha256};
 use std::fs::File;
 use std::io::{BufReader, BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
@@ -36,12 +36,13 @@ use tauri::{AppHandle, Emitter, Manager};
 /// quality loss on short clips. Quantized (q5_1) keeps the download
 /// under 60 MB.
 pub const MODEL_FILENAME: &str = "ggml-base.en-q5_1.bin";
-pub const MODEL_BYTES: u64 = 59_876_896; // ~57.1 MiB; reported by HF
-/// SHA-1 of the model file as published in the whisper.cpp model card.
+pub const MODEL_BYTES: u64 = 59_721_011; // ~57.0 MiB; reported by HF
+/// SHA-256 of the Git LFS object Hugging Face serves for this model.
 /// If Hugging Face ever re-uploads with a different hash, this needs
 /// to bump in lockstep with the URL — refusing the download is the
 /// correct failure mode (don't run on weights we didn't verify).
-pub const MODEL_SHA1_HEX: &str = "d26d7ce5a1b6e57bea5d0431b9c20ae49423c94a";
+pub const MODEL_SHA256_HEX: &str =
+    "4baf70dd0d7c4247ba2b81fafd9c01005ac77c2f9ef064e00dcf195d0e2fdd2f";
 pub const MODEL_URL: &str =
     "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en-q5_1.bin";
 /// Model identifier persisted in `transcripts.model` so a future model
@@ -58,17 +59,13 @@ pub fn model_path(data_dir: &Path) -> PathBuf {
     data_dir.join(MODELS_DIR).join(MODEL_FILENAME)
 }
 
-/// True iff the model exists on disk AND its SHA-1 matches. We verify
-/// once per process start (cached via the `verified_models` mutex on
-/// AppState) so the per-transcribe cost is negligible.
 pub fn model_present(data_dir: &Path) -> bool {
     model_path(data_dir).exists()
 }
 
-/// Verify the on-disk model file matches MODEL_SHA1_HEX. Returns the
-/// computed hex digest on mismatch so the caller can surface it.
-pub fn verify_model_sha1(path: &Path) -> Result<()> {
-    let mut hasher = Sha1::new();
+/// Verify the on-disk model file matches MODEL_SHA256_HEX.
+pub fn verify_model_sha256(path: &Path) -> Result<()> {
+    let mut hasher = Sha256::new();
     let mut reader = BufReader::new(File::open(path)?);
     let mut buf = [0u8; 64 * 1024];
     loop {
@@ -79,9 +76,9 @@ pub fn verify_model_sha1(path: &Path) -> Result<()> {
         hasher.update(&buf[..n]);
     }
     let got = hex_lower(&hasher.finalize());
-    if got != MODEL_SHA1_HEX {
+    if !got.eq_ignore_ascii_case(MODEL_SHA256_HEX) {
         bail!(
-            "model SHA-1 mismatch: expected {MODEL_SHA1_HEX}, got {got} — delete and re-download"
+            "model SHA-256 mismatch: expected {MODEL_SHA256_HEX}, got {got}. Delete the model in Settings and download it again."
         );
     }
     Ok(())
@@ -105,7 +102,7 @@ pub struct ModelProgress {
 }
 
 /// Stream the model file from Hugging Face into a `.partial` file beside
-/// the final path; verify SHA-1 incrementally; on match, atomically
+/// the final path; verify SHA-256 incrementally; on match, atomically
 /// rename into place. Emits `transcribe://model-progress` events ~5×/sec.
 ///
 /// Idempotent: if the model already exists and verifies, returns Ok(())
@@ -114,11 +111,11 @@ pub async fn download_model(app: AppHandle, data_dir: PathBuf) -> Result<()> {
     let final_path = model_path(&data_dir);
     if final_path.exists() {
         // Verify in-place; if it's intact, skip the download.
-        if verify_model_sha1(&final_path).is_ok() {
-            log::info!("download_model: existing model verified, skipping download");
+        if verify_model_sha256(&final_path).is_ok() {
+            log::info!("download_model: existing model SHA-256 verified, skipping download");
             return Ok(());
         }
-        log::warn!("download_model: existing model failed verification, re-downloading");
+        log::warn!("download_model: existing model failed SHA-256 verification, re-downloading");
         let _ = std::fs::remove_file(&final_path);
     }
     let models_dir = final_path.parent().unwrap();
@@ -127,7 +124,7 @@ pub async fn download_model(app: AppHandle, data_dir: PathBuf) -> Result<()> {
     let partial = final_path.with_extension("partial");
     let _ = std::fs::remove_file(&partial); // start clean — sha is computed from scratch
 
-    log::info!("download_model: starting {MODEL_URL}");
+    log::info!("download_model: starting {MODEL_URL} (expected SHA-256 {MODEL_SHA256_HEX})");
     let client = reqwest::Client::builder()
         .user_agent(concat!("Keepr/", env!("CARGO_PKG_VERSION")))
         .build()?;
@@ -135,7 +132,7 @@ pub async fn download_model(app: AppHandle, data_dir: PathBuf) -> Result<()> {
     let total = resp.content_length().unwrap_or(MODEL_BYTES);
 
     let mut file = BufWriter::new(File::create(&partial)?);
-    let mut hasher = Sha1::new();
+    let mut hasher = Sha256::new();
     let mut downloaded: u64 = 0;
     let mut last_emit: u64 = 0;
     let mut stream = resp.bytes_stream();
@@ -158,9 +155,11 @@ pub async fn download_model(app: AppHandle, data_dir: PathBuf) -> Result<()> {
     drop(file);
 
     let got = hex_lower(&hasher.finalize());
-    if got != MODEL_SHA1_HEX {
+    if !got.eq_ignore_ascii_case(MODEL_SHA256_HEX) {
         let _ = std::fs::remove_file(&partial);
-        bail!("downloaded model SHA-1 mismatch: expected {MODEL_SHA1_HEX}, got {got}");
+        bail!(
+            "downloaded model SHA-256 mismatch: expected {MODEL_SHA256_HEX}, got {got}. The partial download was removed; try Download model again from Settings."
+        );
     }
     std::fs::rename(&partial, &final_path)
         .with_context(|| format!("rename {} to {}", partial.display(), final_path.display()))?;
@@ -173,8 +172,8 @@ pub async fn download_model(app: AppHandle, data_dir: PathBuf) -> Result<()> {
         },
     );
     log::info!(
-        "download_model: complete ({downloaded} bytes) -> {}",
-        final_path.display()
+        "download_model: complete ({downloaded} bytes, SHA-256 {MODEL_SHA256_HEX}) -> {}",
+        final_path.display(),
     );
     Ok(())
 }
@@ -324,4 +323,23 @@ pub fn app_data_dir(app: &AppHandle) -> Result<PathBuf> {
     app.path()
         .app_data_dir()
         .map_err(|e| anyhow!("app_data_dir resolve failed: {e}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn verify_model_sha256_reports_digest_failure_recovery() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("model.bin");
+        std::fs::write(&path, b"tampered model").unwrap();
+
+        let err = verify_model_sha256(&path).unwrap_err().to_string();
+
+        assert!(err.contains("model SHA-256 mismatch"), "got: {err}");
+        assert!(err.contains(MODEL_SHA256_HEX), "got: {err}");
+        assert!(err.contains("Delete the model"), "got: {err}");
+        assert!(err.contains("download it again"), "got: {err}");
+    }
 }
