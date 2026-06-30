@@ -10,7 +10,7 @@
 //! The whisper model is NOT bundled. `download_model` streams ~57 MB
 //! (base.en-q5_1) from Hugging Face on first use with explicit consent.
 //! SHA-256 verification against the digest baked in this file ensures
-//! don't run on tampered weights. Model lives at
+//! we don't run on tampered weights. Model lives at
 //! `<app_data_dir>/models/<MODEL_FILENAME>`.
 //!
 //! Threading: whisper.cpp is CPU-heavy. Each transcription runs on a
