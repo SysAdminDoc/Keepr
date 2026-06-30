@@ -1,6 +1,6 @@
 # Keepr
 
-![Version](https://img.shields.io/badge/version-0.25.1-blue)
+![Version](https://img.shields.io/badge/version-0.25.2-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
 
@@ -24,6 +24,8 @@ Google Keep is great until the internet goes out. Keepr gives you the same look,
 
 **Backup & migration** — Manual ZIP export / import with zip-slip + zip-bomb defenses and `.prev` rollback, auto-backup schedule (daily / weekly to your Drive folder), Markdown vault export (one `.md` per note + YAML frontmatter + `_resources/`), Google Takeout import (preserves chronology + reminders + labels + attachments).
 
+**Speech** — Voice-note transcription runs locally with whisper.cpp after an explicit one-time model download. Keepr shows the source URL and expected SHA-256 digest before download, then refuses to run a model that fails verification.
+
 **Theme** — Light / Dark / System (follows OS), masonry grid, full keyboard accessibility, WCAG AAA contrast across all 24 color combinations.
 
 **Distribution** — Unsigned NSIS / MSI installer + portable `.zip` built locally and attached to GitHub Releases. See [Install](#install).
@@ -37,6 +39,10 @@ Keepr uses Tauri's per-app data directory:
 - **Linux:** `$XDG_DATA_HOME/com.sysadmindoc.keepr/keepr.db` (best-effort builds since v0.10).
 
 The schema is versioned (`PRAGMA user_version`), so a newer Keepr can upgrade an older database in place. A backup is just a regular ZIP — `keepr.db` at the root plus attachment resources under `resources/`.
+
+## Network behavior
+
+Keepr makes no background outbound network requests. The only app-initiated outbound HTTP path is **Settings → Voice transcription → Download model**, which fetches the whisper.cpp model from Hugging Face after a user click and verifies its SHA-256 digest before use. After the model is on disk, transcription is fully local. The Web Clipper binds to localhost only and does not contact hosted services.
 
 ### Portable mode
 

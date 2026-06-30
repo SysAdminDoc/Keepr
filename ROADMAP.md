@@ -4,7 +4,7 @@
 
 **Priority legend:** P0 = data loss / crash / security / distribution-blocker · P1 = visible bug / high user value · P2 = polish / nice-to-have · P3 = future / experimental.
 
-**Status (2026-06-28):** v0.25.1 ships the command-module split, Private Vault attachment guardrails, and Settings version source-of-truth. Blocked signing/biometric/notarization items live in [Roadmap_Blocked.md](Roadmap_Blocked.md). This file lists only actionable open work.
+**Status (2026-06-30):** v0.25.2 ships SHA-256 speech model provenance, explicit model source/digest disclosure, and corrected network-disclosure docs. Blocked signing/biometric/notarization items live in [Roadmap_Blocked.md](Roadmap_Blocked.md). This file lists only actionable open work.
 
 ---
 
@@ -18,7 +18,7 @@
 ## Won't ship (rescoped from prior research)
 
 - **NF-12 — Image OCR**: requires per-platform OCR backends; bundling a multi-MB engine into every build fails the cross-platform feature-parity bar. Users can paste OS-extracted text instead.
-- **NF-13 — Rich URL preview cards**: requires outbound HTTP. Directly contradicts the "no outbound network requests" promise.
+- **NF-13 — Rich URL preview cards**: requires app-initiated outbound HTTP to arbitrary websites. Directly contradicts the "no background outbound network requests except the opt-in speech model download" promise.
 
 ---
 
@@ -55,15 +55,8 @@ Carried forward across every research cycle:
 
 ## Research-Driven Additions
 
-- [ ] P1 - Harden speech model provenance and network disclosure
-  Why: Keepr now has one explicit outbound download path, but `SECURITY.md` still says no outbound network and the model is verified with SHA-1.
-  Evidence: `SECURITY.md`; `src-tauri/src/transcribe.rs::MODEL_SHA1_HEX`; `src-tauri/src/transcribe.rs::download_model`; RustSec/source review.
-  Touches: `src-tauri/src/transcribe.rs`, `src/components/VoiceTranscriptionSection.tsx`, `README.md`, `SECURITY.md`, tests for model digest failures.
-  Acceptance: model verification uses SHA-256 or stronger, the UI/logs show source URL and expected digest, failed verification gives a recovery path, and docs state that Keepr makes no background network requests except the opt-in model download.
-  Complexity: M
-
 - [ ] P1 - Package Web Clipper as a release artifact
-  Why: The clipper is developer-mode only, has no packaging script, and its manifest version is v0.1.0 while Keepr is v0.25.1.
+  Why: The clipper is developer-mode only, has no packaging script, and its manifest version is v0.1.0 while Keepr is v0.25.2.
   Evidence: `web-clipper/manifest.json`; `web-clipper/README.md`; Chrome MV3 packaging constraints; Chrome-extension memory guidance.
   Touches: `web-clipper/manifest.json`, `web-clipper/README.md`, release scripts/docs, `README.md`.
   Acceptance: a local build creates a POSIX-path ZIP for Load unpacked install, optionally creates a secondary CRX3 for enterprise/manual tooling, verifies archive contents/icons/manifest load, and documents install/update steps in the release notes.
