@@ -1,11 +1,12 @@
 {
   "name": "keepr",
   "private": true,
-  "version": "0.25.2",
+  "version": "0.25.3",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "build:clipper": "node scripts/build-web-clipper.mjs",
     "preview": "vite preview",
     "lint": "eslint .",
     "test": "vitest run",

@@ -1,6 +1,6 @@
 # Keepr
 
-![Version](https://img.shields.io/badge/version-0.25.2-blue)
+![Version](https://img.shields.io/badge/version-0.25.3-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
 
@@ -28,7 +28,7 @@ Google Keep is great until the internet goes out. Keepr gives you the same look,
 
 **Theme** — Light / Dark / System (follows OS), masonry grid, full keyboard accessibility, WCAG AAA contrast across all 24 color combinations.
 
-**Distribution** — Unsigned NSIS / MSI installer + portable `.zip` built locally and attached to GitHub Releases. See [Install](#install).
+**Distribution** — Unsigned NSIS / MSI installer, portable `.zip`, and Web Clipper ZIP built locally and attached to GitHub Releases. See [Install](#install).
 
 ## Where Keepr stores your data
 
@@ -65,6 +65,11 @@ Pick one of the published builds from [Releases](https://github.com/SysAdminDoc/
 - **`Keepr-portable.zip`** — extract anywhere, run `keepr.exe`. The bundled `portable.flag` makes the app store `keepr.db` next to the EXE so it travels on a USB stick.
 
 Keepr is unsigned today (see [SECURITY.md](SECURITY.md) for rationale). First launch shows Windows SmartScreen — click "More info" → "Run anyway".
+
+**Browser extension**
+
+- **`Keepr-Web-Clipper-<version>.zip`** — primary Web Clipper package. Extract to a permanent folder, open `chrome://extensions` or `edge://extensions`, enable Developer mode, click **Load unpacked**, and select the extracted folder.
+- **`Keepr-Web-Clipper-<version>.crx`** — secondary artifact for enterprise/manual tooling. Modern Chrome/Edge reject self-hosted CRX drag-and-drop installs, so use the ZIP for normal installs.
 
 **macOS (best-effort, v0.10+)**
 

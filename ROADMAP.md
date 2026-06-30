@@ -4,7 +4,7 @@
 
 **Priority legend:** P0 = data loss / crash / security / distribution-blocker · P1 = visible bug / high user value · P2 = polish / nice-to-have · P3 = future / experimental.
 
-**Status (2026-06-30):** v0.25.2 ships SHA-256 speech model provenance, explicit model source/digest disclosure, and corrected network-disclosure docs. Blocked signing/biometric/notarization items live in [Roadmap_Blocked.md](Roadmap_Blocked.md). This file lists only actionable open work.
+**Status (2026-06-30):** v0.25.3 ships Web Clipper release packaging as a ZIP-first artifact with secondary CRX3 tooling. Blocked signing/biometric/notarization items live in [Roadmap_Blocked.md](Roadmap_Blocked.md). This file lists only actionable open work.
 
 ---
 
@@ -54,13 +54,6 @@ Carried forward across every research cycle:
 - **Voice transcription scope (v0.22.4):** local offline whisper.cpp is in-bounds; cloud transcription remains banned.
 
 ## Research-Driven Additions
-
-- [ ] P1 - Package Web Clipper as a release artifact
-  Why: The clipper is developer-mode only, has no packaging script, and its manifest version is v0.1.0 while Keepr is v0.25.2.
-  Evidence: `web-clipper/manifest.json`; `web-clipper/README.md`; Chrome MV3 packaging constraints; Chrome-extension memory guidance.
-  Touches: `web-clipper/manifest.json`, `web-clipper/README.md`, release scripts/docs, `README.md`.
-  Acceptance: a local build creates a POSIX-path ZIP for Load unpacked install, optionally creates a secondary CRX3 for enterprise/manual tooling, verifies archive contents/icons/manifest load, and documents install/update steps in the release notes.
-  Complexity: M
 
 - [ ] P1 - Add Web Clipper context-menu and article capture modes
   Why: Joplin, Notesnook, and Obsidian make clipping available from right-click flows and richer page extraction; Keepr currently clips from the toolbar with a 4 KB text snippet.

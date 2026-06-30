@@ -10,6 +10,7 @@ export default [
     ignores: [
       "dist/**",
       "dist-portable/**",
+      "dist-web-clipper/**",
       "src-tauri/target/**",
       "node_modules/**",
       "**/*.d.ts",
@@ -29,6 +30,14 @@ export default [
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,
+  {
+    files: ["scripts/**/*.mjs"],
+    languageOptions: {
+      ecmaVersion: 2022,
+      sourceType: "module",
+      globals: { ...globals.node, ...globals.es2022 },
+    },
+  },
   {
     files: ["src/**/*.{ts,tsx}"],
     languageOptions: {
