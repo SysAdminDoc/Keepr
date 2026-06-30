@@ -50,7 +50,7 @@ async function clipAndReport(command, label) {
   }
 }
 
-btnPage.addEventListener("click", () => clipAndReport("clip-page", "page"));
+btnPage.addEventListener("click", () => clipAndReport("clip-page", "article"));
 btnSelection.addEventListener("click", () => clipAndReport("clip-selection", "selection"));
 btnUrl.addEventListener("click", () => clipAndReport("clip-url", "URL"));
 

@@ -35,6 +35,7 @@ if (manifest.version !== packageJson.version) {
 
 const requiredEntries = [
   "manifest.json",
+  "article-extractor.js",
   "background.js",
   "popup.html",
   "popup.js",

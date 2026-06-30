@@ -1,19 +1,16 @@
-// Keepr Web Clipper — background service worker.
+// Keepr Web Clipper background worker.
 //
-// MV3 in Chrome/Edge ships service workers; Firefox MV3 ships event
-// pages. Both load this file at extension startup and dispose it when
-// idle. Don't hold long-lived state in module scope — re-read from
-// storage on each event.
-//
-// The `api` shim works in both because Firefox aliases `chrome.*` to
-// itself when an extension declares MV3.
+// The worker owns all localhost writes. Popup buttons and context-menu
+// entries share the same extraction + POST path so auth and payload
+// limits stay centralized in the Keepr desktop server.
 
 const api = globalThis.browser ?? globalThis.chrome;
+const MENU_IDS = {
+  page: "keepr-save-page",
+  selection: "keepr-save-selection",
+  link: "keepr-save-link",
+};
 
-/**
- * Read the configured Keepr endpoint (port + token) from
- * chrome.storage.local. Returns { port, token } or null if unset.
- */
 async function readConfig() {
   const stored = await api.storage.local.get(["port", "token"]);
   if (!stored.port || !stored.token) return null;
@@ -26,7 +23,7 @@ async function postClip(endpoint, payload) {
     return {
       ok: false,
       error:
-        "Keepr endpoint not configured — open Extension Options and paste the Port + Token from Keepr's Settings → Web Clipper.",
+        "Keepr endpoint not configured - open Extension Options and paste the Port + Token from Keepr Settings > Web Clipper.",
     };
   }
   const url = `http://127.0.0.1:${cfg.port}${endpoint}`;
@@ -49,78 +46,114 @@ async function postClip(endpoint, payload) {
     return {
       ok: false,
       error:
-        "Could not reach Keepr — make sure the app is running and the port matches. (" +
+        "Could not reach Keepr - make sure the app is running and the port matches. (" +
         String(e?.message ?? e) +
         ")",
     };
   }
 }
 
-/**
- * Inject a small in-page script that grabs the active selection, the
- * page title, the URL, and the meta description. We DON'T ship
- * Readability for v0.1 — that's a follow-up. Most clips are either
- * "save the URL" or "save the selection I just highlighted", both of
- * which work fine without Readability.
- */
-async function extractFromTab(tab, mode) {
+async function extractFromTab(tab, mode, fallback = {}) {
+  if (!tab?.id) return fallbackClip(fallback);
+  try {
+    await api.scripting.executeScript({
+      target: { tabId: tab.id },
+      files: ["article-extractor.js"],
+    });
+  } catch (_e) {
+    return fallbackClip({
+      ...fallback,
+      url: fallback.url || tab.url,
+      title: fallback.title || tab.title || tab.url,
+    });
+  }
   const [{ result }] = await api.scripting.executeScript({
     target: { tabId: tab.id },
-    args: [mode],
-    func: (extractMode) => {
-      const url = location.href;
-      const title = document.title || url;
-      const metaDesc =
-        document
-          .querySelector('meta[name="description"]')
-          ?.getAttribute("content") || null;
-      let selection = "";
-      const sel = window.getSelection();
-      if (sel && !sel.isCollapsed) {
-        selection = sel.toString();
-      }
-      if (extractMode === "selection") {
-        return {
-          url,
-          title,
-          markdown: selection,
-          excerpt: metaDesc,
-        };
-      }
-      // "page" mode: grab the meta description + the first 4 KB of
-      // visible body text as a plain-text snippet. Cheap, no parser
-      // dependency. The user can install a Readability-powered v2
-      // build later.
-      const main =
-        document.querySelector("article") ??
-        document.querySelector("main") ??
-        document.body;
-      const text = (main?.innerText ?? "").trim();
-      const snippet = text.length > 4000 ? text.slice(0, 4000) + "\n…[truncated]" : text;
-      return {
-        url,
-        title,
-        markdown: snippet,
-        excerpt: metaDesc,
-      };
+    args: [mode, fallback],
+    func: (extractMode, fallbackData) => {
+      return globalThis.KeeprClipperExtractor.extractReadableClip(extractMode, fallbackData);
     },
   });
-  return result;
+  return result ?? fallbackClip(fallback);
 }
 
-/**
- * Public message API for the popup. The popup sends a "command" string;
- * the worker does the extract + POST and returns the result.
- */
+function fallbackClip(fallback = {}) {
+  return {
+    url: fallback.url || "",
+    title: fallback.title || fallback.url || "Untitled clip",
+    markdown: fallback.selectionText || fallback.markdown || "",
+    excerpt: fallback.excerpt || null,
+  };
+}
+
+async function clipActiveTab(command, tab, fallback = {}) {
+  if (command === "clip-url") {
+    return postClip("/clip/url", {
+      url: fallback.url || tab?.url,
+      title: fallback.title || tab?.title || fallback.url || tab?.url,
+      markdown: "",
+      tags: ["clipped", "link"],
+    });
+  }
+  const mode = command === "clip-selection" ? "selection" : "article";
+  const data = await extractFromTab(tab, mode, fallback);
+  return postClip(command === "clip-selection" ? "/clip/selection" : "/clip", {
+    url: data.url || fallback.url || tab?.url,
+    title: data.title || fallback.title || tab?.title || data.url || "Untitled clip",
+    markdown: data.markdown,
+    excerpt: data.excerpt,
+    tags: command === "clip-selection" ? ["clipped", "selection"] : ["clipped", "article"],
+  });
+}
+
+async function setupContextMenus() {
+  if (!api.contextMenus) return;
+  try {
+    if (globalThis.browser?.contextMenus) {
+      await api.contextMenus.removeAll();
+    } else {
+      await new Promise((resolve) => api.contextMenus.removeAll(resolve));
+    }
+  } catch (_e) {
+    // Context menus are best-effort across Chrome and Firefox MV3.
+  }
+  api.contextMenus.create({
+    id: MENU_IDS.page,
+    title: "Save page to Keepr",
+    contexts: ["page"],
+  });
+  api.contextMenus.create({
+    id: MENU_IDS.selection,
+    title: "Save selection to Keepr",
+    contexts: ["selection"],
+  });
+  api.contextMenus.create({
+    id: MENU_IDS.link,
+    title: "Save link to Keepr",
+    contexts: ["link"],
+  });
+}
+
+function flashBadge(tabId, ok) {
+  if (!api.action?.setBadgeText || !tabId) return;
+  api.action.setBadgeText({ tabId, text: ok ? "OK" : "ERR" });
+  api.action.setBadgeBackgroundColor?.({
+    tabId,
+    color: ok ? "#137333" : "#d93025",
+  });
+  setTimeout(() => api.action.setBadgeText({ tabId, text: "" }), 1600);
+}
+
 api.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (!msg || typeof msg.command !== "string") return false;
   (async () => {
     try {
       if (msg.command === "ping") {
         const cfg = await readConfig();
-        if (!cfg) { sendResponse({ ok: false, error: "not_configured" }); return; }
-        // Health check the endpoint itself so the popup knows whether
-        // Keepr is running BEFORE we try to clip.
+        if (!cfg) {
+          sendResponse({ ok: false, error: "not_configured" });
+          return;
+        }
         try {
           const r = await fetch(`http://127.0.0.1:${cfg.port}/health`);
           sendResponse({ ok: r.ok, port: cfg.port });
@@ -135,31 +168,11 @@ api.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         return;
       }
       if (msg.command === "clip-url") {
-        const result = await postClip("/clip/url", {
-          url: tab.url,
-          title: tab.title || tab.url,
-          markdown: "",
-          tags: ["clipped"],
-        });
-        sendResponse(result);
+        sendResponse(await clipActiveTab("clip-url", tab));
         return;
       }
       if (msg.command === "clip-selection" || msg.command === "clip-page") {
-        const data = await extractFromTab(
-          tab,
-          msg.command === "clip-selection" ? "selection" : "page",
-        );
-        const result = await postClip(
-          msg.command === "clip-selection" ? "/clip/selection" : "/clip",
-          {
-            url: data.url,
-            title: data.title,
-            markdown: data.markdown,
-            excerpt: data.excerpt,
-            tags: ["clipped"],
-          },
-        );
-        sendResponse(result);
+        sendResponse(await clipActiveTab(msg.command, tab));
         return;
       }
       sendResponse({ ok: false, error: `unknown command: ${msg.command}` });
@@ -167,5 +180,39 @@ api.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       sendResponse({ ok: false, error: String(e?.message ?? e) });
     }
   })();
-  return true; // keep the channel open for the async response
+  return true;
+});
+
+api.runtime.onInstalled?.addListener(() => {
+  setupContextMenus();
+});
+
+api.runtime.onStartup?.addListener(() => {
+  setupContextMenus();
+});
+
+api.contextMenus?.onClicked?.addListener((info, tab) => {
+  (async () => {
+    let result;
+    if (info.menuItemId === MENU_IDS.link) {
+      result = await clipActiveTab("clip-url", tab, {
+        url: info.linkUrl,
+        title: info.linkText || info.linkUrl,
+      });
+    } else if (info.menuItemId === MENU_IDS.selection) {
+      result = await clipActiveTab("clip-selection", tab, {
+        selectionText: info.selectionText,
+        url: tab?.url,
+        title: tab?.title,
+      });
+    } else if (info.menuItemId === MENU_IDS.page) {
+      result = await clipActiveTab("clip-page", tab, {
+        url: tab?.url,
+        title: tab?.title,
+      });
+    } else {
+      return;
+    }
+    flashBadge(tab?.id, result.ok);
+  })().catch(() => flashBadge(tab?.id, false));
 });

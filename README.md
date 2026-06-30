@@ -1,6 +1,6 @@
 # Keepr
 
-![Version](https://img.shields.io/badge/version-0.25.3-blue)
+![Version](https://img.shields.io/badge/version-0.25.4-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
 
@@ -28,7 +28,7 @@ Google Keep is great until the internet goes out. Keepr gives you the same look,
 
 **Theme** — Light / Dark / System (follows OS), masonry grid, full keyboard accessibility, WCAG AAA contrast across all 24 color combinations.
 
-**Distribution** — Unsigned NSIS / MSI installer, portable `.zip`, and Web Clipper ZIP built locally and attached to GitHub Releases. See [Install](#install).
+**Distribution** — Unsigned NSIS / MSI installer, portable `.zip`, and Web Clipper ZIP built locally and attached to GitHub Releases. The clipper supports toolbar and right-click article / selection / link capture. See [Install](#install).
 
 ## Where Keepr stores your data
 

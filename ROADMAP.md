@@ -4,7 +4,7 @@
 
 **Priority legend:** P0 = data loss / crash / security / distribution-blocker · P1 = visible bug / high user value · P2 = polish / nice-to-have · P3 = future / experimental.
 
-**Status (2026-06-30):** v0.25.3 ships Web Clipper release packaging as a ZIP-first artifact with secondary CRX3 tooling. Blocked signing/biometric/notarization items live in [Roadmap_Blocked.md](Roadmap_Blocked.md). This file lists only actionable open work.
+**Status (2026-06-30):** v0.25.4 ships Web Clipper context-menu actions and local article-to-Markdown capture. Blocked signing/biometric/notarization items live in [Roadmap_Blocked.md](Roadmap_Blocked.md). This file lists only actionable open work.
 
 ---
 
@@ -54,13 +54,6 @@ Carried forward across every research cycle:
 - **Voice transcription scope (v0.22.4):** local offline whisper.cpp is in-bounds; cloud transcription remains banned.
 
 ## Research-Driven Additions
-
-- [ ] P1 - Add Web Clipper context-menu and article capture modes
-  Why: Joplin, Notesnook, and Obsidian make clipping available from right-click flows and richer page extraction; Keepr currently clips from the toolbar with a 4 KB text snippet.
-  Evidence: `web-clipper/background.js`; `web-clipper/popup.js`; Joplin Web Clipper; Notesnook Web Clipper; Chrome `contextMenus` and `scripting` APIs.
-  Touches: `web-clipper/background.js`, `web-clipper/popup.js`, `web-clipper/manifest.json`, `src-tauri/src/web_clipper.rs`, Web Clipper README.
-  Acceptance: right-click actions save page, selection, and link; full-page mode produces readable Markdown with source URL and labels; payload caps and bearer auth remain enforced; Firefox/Chrome behavior is smoke-tested.
-  Complexity: M
 
 - [ ] P2 - Add local end-to-end smoke coverage for desktop and clipper flows
   Why: unit tests cover many helpers, but the trust-critical workflows are desktop/browser integration paths.
