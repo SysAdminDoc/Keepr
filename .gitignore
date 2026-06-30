@@ -37,6 +37,7 @@ CLAUDE.md
 CODEX_CHANGELOG.md
 .claude/
 .audit-notes-*.md
+keepr-web-clipper-selfhost.pem
 
 # Markdown files local-only (except README)
 *.md
