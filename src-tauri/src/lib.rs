@@ -1,5 +1,5 @@
 mod commands;
-mod db;
+pub mod db;
 mod lock;
 // v0.22.1 — vault module is `pub` so the standalone `keepr-verify`
 // binary in src/bin/keepr-verify.rs can re-derive the KEK and decrypt

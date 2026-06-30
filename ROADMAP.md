@@ -4,7 +4,7 @@
 
 **Priority legend:** P0 = data loss / crash / security / distribution-blocker · P1 = visible bug / high user value · P2 = polish / nice-to-have · P3 = future / experimental.
 
-**Status (2026-06-30):** v0.25.4 ships Web Clipper context-menu actions and local article-to-Markdown capture. Blocked signing/biometric/notarization items live in [Roadmap_Blocked.md](Roadmap_Blocked.md). This file lists only actionable open work.
+**Status (2026-06-30):** v0.25.5 ships a local smoke command for temp database, attachment, vault, Web Clipper, and backup verification. Blocked signing/biometric/notarization items live in [Roadmap_Blocked.md](Roadmap_Blocked.md). This file lists only actionable open work.
 
 ---
 
@@ -54,13 +54,6 @@ Carried forward across every research cycle:
 - **Voice transcription scope (v0.22.4):** local offline whisper.cpp is in-bounds; cloud transcription remains banned.
 
 ## Research-Driven Additions
-
-- [ ] P2 - Add local end-to-end smoke coverage for desktop and clipper flows
-  Why: unit tests cover many helpers, but the trust-critical workflows are desktop/browser integration paths.
-  Evidence: `npm test`; `cargo test --lib`; Tauri WebDriver docs; current clipper/localhost architecture.
-  Touches: test harness/scripts, `src-tauri/src/bin/keepr-verify.rs`, `web-clipper/`, README test commands.
-  Acceptance: a local smoke command creates a temp data dir, launches Keepr, creates a note, attaches an image, exercises vault lock/unlock behavior, exports/restores a backup, and posts a clip through the localhost server.
-  Complexity: L
 
 - [ ] P2 - Import Markdown vault folders
   Why: Keepr exports Markdown vaults, but migration is one-way; Obsidian/Joplin users expect folder import with resources.
