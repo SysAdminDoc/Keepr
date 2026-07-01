@@ -4,7 +4,7 @@
 
 **Priority legend:** P0 = data loss / crash / security / distribution-blocker · P1 = visible bug / high user value · P2 = polish / nice-to-have · P3 = future / experimental.
 
-**Status (2026-07-01):** v0.25.6 ships Markdown vault folder import with frontmatter, label, list, attachment, and collision-report coverage. Blocked signing/biometric/notarization items live in [Roadmap_Blocked.md](Roadmap_Blocked.md). This file lists only actionable open work.
+**Status (2026-07-01):** v0.25.7 splits the React/Vite/Tailwind/lucide modernization into ordered dependency lanes and adds the Zustand ESM/Vitest guard that must stay green before unpinning Zustand. Blocked signing/biometric/notarization items live in [Roadmap_Blocked.md](Roadmap_Blocked.md). This file lists only actionable open work.
 
 ---
 
@@ -55,9 +55,51 @@ Carried forward across every research cycle:
 
 ## Research-Driven Additions
 
-- [ ] P2 - Plan the React/Vite/Tailwind/lucide upgrade lane
-  Why: `npm outdated --long` shows React 19, Vite 8, Tailwind 4, lucide 1.x, and TypeScript 6 migration work; npm production advisories are clean, so this can be staged deliberately.
-  Evidence: `package.json`; `package-lock.json`; `npm audit --omit=dev`; `npm outdated --long`; stack-javascript memory warning about Zustand version drift.
-  Touches: `package.json`, `package-lock.json`, `vite.config.ts`, `tailwind.config.js`, `src/index.css`, visual regression screenshots, unit tests.
-  Acceptance: upgrade plan lands in small commits with a green lint/test/build after each tier; Zustand remains pinned until the prior ESM/Vitest regression has a dedicated guard test.
+- [ ] P2 - Patch-safe Tauri/Vitest/tooling refresh
+  Why: `npm outdated --long` shows wanted-only updates for `@tauri-apps/api`, `@tauri-apps/cli`, `vitest`, `@vitest/ui`, `globals`, `autoprefixer`, `postcss`, and `typescript-eslint` while `npm audit --omit=dev` is clean.
+  Evidence: live `npm outdated --long` on 2026-07-01; `package.json`; `package-lock.json`.
+  Touches: `package.json`, `package-lock.json`, release artifacts.
+  Acceptance: update only the wanted patch/minor set; `npm test`, `npm run lint`, `npm run build`, `npm run build:clipper`, `npm run smoke`, and `npm run tauri build` stay green.
+  Complexity: M
+
+- [ ] P2 - React 19 renderer lane
+  Why: React/React DOM latest is 19.2.x, but the app has dense modal/editor hooks and root error-boundary behavior that need a standalone pass.
+  Evidence: `npm outdated --long`; stack-javascript hook-order regression notes; `src/App.tsx`; `src/components/ErrorBoundary.tsx`; `src/components/NoteEditor.tsx`.
+  Touches: `package.json`, `package-lock.json`, `@types/react`, `@types/react-dom`, `eslint.config.js`, rendered Settings/editor smoke screenshots.
+  Acceptance: React 19 types/runtime are upgraded together; hook lint stays error-clean; desktop and 390px Settings/editor rendered checks show no blank screen, console errors, or layout clipping.
   Complexity: L
+
+- [ ] P2 - Vite 8 / plugin-react 6 lane
+  Why: Vite latest is 8.1.x and plugin-react latest is 6.x; stack memory flags Vite 8 native optional dependency handling as a known install/build risk.
+  Evidence: `npm outdated --long`; stack-javascript Vite 8 optional-native warning; `vite.config.ts`; `vitest.config.ts`.
+  Touches: `package.json`, `package-lock.json`, `vite.config.ts`, `vitest.config.ts`, release build artifacts.
+  Acceptance: Vite/plugin-react upgrade builds without omitting optional native bindings; `npm run build`, `npm test`, and Tauri build complete from a clean install.
+  Complexity: L
+
+- [ ] P2 - Tailwind 4 styling lane
+  Why: Tailwind latest is 4.3.x and this app depends on Tailwind 3 config-driven palette imports plus `@tailwind` directives.
+  Evidence: `npm outdated --long`; `tailwind.config.js`; `postcss.config.js`; `src/index.css`; `src/keep-palette.js`.
+  Touches: `package.json`, `package-lock.json`, `tailwind.config.js`, `postcss.config.js`, `src/index.css`, visual regression screenshots.
+  Acceptance: Tailwind 4 migration preserves Keep color tokens, dark mode, scrollbar/focus styles, and note card/editor/settings layout on desktop and 390px mobile.
+  Complexity: L
+
+- [ ] P2 - lucide-react 1.x icon lane
+  Why: lucide latest is 1.22.x and every tool surface relies on icon imports for compact controls.
+  Evidence: `npm outdated --long`; `src/components/**/*.tsx`.
+  Touches: `package.json`, `package-lock.json`, icon import call sites if exports changed.
+  Acceptance: lucide 1.x is installed with no missing icon exports; `npm run lint`, `npm test`, and rendered Settings/editor/topbar checks remain clean.
+  Complexity: M
+
+- [ ] P2 - TypeScript 6 + ESLint 10 lane
+  Why: TypeScript latest is 6.0.x and ESLint latest is 10.x; both can change diagnostics and flat-config behavior.
+  Evidence: `npm outdated --long`; `tsconfig.json`; `tsconfig.node.json`; `eslint.config.js`.
+  Touches: `package.json`, `package-lock.json`, TypeScript config, ESLint config.
+  Acceptance: TypeScript 6 and ESLint 10 land together only after framework lanes are stable; type-check, lint, unit tests, and build are green without suppressing new diagnostics.
+  Complexity: L
+
+- [ ] P2 - Zustand pin removal lane
+  Why: Zustand latest is 5.0.14, but the repo intentionally pins 5.0.1 until ESM/Vitest singleton behavior is guarded.
+  Evidence: `package.json`; `src/store.ts`; `src/__tests__/storeZustandRegression.test.ts`.
+  Touches: `package.json`, `package-lock.json`, `src/__tests__/storeZustandRegression.test.ts` if upstream behavior changes.
+  Acceptance: upgrade Zustand only after the ESM singleton guard exists and passes; store state/actions remain shared across static and dynamic imports under Vitest.
+  Complexity: M
