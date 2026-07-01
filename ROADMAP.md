@@ -4,7 +4,7 @@
 
 **Priority legend:** P0 = data loss / crash / security / distribution-blocker · P1 = visible bug / high user value · P2 = polish / nice-to-have · P3 = future / experimental.
 
-**Status (2026-07-01):** v0.25.7 splits the React/Vite/Tailwind/lucide modernization into ordered dependency lanes and adds the Zustand ESM/Vitest guard that must stay green before unpinning Zustand. Blocked signing/biometric/notarization items live in [Roadmap_Blocked.md](Roadmap_Blocked.md). This file lists only actionable open work.
+**Status (2026-07-01):** v0.25.8 ships the patch-safe Tauri/Vitest/tooling refresh with production npm audit clean; the remaining dev-only Vite/esbuild audit finding stays with the planned Vite 8 breaking lane. Blocked signing/biometric/notarization items live in [Roadmap_Blocked.md](Roadmap_Blocked.md). This file lists only actionable open work.
 
 ---
 
@@ -55,13 +55,6 @@ Carried forward across every research cycle:
 
 ## Research-Driven Additions
 
-- [ ] P2 - Patch-safe Tauri/Vitest/tooling refresh
-  Why: `npm outdated --long` shows wanted-only updates for `@tauri-apps/api`, `@tauri-apps/cli`, `vitest`, `@vitest/ui`, `globals`, `autoprefixer`, `postcss`, and `typescript-eslint` while `npm audit --omit=dev` is clean.
-  Evidence: live `npm outdated --long` on 2026-07-01; `package.json`; `package-lock.json`.
-  Touches: `package.json`, `package-lock.json`, release artifacts.
-  Acceptance: update only the wanted patch/minor set; `npm test`, `npm run lint`, `npm run build`, `npm run build:clipper`, `npm run smoke`, and `npm run tauri build` stay green.
-  Complexity: M
-
 - [ ] P2 - React 19 renderer lane
   Why: React/React DOM latest is 19.2.x, but the app has dense modal/editor hooks and root error-boundary behavior that need a standalone pass.
   Evidence: `npm outdated --long`; stack-javascript hook-order regression notes; `src/App.tsx`; `src/components/ErrorBoundary.tsx`; `src/components/NoteEditor.tsx`.
@@ -71,7 +64,7 @@ Carried forward across every research cycle:
 
 - [ ] P2 - Vite 8 / plugin-react 6 lane
   Why: Vite latest is 8.1.x and plugin-react latest is 6.x; stack memory flags Vite 8 native optional dependency handling as a known install/build risk.
-  Evidence: `npm outdated --long`; stack-javascript Vite 8 optional-native warning; `vite.config.ts`; `vitest.config.ts`.
+  Evidence: `npm outdated --long`; `npm audit` Vite/esbuild dev-server advisory requiring a breaking Vite upgrade; stack-javascript Vite 8 optional-native warning; `vite.config.ts`; `vitest.config.ts`.
   Touches: `package.json`, `package-lock.json`, `vite.config.ts`, `vitest.config.ts`, release build artifacts.
   Acceptance: Vite/plugin-react upgrade builds without omitting optional native bindings; `npm run build`, `npm test`, and Tauri build complete from a clean install.
   Complexity: L
