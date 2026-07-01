@@ -4,7 +4,7 @@
 
 **Priority legend:** P0 = data loss / crash / security / distribution-blocker · P1 = visible bug / high user value · P2 = polish / nice-to-have · P3 = future / experimental.
 
-**Status (2026-07-01):** v0.25.11 ships the Tailwind 4 migration on top of Vite 8 and React 19, preserving Keepr's class-based dark mode, palette tokens, custom shadows, and desktop/mobile modal/editor layout. Blocked signing/biometric/notarization items live in [Roadmap_Blocked.md](Roadmap_Blocked.md). This file lists only actionable open work.
+**Status (2026-07-01):** v0.25.12 ships the TypeScript 6 / ESLint 10 lane after React 19, Vite 8, and Tailwind 4. The build now uses TypeScript 6.0.3, ESLint 10.6.0, `@eslint/js` 10.0.1, and `@types/node` 26.0.1; `eslint-plugin-react` was removed because its latest peer range stops at ESLint 9 and Keepr only needed the React Hooks plugin. Blocked signing/biometric/notarization items live in [Roadmap_Blocked.md](Roadmap_Blocked.md). This file lists only actionable open work.
 
 ---
 
@@ -54,13 +54,6 @@ Carried forward across every research cycle:
 - **Voice transcription scope (v0.22.4):** local offline whisper.cpp is in-bounds; cloud transcription remains banned.
 
 ## Research-Driven Additions
-
-- [ ] P2 - TypeScript 6 + ESLint 10 lane
-  Why: TypeScript latest is 6.0.x and ESLint latest is 10.x; both can change diagnostics and flat-config behavior.
-  Evidence: `npm outdated --long`; `tsconfig.json`; `tsconfig.node.json`; `eslint.config.js`.
-  Touches: `package.json`, `package-lock.json`, TypeScript config, ESLint config.
-  Acceptance: TypeScript 6 and ESLint 10 land together only after framework lanes are stable; type-check, lint, unit tests, and build are green without suppressing new diagnostics.
-  Complexity: L
 
 - [ ] P2 - Zustand pin removal lane
   Why: Zustand latest is 5.0.14, but the repo intentionally pins 5.0.1 until ESM/Vitest singleton behavior is guarded.
