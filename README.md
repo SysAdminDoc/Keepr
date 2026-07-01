@@ -1,6 +1,6 @@
 # Keepr
 
-![Version](https://img.shields.io/badge/version-0.25.14-blue)
+![Version](https://img.shields.io/badge/version-0.26.0-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
 
@@ -23,6 +23,8 @@ Google Keep is great until the internet goes out. Keepr gives you the same look,
 **System integration** — System-tray icon with show-hide + new-note + quit menu, `Ctrl+Alt+N` global hotkey quick-capture, single-instance guard.
 
 **Backup & migration** — Manual ZIP export / import with zip-slip + zip-bomb defenses and `.prev` rollback, auto-backup schedule (daily / weekly to your Drive folder), Markdown vault export/import (one `.md` per note + YAML frontmatter + `_resources/`), Google Takeout import (preserves chronology + reminders + labels + attachments).
+
+**Document scanner** — Capture from webcam or pick an existing photo. OpenCV WASM auto-detects document edges, draggable corner handles let you adjust the crop, perspective warp straightens the page, and enhancement filters (Color, Enhanced, Grayscale, B&W) clean up the result. The ~4 MB WASM payload loads lazily on first use.
 
 **Speech** — Voice-note transcription runs locally with whisper.cpp after an explicit one-time model download. Keepr shows the source URL and expected SHA-256 digest before download, then refuses to run a model that fails verification.
 

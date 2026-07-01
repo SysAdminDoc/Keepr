@@ -22,6 +22,7 @@ import {
   History,
   MoreVertical,
   AlertTriangle,
+  ScanLine,
 } from "lucide-react";
 import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import type { Attachment } from "../types";
@@ -46,6 +47,9 @@ const HistoryDrawer = lazy(() =>
 );
 const VoiceRecorderModal = lazy(() =>
   import("./VoiceRecorderModal").then((m) => ({ default: m.VoiceRecorderModal })),
+);
+const DocumentScannerModal = lazy(() =>
+  import("./DocumentScannerModal").then((m) => ({ default: m.DocumentScannerModal })),
 );
 import type {
   BackgroundPatternKey,
@@ -177,6 +181,7 @@ export function NoteEditor() {
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [reminderPickerOpen, setReminderPickerOpen] = useState(false);
   const [voiceRecorderOpen, setVoiceRecorderOpen] = useState(false);
+  const [scannerOpen, setScannerOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   // EI-V0.5-15 — kebab "More" overflow menu. Absorbs the lower-priority
   // actions (Make a copy, Move to vault, Version history) so the
@@ -975,6 +980,19 @@ export function NoteEditor() {
             <Mic size={18} aria-hidden />
           </IconBtn>
           <IconBtn
+            ariaLabel="Scan document"
+            onClick={async () => {
+              if (noteInVault) {
+                showToast("Vault notes cannot have attachments because attachment files are not encrypted");
+                return;
+              }
+              const id = await ensureExistingId();
+              if (id) setScannerOpen(true);
+            }}
+          >
+            <ScanLine size={18} aria-hidden />
+          </IconBtn>
+          <IconBtn
             ariaLabel="Background options"
             onClick={() => setColorOpen((v) => !v)}
             pressed={colorOpen}
@@ -1185,6 +1203,33 @@ export function NoteEditor() {
                 });
               } catch (e) {
                 showToast("Could not save voice note: " + String(e));
+              }
+            }}
+          />
+        </Suspense>
+      )}
+
+      {scannerOpen && existing && (
+        <Suspense fallback={null}>
+          <DocumentScannerModal
+            open={scannerOpen}
+            onCancel={() => setScannerOpen(false)}
+            onSave={async (bytes) => {
+              try {
+                const att = await api.addImageAttachmentBytes(
+                  existing.id,
+                  bytes,
+                  "image/png",
+                  "scan.png",
+                );
+                setAttachments((prev) => [...prev, att]);
+                patchNote(existing.id, {
+                  attachments: [...attachments, att],
+                  updated_at: new Date().toISOString(),
+                });
+                setScannerOpen(false);
+              } catch (e) {
+                showToast("Could not save scan: " + String(e));
               }
             }}
           />
