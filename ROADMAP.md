@@ -4,7 +4,7 @@
 
 **Priority legend:** P0 = data loss / crash / security / distribution-blocker · P1 = visible bug / high user value · P2 = polish / nice-to-have · P3 = future / experimental.
 
-**Status (2026-07-01):** v0.25.10 ships the Vite 8 / plugin-react 6 migration and clears the dev-only Vite/esbuild audit finding while preserving the React 19 renderer. Blocked signing/biometric/notarization items live in [Roadmap_Blocked.md](Roadmap_Blocked.md). This file lists only actionable open work.
+**Status (2026-07-01):** v0.25.11 ships the Tailwind 4 migration on top of Vite 8 and React 19, preserving Keepr's class-based dark mode, palette tokens, custom shadows, and desktop/mobile modal/editor layout. Blocked signing/biometric/notarization items live in [Roadmap_Blocked.md](Roadmap_Blocked.md). This file lists only actionable open work.
 
 ---
 
@@ -54,13 +54,6 @@ Carried forward across every research cycle:
 - **Voice transcription scope (v0.22.4):** local offline whisper.cpp is in-bounds; cloud transcription remains banned.
 
 ## Research-Driven Additions
-
-- [ ] P2 - Tailwind 4 styling lane
-  Why: Tailwind latest is 4.3.x and this app depends on Tailwind 3 config-driven palette imports plus `@tailwind` directives.
-  Evidence: `npm outdated --long`; `tailwind.config.js`; `postcss.config.js`; `src/index.css`; `src/keep-palette.js`.
-  Touches: `package.json`, `package-lock.json`, `tailwind.config.js`, `postcss.config.js`, `src/index.css`, visual regression screenshots.
-  Acceptance: Tailwind 4 migration preserves Keep color tokens, dark mode, scrollbar/focus styles, and note card/editor/settings layout on desktop and 390px mobile.
-  Complexity: L
 
 - [ ] P2 - TypeScript 6 + ESLint 10 lane
   Why: TypeScript latest is 6.0.x and ESLint latest is 10.x; both can change diagnostics and flat-config behavior.
