@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useState, type ReactElement } from "react";
 import {
   DndContext,
   DragOverlay,
@@ -14,7 +14,6 @@ import type { Note } from "../types";
 import { NoteCard } from "./NoteCard";
 import { sortNotes, useStore } from "../store";
 import { api } from "../api";
-import { useState } from "react";
 
 interface Props {
   notes: Note[];
@@ -146,7 +145,7 @@ export function NoteGrid({ notes, layout = "masonry", ariaLabel }: Props) {
   // remaining cards never visually move. The multi-column masonry above
   // would redistribute columns on every count change, scrambling the
   // user's muscle memory for pinned-note locations.
-  let cards: JSX.Element;
+  let cards: ReactElement;
   if (viewMode === "list") {
     cards = (
       <div className="max-w-3xl mx-auto" role="list" aria-label={ariaLabel}>
