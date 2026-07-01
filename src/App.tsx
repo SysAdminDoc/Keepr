@@ -572,8 +572,13 @@ function EmptyState({
       icon: <Bell size={120} strokeWidth={1.2} />,
       text: "Notes with upcoming reminders appear here",
     },
+    smart: {
+      icon: <Tag size={120} strokeWidth={1.2} />,
+      text: `No notes match "${headerLabel}"`,
+    },
   };
-  const { icon, text } = map[section];
+  const entry = map[section] ?? map.notes;
+  const { icon, text } = entry;
   return (
     <div className="flex flex-col items-center justify-center text-gray-400 dark:text-gray-500 mt-20">
       <div aria-hidden>{icon}</div>

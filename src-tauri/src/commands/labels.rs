@@ -54,6 +54,16 @@ pub fn rename_label(state: State<'_, AppState>, id: String, name: String) -> Res
     if trimmed.is_empty() {
         return Err("label name cannot be empty".into());
     }
+    let existing: Option<String> = conn
+        .query_row(
+            "SELECT id FROM labels WHERE name = ?1 COLLATE NOCASE AND id != ?2",
+            params![trimmed, id],
+            |r| r.get(0),
+        )
+        .ok();
+    if existing.is_some() {
+        return Err("a label with that name already exists".into());
+    }
     conn.execute(
         "UPDATE labels SET name = ?1 WHERE id = ?2",
         params![trimmed, id],
@@ -90,6 +100,12 @@ pub fn set_note_labels(
         )
         .map_err(err)?;
     }
+    let now = chrono::Utc::now().to_rfc3339();
+    tx.execute(
+        "UPDATE notes SET updated_at = ?1 WHERE id = ?2",
+        params![now, note_id],
+    )
+    .map_err(err)?;
     tx.commit().map_err(err)?;
     Ok(())
 }
