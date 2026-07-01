@@ -179,6 +179,8 @@ export function NoteEditor() {
   // file copy + DB write stay transactional). We snapshot existing
   // attachments on open and append optimistically on add.
   const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const attachmentsRef = useRef<Attachment[]>([]);
+  useEffect(() => { attachmentsRef.current = attachments; }, [attachments]);
   const [reminderPickerOpen, setReminderPickerOpen] = useState(false);
   const [voiceRecorderOpen, setVoiceRecorderOpen] = useState(false);
   const [scannerOpen, setScannerOpen] = useState(false);
@@ -625,7 +627,7 @@ export function NoteEditor() {
       setAttachments((prev) => [...prev, att]);
       // Refresh the note in the store so the card shows the new attachment.
       patchNote(noteId, {
-        attachments: [...attachments, att],
+        attachments: [...attachmentsRef.current, att],
         updated_at: new Date().toISOString(),
       });
     } catch (e) {
@@ -666,7 +668,7 @@ export function NoteEditor() {
       const att = await api.addImageAttachmentBytes(noteId, bytes, mime, hint);
       setAttachments((prev) => [...prev, att]);
       patchNote(noteId, {
-        attachments: [...attachments, att],
+        attachments: [...attachmentsRef.current, att],
         updated_at: new Date().toISOString(),
       });
     } catch (e) {
@@ -1198,7 +1200,7 @@ export function NoteEditor() {
                 );
                 setAttachments((prev) => [...prev, att]);
                 patchNote(existing.id, {
-                  attachments: [...attachments, att],
+                  attachments: [...attachmentsRef.current, att],
                   updated_at: new Date().toISOString(),
                 });
               } catch (e) {
@@ -1224,7 +1226,7 @@ export function NoteEditor() {
                 );
                 setAttachments((prev) => [...prev, att]);
                 patchNote(existing.id, {
-                  attachments: [...attachments, att],
+                  attachments: [...attachmentsRef.current, att],
                   updated_at: new Date().toISOString(),
                 });
                 setScannerOpen(false);

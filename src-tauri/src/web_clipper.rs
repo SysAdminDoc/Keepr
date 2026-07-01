@@ -209,7 +209,11 @@ fn insert_clipped_note(
     // exceed this — better to truncate than reject.
     const BODY_CAP: usize = 64 * 1024;
     if body.len() > BODY_CAP {
-        body.truncate(BODY_CAP);
+        let mut end = BODY_CAP;
+        while end > 0 && !body.is_char_boundary(end) {
+            end -= 1;
+        }
+        body.truncate(end);
         body.push_str("\n\n[... truncated; original page is longer than Keepr's per-note cap]");
     }
 

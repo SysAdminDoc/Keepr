@@ -36,21 +36,30 @@ let _cvPending: Promise<any> | null = null;
 function loadCV(): Promise<any> {
   if (_cv?.Mat) return Promise.resolve(_cv);
   if (_cvPending) return _cvPending;
-  _cvPending = import("@techstark/opencv-js").then((mod) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const cv: any = mod.default ?? mod;
-    if (cv.Mat) {
-      _cv = cv;
-      return cv;
-    }
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return new Promise<any>((resolve) => {
-      cv.onRuntimeInitialized = () => {
+  _cvPending = import("@techstark/opencv-js")
+    .then((mod) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const cv: any = mod.default ?? mod;
+      if (cv.Mat) {
         _cv = cv;
-        resolve(cv);
-      };
+        return cv;
+      }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return new Promise<any>((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          reject(new Error("OpenCV WASM init timed out"));
+        }, 30000);
+        cv.onRuntimeInitialized = () => {
+          clearTimeout(timeout);
+          _cv = cv;
+          resolve(cv);
+        };
+      });
+    })
+    .catch((e) => {
+      _cvPending = null;
+      throw e;
     });
-  });
   return _cvPending;
 }
 
@@ -284,12 +293,14 @@ export function DocumentScannerModal({ open, onCancel, onSave }: Props) {
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const closedRef = useRef(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const [dropActive, setDropActive] = useState(false);
 
   /* ── Load OpenCV on open ──────────────────────────────────────── */
   useEffect(() => {
     if (!open) return;
+    closedRef.current = false;
     let cancelled = false;
     loadCV()
       .then(() => {
@@ -304,6 +315,7 @@ export function DocumentScannerModal({ open, onCancel, onSave }: Props) {
   /* ── Reset on close ───────────────────────────────────────────── */
   useEffect(() => {
     if (open) return;
+    closedRef.current = true;
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
     setPhase("source");
@@ -363,6 +375,10 @@ export function DocumentScannerModal({ open, onCancel, onSave }: Props) {
           height: { ideal: 1080 },
         },
       });
+      if (closedRef.current) {
+        stream.getTracks().forEach((t) => t.stop());
+        return;
+      }
       streamRef.current = stream;
       setPhase("camera");
       requestAnimationFrame(() => {

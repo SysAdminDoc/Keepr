@@ -36,6 +36,18 @@ fn ensure_device_id(state: &AppState) -> String {
     id
 }
 
+pub fn ensure_sync_token(state: &AppState) -> String {
+    if let Some(tok) = get_setting(state, "sync_token") {
+        if tok.len() >= 32 {
+            return tok;
+        }
+    }
+    let tok = Uuid::new_v4().to_string().replace('-', "")
+        + &Uuid::new_v4().to_string().replace('-', "");
+    let _ = set_setting(state, "sync_token", &tok);
+    tok
+}
+
 fn device_name() -> String {
     hostname::get()
         .ok()
@@ -121,7 +133,6 @@ pub async fn sync_now(
     let now = Utc::now().to_rfc3339();
     let _ = set_setting(&state, "sync_last_at", &now);
 
-    // Purge tombstones older than 30 days
     let cutoff = (Utc::now() - chrono::Duration::days(30)).to_rfc3339();
     {
         let conn = state.db.lock();
@@ -153,16 +164,17 @@ async fn sync_with_peer(
         .map_err(|e| e.to_string())?;
 
     let base_url = format!("http://{}:{}", peer.host, peer.port);
+    let token = get_setting(state, "sync_peer_token")
+        .unwrap_or_default();
 
-    // Build local state vector
     let sv = {
         let conn = state.db.lock();
         protocol::build_state_vector(&conn, device_id)?
     };
 
-    // Reconcile with peer
     let resp = client
         .post(format!("{base_url}/sync/reconcile"))
+        .bearer_auth(&token)
         .json(&protocol::ReconcileRequest {
             state_vector: sv,
         })
@@ -177,7 +189,6 @@ async fn sync_with_peer(
     let reconcile: protocol::ReconcileResponse =
         resp.json().await.map_err(|e| format!("parse: {e}"))?;
 
-    // Pull notes from reconcile response (these are newer on the peer)
     let notes_pulled = reconcile.pull.len();
     {
         let conn = state.db.lock();
@@ -185,13 +196,14 @@ async fn sync_with_peer(
         protocol::apply_tombstones(&conn, &reconcile.tombstones)?;
     }
 
-    // Push notes the peer wants from us
     let mut notes_to_push = Vec::new();
     {
         let conn = state.db.lock();
         for note_id in &reconcile.push_ids {
             if let Ok(Some(sn)) = load_sync_note_from_conn(&conn, note_id) {
-                notes_to_push.push(sn);
+                if sn.note.vault != "vault" {
+                    notes_to_push.push(sn);
+                }
             }
         }
     }
@@ -221,6 +233,7 @@ async fn sync_with_peer(
 
         let resp = client
             .post(format!("{base_url}/sync/push"))
+            .bearer_auth(&token)
             .json(&push_req)
             .send()
             .await
@@ -231,7 +244,6 @@ async fn sync_with_peer(
         }
     }
 
-    // Sync attachments: transfer missing resource blobs
     let local_hashes: Vec<String> = {
         let conn = state.db.lock();
         let mut stmt = conn
@@ -247,21 +259,33 @@ async fn sync_with_peer(
 
     let mut attachments_transferred = 0;
     for remote_path in &reconcile.attachment_hashes {
+        if !protocol::is_safe_sync_resource_path(remote_path) {
+            log::warn!("sync: skipping unsafe attachment path from peer: {remote_path}");
+            continue;
+        }
         if local_hashes.contains(remote_path) {
             continue;
         }
         let full_path = resources_dir.join(remote_path);
+        if !full_path.starts_with(resources_dir) {
+            continue;
+        }
         if full_path.exists() {
             continue;
         }
         let resp = client
             .get(format!("{base_url}/sync/attachment"))
+            .bearer_auth(&token)
             .query(&[("path", remote_path.as_str())])
             .send()
             .await;
         match resp {
             Ok(r) if r.status().is_success() => {
                 if let Ok(bytes) = r.bytes().await {
+                    if bytes.len() > 50 * 1024 * 1024 {
+                        log::warn!("sync: skipping oversized attachment ({} bytes)", bytes.len());
+                        continue;
+                    }
                     if let Some(parent) = full_path.parent() {
                         let _ = std::fs::create_dir_all(parent);
                     }
@@ -342,17 +366,19 @@ fn load_sync_note_from_conn(
     let mut note = note;
     note.checklist = checklist;
 
-    let labels_names: Vec<String> = conn
-        .prepare(
-            "SELECT l.name FROM labels l \
-             JOIN note_labels nl ON nl.label_id = l.id \
-             WHERE nl.note_id = ?1",
-        )
-        .map_err(|e| e.to_string())?
-        .query_map(params![note_id], |r| r.get(0))
-        .map_err(|e| e.to_string())?
-        .filter_map(|r| r.ok())
-        .collect();
+    let labels_names: Vec<String> = {
+        let mut stmt = conn
+            .prepare(
+                "SELECT l.name FROM labels l \
+                 JOIN note_labels nl ON nl.label_id = l.id \
+                 WHERE nl.note_id = ?1",
+            )
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map(params![note_id], |r| r.get(0))
+            .map_err(|e| e.to_string())?;
+        rows.filter_map(|r| r.ok()).collect()
+    };
 
     let reminder = conn
         .query_row(
