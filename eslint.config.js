@@ -2,7 +2,6 @@ import js from "@eslint/js";
 import globals from "globals";
 import tseslint from "typescript-eslint";
 import reactHooks from "eslint-plugin-react-hooks";
-import reactPlugin from "eslint-plugin-react";
 
 /** @type {import('eslint').Linter.Config[]} */
 export default [
@@ -47,20 +46,12 @@ export default [
       parserOptions: { ecmaFeatures: { jsx: true } },
     },
     plugins: {
-      react: reactPlugin,
       "react-hooks": reactHooks,
-    },
-    settings: {
-      react: { version: "19.2" },
     },
     rules: {
       // The rule that would have caught v0.16.1's editor-blanks-screen bug.
       "react-hooks/rules-of-hooks": "error",
       "react-hooks/exhaustive-deps": "warn",
-
-      // React 17+ JSX transform makes the import-React-everywhere rule moot.
-      "react/react-in-jsx-scope": "off",
-      "react/prop-types": "off",
 
       // We use TypeScript for everything; the unused-vars TS variant is
       // configured below to also exempt _-prefixed args.
