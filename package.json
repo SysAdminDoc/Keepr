@@ -1,12 +1,13 @@
 {
   "name": "keepr",
   "private": true,
-  "version": "0.25.13",
+  "version": "0.25.14",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
     "build:clipper": "node scripts/build-web-clipper.mjs",
+    "build:store-installer": "tauri build --no-bundle && tauri bundle --config src-tauri/tauri.microsoftstore.conf.json --bundles nsis msi",
     "smoke": "cargo run --manifest-path src-tauri/Cargo.toml --bin keepr-smoke",
     "preview": "vite preview",
     "lint": "eslint .",

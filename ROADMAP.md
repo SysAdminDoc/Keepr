@@ -4,12 +4,11 @@
 
 **Priority legend:** P0 = data loss / crash / security / distribution-blocker · P1 = visible bug / high user value · P2 = polish / nice-to-have · P3 = future / experimental.
 
-**Status (2026-07-01):** v0.25.13 finishes the dependency modernization queue: React 19, Vite 8, Tailwind 4, TypeScript 6, ESLint 10, lucide 1.x, and Zustand 5.0.14 are all current, with `npm outdated --long` empty. Blocked signing/biometric/notarization items live in [Roadmap_Blocked.md](Roadmap_Blocked.md). This file lists only actionable open work.
+**Status (2026-07-01):** v0.25.14 adds a local Microsoft Store installer lane: `npm run build:store-installer` builds the Store-flavored NSIS/MSI installers with the required offline WebView2 installer mode. Partner Center submission, Store signing, package-identity MSIX/share-target work, and Store auto-update validation are blocked on external Microsoft account/product identity. Blocked signing/biometric/notarization items live in [Roadmap_Blocked.md](Roadmap_Blocked.md). This file lists only actionable open work.
 
 ---
 
 ## Open: Larger bets (v0.25.x and later)
-- [ ] **P3 — MSIX packaging + Microsoft Store** — free signing, Windows Share Target contract, auto-update via Store.
 - [ ] **P3 — Document scanner** (OpenCV WASM, ~7 MB renderer payload) — Apple Notes parity, lower-priority capture path.
 - [ ] **P3 — Optional LAN-only P2P sync** (mDNS + Yjs CRDT, Anytype model) — only sync model compatible with "no cloud server" non-goal.
 
