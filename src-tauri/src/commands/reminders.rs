@@ -261,6 +261,7 @@ pub fn peek_due_reminders(
              FROM reminders r
              JOIN notes n ON n.id = r.note_id
              WHERE r.fired_at IS NULL
+               AND r.dismissed_at IS NULL
                AND (r.snooze_until IS NULL OR r.snooze_until <= ?1)
                AND r.fire_at <= ?1
                AND n.trashed = 0",

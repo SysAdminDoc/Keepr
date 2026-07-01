@@ -832,9 +832,9 @@ pub fn duplicate_note(state: State<'_, AppState>, id: String) -> Result<Note, St
         format!("{} (copy)", source.title)
     };
     tx.execute(
-        "INSERT INTO notes (id, kind, title, body, color, pinned, archived, trashed, position, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, 0, 0, 0, 0, ?6, ?6)",
-        params![new_id, source.kind, copy_title, source.body, source.color, now],
+        "INSERT INTO notes (id, kind, title, body, color, pinned, archived, trashed, position, created_at, updated_at, background_pattern)
+         VALUES (?1, ?2, ?3, ?4, ?5, 0, 0, 0, 0, ?6, ?6, ?7)",
+        params![new_id, source.kind, copy_title, source.body, source.color, now, source.background_pattern],
     )
     .map_err(err)?;
     // Two-pass copy: first assign fresh ids, then write rows with
@@ -947,6 +947,11 @@ pub fn delete_note_permanent(state: State<'_, AppState>, id: String) -> Result<(
         attachments::collect_attachment_files(&conn, std::slice::from_ref(&id)).map_err(err)?;
     conn.execute("DELETE FROM notes WHERE id = ?1", params![id])
         .map_err(err)?;
+    let now = now_iso();
+    let _ = conn.execute(
+        "INSERT OR REPLACE INTO sync_tombstones (note_id, deleted_at) VALUES (?1, ?2)",
+        params![id, now],
+    );
     let resources = state.data_dir.join(attachments::RESOURCES_DIR);
     for files in &files {
         attachments::delete_attachment_files(&conn, &resources, files);
@@ -1028,6 +1033,13 @@ pub fn empty_trash(state: State<'_, AppState>) -> Result<(), String> {
     let files = attachments::collect_attachment_files(&conn, &note_ids).map_err(err)?;
     conn.execute("DELETE FROM notes WHERE trashed = 1", [])
         .map_err(err)?;
+    let now = now_iso();
+    for nid in &note_ids {
+        let _ = conn.execute(
+            "INSERT OR REPLACE INTO sync_tombstones (note_id, deleted_at) VALUES (?1, ?2)",
+            params![nid, now],
+        );
+    }
     let resources = state.data_dir.join(attachments::RESOURCES_DIR);
     for files in &files {
         attachments::delete_attachment_files(&conn, &resources, files);

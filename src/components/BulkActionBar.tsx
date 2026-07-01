@@ -142,10 +142,24 @@ export function BulkActionBar({ visibleIds }: Props) {
   const requestBulkDeleteForever = () => setDeleteConfirmOpen(true);
   const confirmBulkDeleteForever = () => {
     setDeleteConfirmOpen(false);
-    void runBulk("Deleted", async (id) => {
-      await api.deleteNotePermanent(id);
-      removeNote(id);
-    });
+    const visibleIds = new Set(selected.map((n) => n.id));
+    const failures: string[] = [];
+    void (async () => {
+      for (const id of visibleIds) {
+        try {
+          await api.deleteNotePermanent(id);
+          removeNote(id);
+        } catch (e) {
+          failures.push(`${id}: ${String(e)}`);
+        }
+      }
+      clearSelection();
+      if (failures.length > 0) {
+        showToast(`Deleted: ${failures.length} failed`);
+      } else {
+        showToast(`Deleted (${visibleIds.size})`);
+      }
+    })();
   };
 
   const bulkColor = (color: ColorKey) => {

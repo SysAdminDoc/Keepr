@@ -59,7 +59,24 @@ export function NewNoteBar() {
         <div className="flex items-center gap-1 text-gray-600 dark:text-gray-300">
           <button
             type="button"
-            onClick={() => openEditor(null)}
+            onClick={async () => {
+              try {
+                const note = await api.createNote({
+                  kind: "list",
+                  title: "",
+                  body: "",
+                  color: "default",
+                  pinned: false,
+                  checklist: [{ text: "", checked: false, position: 0 }],
+                  labels: [],
+                  backgroundPattern: "",
+                });
+                upsertNote(note);
+                openEditor(note.id);
+              } catch {
+                openEditor(null);
+              }
+            }}
             aria-label="New list"
             title="New list"
             className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-[#3c4043]"
