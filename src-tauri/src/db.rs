@@ -4,7 +4,7 @@ use std::path::Path;
 
 /// Current schema version. Bump and add a new arm to `apply_migration` for every
 /// schema change. Migrations are forward-only and ordered.
-pub const SCHEMA_VERSION: i32 = 14;
+pub const SCHEMA_VERSION: i32 = 15;
 
 pub fn open(path: &Path) -> Result<Connection> {
     let mut conn = Connection::open(path)?;
@@ -59,6 +59,7 @@ fn apply_migration(tx: &rusqlite::Transaction, version: i32) -> Result<()> {
         12 => tx.execute_batch(MIGRATION_V12)?,
         13 => tx.execute_batch(MIGRATION_V13)?,
         14 => tx.execute_batch(MIGRATION_V14)?,
+        15 => tx.execute_batch(MIGRATION_V15)?,
         v => bail!("no migration defined for schema v{v}"),
     }
     Ok(())
@@ -430,6 +431,21 @@ CREATE INDEX IF NOT EXISTS idx_attachments_resource_path
 CREATE INDEX IF NOT EXISTS idx_attachments_thumb_path
     ON attachments(thumb_path)
     WHERE thumb_path IS NOT NULL;
+"#;
+
+/// v15 — LAN sync support.
+///
+/// Tombstones track permanently deleted notes so a sync peer doesn't
+/// re-introduce them. The 30-day TTL is enforced in application code,
+/// not a trigger. Device identity and sync settings use the existing
+/// `app_settings` table (v5).
+const MIGRATION_V15: &str = r#"
+CREATE TABLE IF NOT EXISTS sync_tombstones (
+    note_id TEXT PRIMARY KEY,
+    deleted_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_sync_tombstones_deleted
+    ON sync_tombstones(deleted_at);
 "#;
 
 #[cfg(test)]

@@ -15,6 +15,7 @@ import { AppLockSection } from "./AppLockSection";
 import { VaultSection } from "./VaultSection";
 import { VoiceTranscriptionSection } from "./VoiceTranscriptionSection";
 import { WebClipperSection } from "./WebClipperSection";
+import { SyncSection } from "./SyncSection";
 import type { MarkdownVaultImportSummary } from "../types";
 
 export function SettingsModal() {
@@ -453,6 +454,8 @@ export function SettingsModal() {
             <VoiceTranscriptionSection />
 
             <WebClipperSection />
+
+            <SyncSection />
 
             <div>
               <div className="font-medium">Backup / Restore</div>

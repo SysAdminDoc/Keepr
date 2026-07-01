@@ -1,6 +1,6 @@
 [package]
 name = "keepr"
-version = "0.26.0"
+version = "0.26.1"
 description = "Offline-first Google Keep clone"
 authors = ["Matthew Ashton"]
 edition = "2021"
@@ -70,7 +70,7 @@ rubato = "0.16.2"
 # on Windows; `stream` for chunked progress reporting; `gzip` is the
 # default for HF served content. No `default-features = false` — we
 # want connection pooling, redirects, etc.
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "json"] }
 # SHA-256 verification of the downloaded model bytes against the Git
 # LFS object digest Hugging Face serves for each whisper.cpp weight.
 sha2 = "0.10"
@@ -86,7 +86,7 @@ futures-util = "0.3"
 # v0.24.0 — Web Clipper localhost HTTP server. axum 0.8 is the
 # smallest sane stack for ~4 routes + JSON + CORS; tower-http for
 # the chrome-extension://moz-extension:// origin matching.
-axum = { version = "0.8.9", default-features = false, features = ["http1", "json", "tokio"] }
+axum = { version = "0.8.9", default-features = false, features = ["http1", "json", "tokio", "query"] }
 tower-http = { version = "0.6.11", default-features = false, features = ["cors"] }
 # Random port allocation + 256-bit bearer token generation for the
 # Web Clipper. Don't use the rand_chacha + getrandom combo from
@@ -99,6 +99,8 @@ subtle = "2"
 # enough for in-app uploads and keeps duplicate image/audio blobs to a
 # single on-disk file.
 blake3 = "1"
+mdns-sd = "0.12"
+hostname = "0.4"
 
 [dev-dependencies]
 tempfile = "3"
