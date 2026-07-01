@@ -2522,7 +2522,7 @@ dependencies = [
 
 [[package]]
 name = "keepr"
-version = "0.25.12"
+version = "0.25.13"
 dependencies = [
  "anyhow",
  "argon2",

@@ -4,7 +4,7 @@
 
 **Priority legend:** P0 = data loss / crash / security / distribution-blocker · P1 = visible bug / high user value · P2 = polish / nice-to-have · P3 = future / experimental.
 
-**Status (2026-07-01):** v0.25.12 ships the TypeScript 6 / ESLint 10 lane after React 19, Vite 8, and Tailwind 4. The build now uses TypeScript 6.0.3, ESLint 10.6.0, `@eslint/js` 10.0.1, and `@types/node` 26.0.1; `eslint-plugin-react` was removed because its latest peer range stops at ESLint 9 and Keepr only needed the React Hooks plugin. Blocked signing/biometric/notarization items live in [Roadmap_Blocked.md](Roadmap_Blocked.md). This file lists only actionable open work.
+**Status (2026-07-01):** v0.25.13 finishes the dependency modernization queue: React 19, Vite 8, Tailwind 4, TypeScript 6, ESLint 10, lucide 1.x, and Zustand 5.0.14 are all current, with `npm outdated --long` empty. Blocked signing/biometric/notarization items live in [Roadmap_Blocked.md](Roadmap_Blocked.md). This file lists only actionable open work.
 
 ---
 
@@ -52,12 +52,3 @@ Carried forward across every research cycle:
 - **App Lock + Private Vault lost-credential policy:** no recovery for App Lock or default Vault. **(Updated v0.21.1: opt-in recovery seed for Vault.)**
 - **Reminder scheduler granularity:** 30-second poll. Documented up-to-30-s lag acceptable.
 - **Voice transcription scope (v0.22.4):** local offline whisper.cpp is in-bounds; cloud transcription remains banned.
-
-## Research-Driven Additions
-
-- [ ] P2 - Zustand pin removal lane
-  Why: Zustand latest is 5.0.14, but the repo intentionally pins 5.0.1 until ESM/Vitest singleton behavior is guarded.
-  Evidence: `package.json`; `src/store.ts`; `src/__tests__/storeZustandRegression.test.ts`.
-  Touches: `package.json`, `package-lock.json`, `src/__tests__/storeZustandRegression.test.ts` if upstream behavior changes.
-  Acceptance: upgrade Zustand only after the ESM singleton guard exists and passes; store state/actions remain shared across static and dynamic imports under Vitest.
-  Complexity: M
