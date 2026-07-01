@@ -4,7 +4,7 @@
 
 **Priority legend:** P0 = data loss / crash / security / distribution-blocker · P1 = visible bug / high user value · P2 = polish / nice-to-have · P3 = future / experimental.
 
-**Status (2026-07-01):** v0.25.9 ships the React 19 renderer upgrade plus lucide 1.x peer-compatibility bump, with desktop/mobile Settings and editor Browser QA. The remaining dev-only Vite/esbuild audit finding stays with the planned Vite 8 breaking lane. Blocked signing/biometric/notarization items live in [Roadmap_Blocked.md](Roadmap_Blocked.md). This file lists only actionable open work.
+**Status (2026-07-01):** v0.25.10 ships the Vite 8 / plugin-react 6 migration and clears the dev-only Vite/esbuild audit finding while preserving the React 19 renderer. Blocked signing/biometric/notarization items live in [Roadmap_Blocked.md](Roadmap_Blocked.md). This file lists only actionable open work.
 
 ---
 
@@ -54,13 +54,6 @@ Carried forward across every research cycle:
 - **Voice transcription scope (v0.22.4):** local offline whisper.cpp is in-bounds; cloud transcription remains banned.
 
 ## Research-Driven Additions
-
-- [ ] P2 - Vite 8 / plugin-react 6 lane
-  Why: Vite latest is 8.1.x and plugin-react latest is 6.x; stack memory flags Vite 8 native optional dependency handling as a known install/build risk.
-  Evidence: `npm outdated --long`; `npm audit` Vite/esbuild dev-server advisory requiring a breaking Vite upgrade; stack-javascript Vite 8 optional-native warning; `vite.config.ts`; `vitest.config.ts`.
-  Touches: `package.json`, `package-lock.json`, `vite.config.ts`, `vitest.config.ts`, release build artifacts.
-  Acceptance: Vite/plugin-react upgrade builds without omitting optional native bindings; `npm run build`, `npm test`, and Tauri build complete from a clean install.
-  Complexity: L
 
 - [ ] P2 - Tailwind 4 styling lane
   Why: Tailwind latest is 4.3.x and this app depends on Tailwind 3 config-driven palette imports plus `@tailwind` directives.

@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Keepr Web Clipper",
   "short_name": "Keepr Clipper",
-  "version": "0.25.9",
+  "version": "0.25.10",
   "description": "Save articles, selections, links, or URLs to your local Keepr database. Offline-only — talks to http://127.0.0.1 with a bearer token from Keepr's Settings.",
   "permissions": ["activeTab", "contextMenus", "scripting", "storage"],
   "host_permissions": ["http://127.0.0.1/*"],
