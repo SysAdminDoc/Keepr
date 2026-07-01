@@ -202,6 +202,839 @@ pub(super) fn yaml_quote_if_needed(s: &str) -> String {
     }
 }
 
+#[derive(Debug, Serialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct MarkdownVaultImportSummary {
+    pub notes_created: u32,
+    pub attachments_copied: u32,
+    pub labels_created: u32,
+    pub skipped_files: Vec<String>,
+    pub collisions: Vec<String>,
+}
+
+#[derive(Debug, Default)]
+pub(super) struct MarkdownFrontmatter {
+    pub(super) id: Option<String>,
+    pub(super) kind: Option<String>,
+    pub(super) color: Option<String>,
+    pub(super) pinned: Option<bool>,
+    pub(super) archived: Option<bool>,
+    pub(super) created: Option<String>,
+    pub(super) updated: Option<String>,
+    pub(super) labels: Vec<String>,
+}
+
+#[derive(Debug)]
+pub(super) struct MarkdownNoteDraft {
+    pub(super) frontmatter: MarkdownFrontmatter,
+    pub(super) title: String,
+    pub(super) kind: String,
+    pub(super) body: String,
+    pub(super) checklist: Vec<ChecklistItemInput>,
+    pub(super) resource_refs: Vec<MarkdownResourceRef>,
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct MarkdownResourceRef {
+    pub(super) target: String,
+    pub(super) filename: String,
+}
+
+#[tauri::command]
+pub fn import_markdown_vault(
+    state: State<'_, AppState>,
+    src_dir: String,
+) -> Result<MarkdownVaultImportSummary, String> {
+    if state.importing.load(std::sync::atomic::Ordering::SeqCst) {
+        return Err("a restore is currently in progress".into());
+    }
+    log::info!("import_markdown_vault: importing folder {src_dir}");
+    let src = PathBuf::from(&src_dir);
+    let mut conn = state.db.lock();
+    let result = import_markdown_vault_inner(&mut conn, &state.data_dir, &src);
+    match &result {
+        Ok(summary) => log::info!(
+            "import_markdown_vault: imported {} note(s), {} attachment(s), {} label(s), {} collision(s), {} skipped item(s)",
+            summary.notes_created,
+            summary.attachments_copied,
+            summary.labels_created,
+            summary.collisions.len(),
+            summary.skipped_files.len()
+        ),
+        Err(e) => log::error!("import_markdown_vault: failed: {e}"),
+    }
+    result
+}
+
+pub(super) fn import_markdown_vault_inner(
+    conn: &mut Connection,
+    data_dir: &Path,
+    src_dir: &Path,
+) -> Result<MarkdownVaultImportSummary, String> {
+    if !src_dir.is_dir() {
+        return Err(format!("not a directory: {}", src_dir.display()));
+    }
+
+    let resources_dir = data_dir.join(attachments::RESOURCES_DIR);
+    std::fs::create_dir_all(&resources_dir).map_err(err)?;
+
+    let mut summary = MarkdownVaultImportSummary::default();
+    let mut md_files: Vec<PathBuf> = Vec::new();
+    for entry in walkdir::WalkDir::new(src_dir).follow_links(false) {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(e) => {
+                summary.skipped_files.push(format!("walk error: {e}"));
+                continue;
+            }
+        };
+        if !entry.file_type().is_file() {
+            continue;
+        }
+        let path = entry.path();
+        if path_has_component(path, VAULT_RESOURCES_DIR) {
+            continue;
+        }
+        if path
+            .extension()
+            .and_then(|s| s.to_str())
+            .map(|s| s.eq_ignore_ascii_case("md") || s.eq_ignore_ascii_case("markdown"))
+            .unwrap_or(false)
+        {
+            md_files.push(path.to_path_buf());
+        }
+    }
+    md_files.sort();
+
+    for md_path in md_files {
+        let rel = display_relative_path(src_dir, &md_path);
+        let raw = match std::fs::read_to_string(&md_path) {
+            Ok(raw) => raw,
+            Err(e) => {
+                summary
+                    .skipped_files
+                    .push(format!("{rel}: could not read Markdown ({e})"));
+                continue;
+            }
+        };
+        let file_stem = md_path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("Untitled");
+        let draft = parse_markdown_vault_note(&raw, file_stem);
+        let note_id = resolve_import_note_id(conn, &draft, &rel, &mut summary)?;
+        let created_at = normalize_import_timestamp(draft.frontmatter.created.as_deref());
+        let updated_at = normalize_import_timestamp(draft.frontmatter.updated.as_deref())
+            .unwrap_or_else(|| created_at.clone().unwrap_or_else(now_iso));
+        let created_at = created_at.unwrap_or_else(|| updated_at.clone());
+        let archived = draft.frontmatter.archived.unwrap_or(false);
+        let color = normalize_import_color(draft.frontmatter.color.as_deref());
+        let input = NoteInput {
+            kind: draft.kind,
+            title: draft.title,
+            body: draft.body,
+            color,
+            pinned: draft.frontmatter.pinned.unwrap_or(false),
+            checklist: draft.checklist,
+            labels: Vec::new(),
+            background_pattern: String::new(),
+        };
+        if let Err(e) = notes::validate_note_input(&input) {
+            summary.skipped_files.push(format!("{rel}: {e}"));
+            continue;
+        }
+        let NoteInput {
+            kind,
+            title,
+            body,
+            color,
+            pinned,
+            checklist,
+            ..
+        } = input;
+
+        let mut labels_created_for_note = 0u32;
+        let tx = conn.transaction().map_err(err)?;
+        let position: i64 = tx
+            .query_row(
+                "SELECT COALESCE(MAX(position) + 1, 0) FROM notes",
+                [],
+                |r| r.get(0),
+            )
+            .map_err(err)?;
+        tx.execute(
+            "INSERT INTO notes (id, kind, title, body, color, pinned, archived, trashed, position, created_at, updated_at, background_pattern)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0, ?8, ?9, ?10, '')",
+            params![
+                &note_id,
+                &kind,
+                &title,
+                &body,
+                &color,
+                pinned as i64,
+                archived as i64,
+                position,
+                &created_at,
+                &updated_at,
+            ],
+        )
+        .map_err(err)?;
+        for (i, item) in checklist.iter().enumerate() {
+            let item_id = item
+                .id
+                .clone()
+                .unwrap_or_else(|| Uuid::new_v4().to_string());
+            tx.execute(
+                "INSERT INTO checklist_items (id, note_id, text, checked, position, parent_id)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![
+                    item_id,
+                    &note_id,
+                    &item.text,
+                    item.checked as i64,
+                    item.position.max(i as i64),
+                    &item.parent_id,
+                ],
+            )
+            .map_err(err)?;
+        }
+        for label_name in draft.frontmatter.labels.iter().map(|s| s.trim()) {
+            if label_name.is_empty() {
+                continue;
+            }
+            let label_id = Uuid::new_v4().to_string();
+            let inserted = tx
+                .execute(
+                    "INSERT INTO labels (id, name) VALUES (?1, ?2)
+                     ON CONFLICT(name) DO NOTHING",
+                    params![&label_id, label_name],
+                )
+                .map_err(err)?;
+            if inserted > 0 {
+                labels_created_for_note += 1;
+            }
+            let stored_label_id: String = tx
+                .query_row(
+                    "SELECT id FROM labels WHERE name = ?1 COLLATE NOCASE",
+                    params![label_name],
+                    |r| r.get(0),
+                )
+                .map_err(err)?;
+            tx.execute(
+                "INSERT OR IGNORE INTO note_labels (note_id, label_id) VALUES (?1, ?2)",
+                params![&note_id, stored_label_id],
+            )
+            .map_err(err)?;
+        }
+        tx.commit().map_err(err)?;
+        summary.notes_created += 1;
+        summary.labels_created += labels_created_for_note;
+
+        let mut seen_resources = std::collections::HashSet::new();
+        for resource_ref in draft.resource_refs {
+            if !seen_resources.insert(resource_ref.target.to_ascii_lowercase()) {
+                continue;
+            }
+            let Some(src_resource) =
+                resolve_markdown_resource(src_dir, &md_path, &resource_ref.target)
+            else {
+                summary.skipped_files.push(format!(
+                    "{rel}: missing or unsafe resource {}",
+                    resource_ref.target
+                ));
+                continue;
+            };
+            match import_markdown_resource_attachment(
+                conn,
+                &resources_dir,
+                &note_id,
+                &resource_ref,
+                &src_resource,
+            ) {
+                Ok(()) => summary.attachments_copied += 1,
+                Err(e) => summary
+                    .skipped_files
+                    .push(format!("{rel}: {} ({e})", resource_ref.target)),
+            }
+        }
+    }
+
+    Ok(summary)
+}
+
+pub(super) fn parse_markdown_vault_note(raw: &str, file_stem: &str) -> MarkdownNoteDraft {
+    let normalized = normalize_newlines(raw);
+    let (frontmatter, markdown) = split_frontmatter(&normalized);
+    let frontmatter = frontmatter
+        .as_deref()
+        .map(parse_markdown_frontmatter)
+        .unwrap_or_default();
+    let (title, body_with_heading_removed) = extract_markdown_title(&markdown, file_stem);
+    let resource_refs = extract_markdown_resource_refs(&body_with_heading_removed);
+    let (checklist, checklist_remainder) = parse_checklist_body(&body_with_heading_removed);
+    let requested_list = frontmatter
+        .kind
+        .as_deref()
+        .map(|k| {
+            matches!(
+                k.trim().to_ascii_lowercase().as_str(),
+                "list" | "checklist" | "todo"
+            )
+        })
+        .unwrap_or(false);
+    let checklist_only = !checklist.is_empty() && checklist_remainder.trim().is_empty();
+    let (kind, body) = if requested_list || checklist_only {
+        ("list".to_string(), checklist_remainder.trim().to_string())
+    } else {
+        (
+            "text".to_string(),
+            body_with_heading_removed.trim().to_string(),
+        )
+    };
+
+    MarkdownNoteDraft {
+        frontmatter,
+        title,
+        kind: kind.clone(),
+        body,
+        checklist: if kind == "list" {
+            checklist
+        } else {
+            Vec::new()
+        },
+        resource_refs,
+    }
+}
+
+fn normalize_newlines(raw: &str) -> String {
+    raw.replace("\r\n", "\n").replace('\r', "\n")
+}
+
+fn split_frontmatter(text: &str) -> (Option<String>, String) {
+    let Some(rest) = text.strip_prefix("---\n") else {
+        return (None, text.to_string());
+    };
+    let mut offset = 0usize;
+    for line in rest.split_inclusive('\n') {
+        let trimmed = line.trim_end_matches('\n');
+        if trimmed == "---" {
+            let fm = rest[..offset].to_string();
+            let body = rest[offset + line.len()..].to_string();
+            return (Some(fm), body);
+        }
+        offset += line.len();
+    }
+    (None, text.to_string())
+}
+
+fn parse_markdown_frontmatter(raw: &str) -> MarkdownFrontmatter {
+    let mut fm = MarkdownFrontmatter::default();
+    let mut list_key: Option<String> = None;
+    for line in raw.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        if let Some(key) = &list_key {
+            if let Some(value) = trimmed.strip_prefix("- ") {
+                if key == "labels" || key == "tags" {
+                    fm.labels.push(yaml_unquote(value.trim()));
+                }
+                continue;
+            }
+        }
+        list_key = None;
+        let Some((key, value)) = trimmed.split_once(':') else {
+            continue;
+        };
+        let key = key.trim().to_ascii_lowercase();
+        let value = value.trim();
+        if value.is_empty() && (key == "labels" || key == "tags") {
+            list_key = Some(key);
+            continue;
+        }
+        match key.as_str() {
+            "id" => fm.id = Some(yaml_unquote(value)),
+            "type" | "kind" => fm.kind = Some(yaml_unquote(value)),
+            "color" => fm.color = Some(yaml_unquote(value)),
+            "pinned" => fm.pinned = parse_frontmatter_bool(value),
+            "archived" => fm.archived = parse_frontmatter_bool(value),
+            "created" | "created_at" => fm.created = Some(yaml_unquote(value)),
+            "updated" | "updated_at" => fm.updated = Some(yaml_unquote(value)),
+            "label" => fm.labels.push(yaml_unquote(value)),
+            "labels" | "tags" => {
+                let decoded = yaml_unquote(value);
+                if decoded.starts_with('[') && decoded.ends_with(']') {
+                    for item in decoded[1..decoded.len() - 1].split(',') {
+                        let label = yaml_unquote(item.trim());
+                        if !label.is_empty() {
+                            fm.labels.push(label);
+                        }
+                    }
+                } else if !decoded.is_empty() {
+                    fm.labels.push(decoded);
+                }
+            }
+            _ => {}
+        }
+    }
+    fm.labels.sort_by_key(|s| s.to_ascii_lowercase());
+    fm.labels.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
+    fm
+}
+
+fn yaml_unquote(value: &str) -> String {
+    let value = value.trim();
+    if value.len() >= 2 && value.starts_with('"') && value.ends_with('"') {
+        let inner = &value[1..value.len() - 1];
+        let mut out = String::with_capacity(inner.len());
+        let mut chars = inner.chars();
+        while let Some(c) = chars.next() {
+            if c == '\\' {
+                if let Some(next) = chars.next() {
+                    out.push(next);
+                }
+            } else {
+                out.push(c);
+            }
+        }
+        out
+    } else if value.len() >= 2 && value.starts_with('\'') && value.ends_with('\'') {
+        value[1..value.len() - 1].to_string()
+    } else {
+        value.to_string()
+    }
+}
+
+fn parse_frontmatter_bool(value: &str) -> Option<bool> {
+    match yaml_unquote(value).trim().to_ascii_lowercase().as_str() {
+        "true" | "yes" | "1" => Some(true),
+        "false" | "no" | "0" => Some(false),
+        _ => None,
+    }
+}
+
+fn extract_markdown_title(markdown: &str, file_stem: &str) -> (String, String) {
+    let lines: Vec<&str> = markdown.lines().collect();
+    let mut first_content = 0usize;
+    while first_content < lines.len() && lines[first_content].trim().is_empty() {
+        first_content += 1;
+    }
+    if let Some(title) = lines
+        .get(first_content)
+        .and_then(|line| line.trim_start().strip_prefix("# "))
+    {
+        let mut body_start = first_content + 1;
+        if body_start < lines.len() && lines[body_start].trim().is_empty() {
+            body_start += 1;
+        }
+        return (
+            title.trim().to_string(),
+            lines[body_start..].join("\n").trim().to_string(),
+        );
+    }
+    let title = file_stem.trim();
+    (
+        if title.is_empty() {
+            "Untitled".to_string()
+        } else {
+            title.to_string()
+        },
+        markdown.trim().to_string(),
+    )
+}
+
+fn parse_checklist_body(body: &str) -> (Vec<ChecklistItemInput>, String) {
+    let mut items = Vec::new();
+    let mut remainder = Vec::new();
+    for line in body.lines() {
+        if let Some((checked, text)) = parse_checklist_line(line) {
+            items.push(ChecklistItemInput {
+                id: None,
+                text,
+                checked,
+                position: items.len() as i64,
+                parent_id: None,
+            });
+        } else if !line.trim().is_empty() && !is_attachment_reference_line(line) {
+            remainder.push(line);
+        }
+    }
+    (items, remainder.join("\n"))
+}
+
+fn parse_checklist_line(line: &str) -> Option<(bool, String)> {
+    let trimmed = line.trim_start();
+    for prefix in ["- [ ] ", "* [ ] ", "+ [ ] "] {
+        if let Some(text) = trimmed.strip_prefix(prefix) {
+            return Some((false, text.trim().to_string()));
+        }
+    }
+    for prefix in ["- [x] ", "- [X] ", "* [x] ", "* [X] ", "+ [x] ", "+ [X] "] {
+        if let Some(text) = trimmed.strip_prefix(prefix) {
+            return Some((true, text.trim().to_string()));
+        }
+    }
+    None
+}
+
+fn is_attachment_reference_line(line: &str) -> bool {
+    !extract_markdown_resource_refs(line).is_empty()
+}
+
+fn extract_markdown_resource_refs(markdown: &str) -> Vec<MarkdownResourceRef> {
+    let mut refs = Vec::new();
+    let mut cursor = 0usize;
+    while let Some(close_rel) = markdown[cursor..].find("](") {
+        let close = cursor + close_rel;
+        let Some(open) = markdown[..close].rfind('[') else {
+            cursor = close + 2;
+            continue;
+        };
+        let target_start = close + 2;
+        let Some(end_rel) = markdown[target_start..].find(')') else {
+            break;
+        };
+        let target_end = target_start + end_rel;
+        let target = normalize_markdown_target(&markdown[target_start..target_end]);
+        if is_supported_resource_target(&target) {
+            let label = markdown[open + 1..close].trim();
+            let filename = if label.is_empty() {
+                resource_filename_hint(&target)
+            } else {
+                label.to_string()
+            };
+            refs.push(MarkdownResourceRef { target, filename });
+        }
+        cursor = target_end + 1;
+    }
+    let mut cursor = 0usize;
+    while let Some(start_rel) = markdown[cursor..].find("![[") {
+        let target_start = cursor + start_rel + 3;
+        let Some(end_rel) = markdown[target_start..].find("]]") else {
+            break;
+        };
+        let target_end = target_start + end_rel;
+        let inside = &markdown[target_start..target_end];
+        let (target_raw, label) = inside
+            .split_once('|')
+            .map(|(target, label)| (target.trim(), label.trim()))
+            .unwrap_or((inside.trim(), ""));
+        let target = normalize_markdown_target(target_raw);
+        if is_supported_resource_target(&target) {
+            refs.push(MarkdownResourceRef {
+                filename: if label.is_empty() {
+                    resource_filename_hint(&target)
+                } else {
+                    label.to_string()
+                },
+                target,
+            });
+        }
+        cursor = target_end + 2;
+    }
+    refs
+}
+
+fn normalize_markdown_target(raw: &str) -> String {
+    let mut target = raw.trim();
+    if target.starts_with('<') && target.ends_with('>') && target.len() > 1 {
+        target = &target[1..target.len() - 1];
+    }
+    if let Some((without_fragment, _)) = target.split_once('#') {
+        target = without_fragment;
+    }
+    if let Some((without_query, _)) = target.split_once('?') {
+        target = without_query;
+    }
+    percent_decode(target).replace('\\', "/")
+}
+
+fn percent_decode(value: &str) -> String {
+    let bytes = value.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0usize;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            if let (Some(hi), Some(lo)) = (hex_value(bytes[i + 1]), hex_value(bytes[i + 2])) {
+                out.push((hi << 4) | lo);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).to_string()
+}
+
+fn hex_value(b: u8) -> Option<u8> {
+    match b {
+        b'0'..=b'9' => Some(b - b'0'),
+        b'a'..=b'f' => Some(b - b'a' + 10),
+        b'A'..=b'F' => Some(b - b'A' + 10),
+        _ => None,
+    }
+}
+
+fn is_supported_resource_target(target: &str) -> bool {
+    if target.is_empty()
+        || target.starts_with('#')
+        || target.contains("://")
+        || target.to_ascii_lowercase().starts_with("data:")
+        || target.to_ascii_lowercase().starts_with("mailto:")
+    {
+        return false;
+    }
+    let ext = Path::new(target)
+        .extension()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    imported_resource_mime_and_kind(&ext).is_some()
+}
+
+fn resource_filename_hint(target: &str) -> String {
+    Path::new(target)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("attachment")
+        .to_string()
+}
+
+fn resolve_import_note_id(
+    conn: &Connection,
+    draft: &MarkdownNoteDraft,
+    rel: &str,
+    summary: &mut MarkdownVaultImportSummary,
+) -> Result<String, String> {
+    let requested = draft
+        .frontmatter
+        .id
+        .as_deref()
+        .map(str::trim)
+        .filter(|id| Uuid::parse_str(id).is_ok())
+        .map(str::to_string);
+    let Some(requested) = requested else {
+        return Ok(Uuid::new_v4().to_string());
+    };
+    let exists: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM notes WHERE id = ?1",
+            params![&requested],
+            |r| r.get(0),
+        )
+        .map_err(err)?;
+    if exists == 0 {
+        Ok(requested)
+    } else {
+        let replacement = Uuid::new_v4().to_string();
+        summary.collisions.push(format!(
+            "{rel}: existing note id {requested} imported as {replacement}"
+        ));
+        Ok(replacement)
+    }
+}
+
+fn normalize_import_timestamp(value: Option<&str>) -> Option<String> {
+    let value = value?.trim();
+    if value.is_empty() {
+        return None;
+    }
+    if chrono::DateTime::parse_from_rfc3339(value).is_ok() {
+        Some(value.to_string())
+    } else {
+        None
+    }
+}
+
+fn normalize_import_color(value: Option<&str>) -> String {
+    match value
+        .map(|s| s.trim().to_ascii_lowercase())
+        .unwrap_or_default()
+        .as_str()
+    {
+        "red" => "red",
+        "orange" => "orange",
+        "yellow" => "yellow",
+        "green" => "green",
+        "teal" => "teal",
+        "blue" => "blue",
+        "darkblue" | "dark_blue" | "dark-blue" => "darkblue",
+        "purple" => "purple",
+        "pink" => "pink",
+        "brown" => "brown",
+        "gray" | "grey" => "gray",
+        _ => "default",
+    }
+    .to_string()
+}
+
+fn resolve_markdown_resource(src_root: &Path, md_path: &Path, target: &str) -> Option<PathBuf> {
+    if has_unsafe_relative_components(target) {
+        return None;
+    }
+    let md_parent = md_path.parent().unwrap_or(src_root);
+    let target_path = Path::new(target.trim_start_matches("./"));
+    let mut candidates = Vec::new();
+    if target
+        .trim_start_matches("./")
+        .starts_with(&format!("{VAULT_RESOURCES_DIR}/"))
+    {
+        candidates.push(src_root.join(target_path));
+        candidates.push(md_parent.join(target_path));
+    } else {
+        candidates.push(md_parent.join(target_path));
+        candidates.push(src_root.join(target_path));
+    }
+    let root = src_root.canonicalize().ok()?;
+    for candidate in candidates {
+        if !candidate.is_file() {
+            continue;
+        }
+        let Ok(canonical) = candidate.canonicalize() else {
+            continue;
+        };
+        if canonical.starts_with(&root) {
+            return Some(canonical);
+        }
+    }
+    None
+}
+
+fn has_unsafe_relative_components(target: &str) -> bool {
+    let path = Path::new(target);
+    path.components().any(|component| {
+        matches!(
+            component,
+            std::path::Component::ParentDir
+                | std::path::Component::RootDir
+                | std::path::Component::Prefix(_)
+        )
+    })
+}
+
+fn import_markdown_resource_attachment(
+    conn: &mut Connection,
+    resources_dir: &Path,
+    note_id: &str,
+    resource_ref: &MarkdownResourceRef,
+    src_resource: &Path,
+) -> Result<(), String> {
+    let metadata = std::fs::metadata(src_resource).map_err(err)?;
+    if metadata.len() > attachments::MAX_ATTACHMENT_BYTES {
+        return Err(format!(
+            "resource exceeds {} bytes (got {})",
+            attachments::MAX_ATTACHMENT_BYTES,
+            metadata.len()
+        ));
+    }
+    let ext = attachments::sanitize_extension(src_resource);
+    let Some((mime, kind)) = imported_resource_mime_and_kind(&ext) else {
+        return Err(format!("unsupported resource extension: {ext}"));
+    };
+    let bytes = std::fs::read(src_resource).map_err(err)?;
+    let stored = attachments::store_content_addressed_bytes(resources_dir, &bytes, &ext)?;
+    let mut width_recorded: Option<i64> = None;
+    let mut height_recorded: Option<i64> = None;
+    let mut thumb_path: Option<String> = None;
+    if kind == "image" && mime != "image/svg+xml" {
+        if let Ok(decoded) = image::load_from_memory(&bytes) {
+            width_recorded = Some(decoded.width() as i64);
+            height_recorded = Some(decoded.height() as i64);
+            thumb_path = attachments::write_content_addressed_thumbnail(
+                resources_dir,
+                &stored.hash,
+                &decoded,
+            );
+        }
+    }
+    let filename = if resource_ref.filename.trim().is_empty() {
+        src_resource
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("attachment")
+            .to_string()
+    } else {
+        resource_ref.filename.trim().to_string()
+    };
+    let new_id = Uuid::new_v4().to_string();
+    let now = now_iso();
+    let insert_result: Result<(), String> = (|| {
+        let tx = conn.transaction().map_err(err)?;
+        let pos: i64 = tx
+            .query_row(
+                "SELECT COALESCE(MAX(position) + 1, 0) FROM attachments WHERE note_id = ?1",
+                params![note_id],
+                |r| r.get(0),
+            )
+            .map_err(err)?;
+        tx.execute(
+            "INSERT INTO attachments (id, note_id, kind, mime, filename, byte_size, width, height, position, created_at, resource_path, thumb_path)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+            params![
+                &new_id,
+                note_id,
+                kind,
+                mime,
+                filename,
+                bytes.len() as i64,
+                width_recorded,
+                height_recorded,
+                pos,
+                &now,
+                &stored.rel_path,
+                thumb_path.as_deref(),
+            ],
+        )
+        .map_err(err)?;
+        tx.commit().map_err(err)?;
+        Ok(())
+    })();
+    if let Err(e) = insert_result {
+        attachments::cleanup_new_resource_on_insert_failure(
+            conn,
+            resources_dir,
+            &stored,
+            thumb_path.as_deref(),
+        );
+        return Err(e);
+    }
+    Ok(())
+}
+
+fn imported_resource_mime_and_kind(ext: &str) -> Option<(&'static str, &'static str)> {
+    match ext.to_ascii_lowercase().as_str() {
+        "png" => Some(("image/png", "image")),
+        "jpg" | "jpeg" => Some(("image/jpeg", "image")),
+        "gif" => Some(("image/gif", "image")),
+        "webp" => Some(("image/webp", "image")),
+        "svg" => Some(("image/svg+xml", "image")),
+        "webm" => Some(("audio/webm", "audio")),
+        "ogg" => Some(("audio/ogg", "audio")),
+        "m4a" | "mp4" => Some(("audio/mp4", "audio")),
+        "mp3" => Some(("audio/mpeg", "audio")),
+        "wav" => Some(("audio/wav", "audio")),
+        _ => None,
+    }
+}
+
+fn path_has_component(path: &Path, component_name: &str) -> bool {
+    path.components().any(|component| {
+        component
+            .as_os_str()
+            .to_string_lossy()
+            .eq_ignore_ascii_case(component_name)
+    })
+}
+
+fn display_relative_path(root: &Path, path: &Path) -> String {
+    path.strip_prefix(root)
+        .unwrap_or(path)
+        .to_string_lossy()
+        .replace('\\', "/")
+}
+
 /// NF-08 — Google Keep Takeout importer. The Takeout export is a ZIP
 /// where each note lives next to a sibling HTML rendering (which we
 /// ignore) and any binary attachments. The canonical path is

@@ -259,6 +259,213 @@ mod tests {
         );
     }
 
+    const TEST_ONE_BY_ONE_PNG: &[u8] = &[
+        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44,
+        0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1f,
+        0x15, 0xc4, 0x89, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9c, 0x63, 0xf8,
+        0xcf, 0xc0, 0xf0, 0x1f, 0x00, 0x05, 0x00, 0x01, 0xff, 0xa7, 0x69, 0x6c, 0x6d, 0x00, 0x00,
+        0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
+    ];
+
+    #[test]
+    fn parse_markdown_vault_note_reads_frontmatter_checklist_and_resources() {
+        let raw = concat!(
+            "---\n",
+            "id: 11111111-1111-4111-8111-111111111111\n",
+            "type: list\n",
+            "color: blue\n",
+            "pinned: true\n",
+            "archived: false\n",
+            "created: 2026-01-02T03:04:05Z\n",
+            "updated: 2026-01-03T03:04:05Z\n",
+            "labels:\n",
+            "  - Work\n",
+            "  - \"two: words\"\n",
+            "---\n",
+            "\n",
+            "# Grocery list\n",
+            "\n",
+            "- [ ] Milk\n",
+            "- [x] Bread\n",
+            "\n",
+            "![pixel](_resources/pixel.png)\n"
+        );
+
+        let draft = parse_markdown_vault_note(raw, "ignored");
+
+        assert_eq!(
+            draft.frontmatter.id.as_deref(),
+            Some("11111111-1111-4111-8111-111111111111")
+        );
+        assert_eq!(draft.frontmatter.labels, vec!["two: words", "Work"]);
+        assert_eq!(draft.kind, "list");
+        assert_eq!(draft.title, "Grocery list");
+        assert_eq!(draft.checklist.len(), 2);
+        assert_eq!(draft.checklist[0].text, "Milk");
+        assert!(!draft.checklist[0].checked);
+        assert_eq!(draft.checklist[1].text, "Bread");
+        assert!(draft.checklist[1].checked);
+        assert_eq!(draft.resource_refs.len(), 1);
+        assert_eq!(draft.resource_refs[0].target, "_resources/pixel.png");
+        assert_eq!(draft.resource_refs[0].filename, "pixel");
+    }
+
+    #[test]
+    fn parse_markdown_vault_note_reads_obsidian_resource_embeds() {
+        let draft = parse_markdown_vault_note(
+            "# Obsidian\n\nBody\n\n![[attachments/pixel.png|Reference image]]\n",
+            "Obsidian",
+        );
+
+        assert_eq!(draft.resource_refs.len(), 1);
+        assert_eq!(draft.resource_refs[0].target, "attachments/pixel.png");
+        assert_eq!(draft.resource_refs[0].filename, "Reference image");
+    }
+
+    #[test]
+    fn import_markdown_vault_creates_notes_labels_lists_and_attachments() {
+        let tmp = tempfile::tempdir().unwrap();
+        let data_dir = tmp.path().join("data");
+        let vault_dir = tmp.path().join("vault");
+        let resources_dir = vault_dir.join(VAULT_RESOURCES_DIR);
+        std::fs::create_dir_all(&data_dir).unwrap();
+        std::fs::create_dir_all(&resources_dir).unwrap();
+        std::fs::write(resources_dir.join("pixel.png"), TEST_ONE_BY_ONE_PNG).unwrap();
+        std::fs::write(
+            vault_dir.join("Grocery list.md"),
+            concat!(
+                "---\n",
+                "id: 11111111-1111-4111-8111-111111111111\n",
+                "type: list\n",
+                "color: blue\n",
+                "pinned: true\n",
+                "archived: true\n",
+                "created: 2026-01-02T03:04:05Z\n",
+                "updated: 2026-01-03T03:04:05Z\n",
+                "labels:\n",
+                "  - Work\n",
+                "  - \"two: words\"\n",
+                "---\n",
+                "\n",
+                "# Grocery list\n",
+                "\n",
+                "- [ ] Milk\n",
+                "- [x] Bread\n",
+                "\n",
+                "![pixel](_resources/pixel.png)\n"
+            ),
+        )
+        .unwrap();
+        let mut conn = crate::db::open(&data_dir.join("keepr.db")).unwrap();
+
+        let summary = import_markdown_vault_inner(&mut conn, &data_dir, &vault_dir).unwrap();
+
+        assert_eq!(summary.notes_created, 1);
+        assert_eq!(summary.attachments_copied, 1);
+        assert_eq!(summary.labels_created, 2);
+        assert!(summary.skipped_files.is_empty(), "{summary:?}");
+        assert!(summary.collisions.is_empty(), "{summary:?}");
+        let note: (String, String, String, i64, i64, String, String) = conn
+            .query_row(
+                "SELECT kind, title, color, pinned, archived, created_at, updated_at
+                 FROM notes WHERE id = '11111111-1111-4111-8111-111111111111'",
+                [],
+                |r| {
+                    Ok((
+                        r.get(0)?,
+                        r.get(1)?,
+                        r.get(2)?,
+                        r.get(3)?,
+                        r.get(4)?,
+                        r.get(5)?,
+                        r.get(6)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(note.0, "list");
+        assert_eq!(note.1, "Grocery list");
+        assert_eq!(note.2, "blue");
+        assert_eq!(note.3, 1);
+        assert_eq!(note.4, 1);
+        assert_eq!(note.5, "2026-01-02T03:04:05Z");
+        assert_eq!(note.6, "2026-01-03T03:04:05Z");
+        let checklist_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM checklist_items
+                 WHERE note_id = '11111111-1111-4111-8111-111111111111'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(checklist_count, 2);
+        let label_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM labels", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(label_count, 2);
+        let attachment: (String, String) = conn
+            .query_row(
+                "SELECT mime, resource_path FROM attachments
+                 WHERE note_id = '11111111-1111-4111-8111-111111111111'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(attachment.0, "image/png");
+        assert!(data_dir.join("resources").join(attachment.1).is_file());
+    }
+
+    #[test]
+    fn import_markdown_vault_reports_id_collision_without_overwriting_existing_note() {
+        let tmp = tempfile::tempdir().unwrap();
+        let data_dir = tmp.path().join("data");
+        let vault_dir = tmp.path().join("vault");
+        std::fs::create_dir_all(&data_dir).unwrap();
+        std::fs::create_dir_all(&vault_dir).unwrap();
+        let mut conn = crate::db::open(&data_dir.join("keepr.db")).unwrap();
+        conn.execute(
+            "INSERT INTO notes (id, kind, title, body, color, pinned, archived, trashed, position, created_at, updated_at, background_pattern)
+             VALUES ('11111111-1111-4111-8111-111111111111', 'text', 'Existing', '', 'default', 0, 0, 0, 0, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', '')",
+            [],
+        )
+        .unwrap();
+        std::fs::write(
+            vault_dir.join("Imported.md"),
+            concat!(
+                "---\n",
+                "id: 11111111-1111-4111-8111-111111111111\n",
+                "type: text\n",
+                "---\n",
+                "# Imported\n",
+                "\n",
+                "New body\n"
+            ),
+        )
+        .unwrap();
+
+        let summary = import_markdown_vault_inner(&mut conn, &data_dir, &vault_dir).unwrap();
+
+        assert_eq!(summary.notes_created, 1);
+        assert_eq!(summary.collisions.len(), 1);
+        assert!(summary.collisions[0].contains("existing note id"));
+        let existing_title: String = conn
+            .query_row(
+                "SELECT title FROM notes WHERE id = '11111111-1111-4111-8111-111111111111'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(existing_title, "Existing");
+        let imported_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM notes WHERE title = 'Imported'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(imported_count, 1);
+    }
+
     #[test]
     fn map_keep_color_covers_full_enum() {
         for (k, v) in [

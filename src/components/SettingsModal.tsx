@@ -15,6 +15,7 @@ import { AppLockSection } from "./AppLockSection";
 import { VaultSection } from "./VaultSection";
 import { VoiceTranscriptionSection } from "./VoiceTranscriptionSection";
 import { WebClipperSection } from "./WebClipperSection";
+import type { MarkdownVaultImportSummary } from "../types";
 
 export function SettingsModal() {
   const settingsOpen = useStore((s) => s.settingsOpen);
@@ -45,6 +46,8 @@ export function SettingsModal() {
   const [appVersion, setAppVersion] = useState<string>("");
   const [busy, setBusy] = useState(false);
   const [pendingRestoreSrc, setPendingRestoreSrc] = useState<string | null>(null);
+  const [markdownImportSummary, setMarkdownImportSummary] =
+    useState<MarkdownVaultImportSummary | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEscape(settingsOpen, closeSettings);
@@ -120,7 +123,7 @@ export function SettingsModal() {
       >
         <div
           ref={containerRef}
-          className="w-full max-w-2xl max-h-[90vh] flex flex-col rounded-lg shadow-keep-hover bg-white dark:bg-[#2d2e30] text-gray-800 dark:text-gray-100"
+          className="w-[calc(100vw-2rem)] max-w-2xl max-h-[90vh] overflow-hidden flex flex-col rounded-lg shadow-keep-hover bg-white dark:bg-[#2d2e30] text-gray-800 dark:text-gray-100"
           onClick={(e) => e.stopPropagation()}
         >
           <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200 dark:border-[#5f6368] shrink-0">
@@ -137,7 +140,7 @@ export function SettingsModal() {
             </button>
           </div>
 
-          <div className="px-5 py-4 space-y-5 overflow-y-auto">
+          <div className="px-5 py-4 space-y-5 overflow-y-auto overflow-x-hidden">
             <Row
               title="Theme"
               subtitle={
@@ -458,18 +461,18 @@ export function SettingsModal() {
                 your Google Drive desktop folder for a cloud copy. Restore on any
                 machine to bring everything back.
               </p>
-              <div className="flex gap-2 mt-3">
+              <div className="flex gap-2 mt-3 flex-wrap">
                 <button
                   disabled={busy}
                   onClick={exportZip}
-                  className="flex items-center gap-2 px-3 py-2 text-sm rounded border border-gray-300 dark:border-[#5f6368] hover:bg-black/5 dark:hover:bg-white/10 disabled:opacity-50"
+                  className="w-full sm:w-auto justify-start whitespace-normal text-left flex items-center gap-2 px-3 py-2 text-sm rounded border border-gray-300 dark:border-[#5f6368] hover:bg-black/5 dark:hover:bg-white/10 disabled:opacity-50"
                 >
                   <Download size={16} aria-hidden /> Export backup…
                 </button>
                 <button
                   disabled={busy}
                   onClick={pickAndStageRestore}
-                  className="flex items-center gap-2 px-3 py-2 text-sm rounded border border-gray-300 dark:border-[#5f6368] hover:bg-black/5 dark:hover:bg-white/10 disabled:opacity-50"
+                  className="w-full sm:w-auto justify-start whitespace-normal text-left flex items-center gap-2 px-3 py-2 text-sm rounded border border-gray-300 dark:border-[#5f6368] hover:bg-black/5 dark:hover:bg-white/10 disabled:opacity-50"
                 >
                   <Upload size={16} aria-hidden /> Restore backup…
                 </button>
@@ -477,13 +480,13 @@ export function SettingsModal() {
             </div>
 
             <div>
-              <div className="font-medium">Markdown vault export &amp; Takeout import</div>
+              <div className="font-medium">Markdown vault export/import &amp; Takeout import</div>
               <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
                 Export every note as a separate <code>.md</code> file with
                 YAML frontmatter, ready to open in Obsidian, Joplin, or any
-                text editor. Or drop your Google Takeout ZIP to migrate
-                straight from Keep — labels, colors, lists, and images
-                are preserved.
+                text editor. Import a Markdown vault folder back into Keepr,
+                or drop your Google Takeout ZIP to migrate straight from Keep.
+                Labels, colors, lists, and images are preserved.
               </p>
               <div className="flex gap-2 mt-3 flex-wrap">
                 <button
@@ -505,9 +508,34 @@ export function SettingsModal() {
                       setBusy(false);
                     }
                   }}
-                  className="flex items-center gap-2 px-3 py-2 text-sm rounded border border-gray-300 dark:border-[#5f6368] hover:bg-black/5 dark:hover:bg-white/10 disabled:opacity-50"
+                  className="w-full sm:w-auto justify-start whitespace-normal text-left flex items-center gap-2 px-3 py-2 text-sm rounded border border-gray-300 dark:border-[#5f6368] hover:bg-black/5 dark:hover:bg-white/10 disabled:opacity-50"
                 >
                   <Download size={16} aria-hidden /> Export as Markdown vault…
+                </button>
+                <button
+                  disabled={busy}
+                  onClick={async () => {
+                    try {
+                      const picked = await open({
+                        title: "Import Markdown vault folder",
+                        directory: true,
+                        multiple: false,
+                      });
+                      if (!picked) return;
+                      setBusy(true);
+                      const summary = await api.importMarkdownVault(picked as string);
+                      setMarkdownImportSummary(summary);
+                      await load();
+                      showToast(markdownImportToast(summary));
+                    } catch (e) {
+                      showToast("Markdown vault import failed: " + String(e));
+                    } finally {
+                      setBusy(false);
+                    }
+                  }}
+                  className="w-full sm:w-auto justify-start whitespace-normal text-left flex items-center gap-2 px-3 py-2 text-sm rounded border border-gray-300 dark:border-[#5f6368] hover:bg-black/5 dark:hover:bg-white/10 disabled:opacity-50"
+                >
+                  <Upload size={16} aria-hidden /> Import Markdown vault...
                 </button>
                 <button
                   disabled={busy}
@@ -529,7 +557,7 @@ export function SettingsModal() {
                       setBusy(false);
                     }
                   }}
-                  className="flex items-center gap-2 px-3 py-2 text-sm rounded border border-gray-300 dark:border-[#5f6368] hover:bg-black/5 dark:hover:bg-white/10 disabled:opacity-50"
+                  className="w-full sm:w-auto justify-start whitespace-normal text-left flex items-center gap-2 px-3 py-2 text-sm rounded border border-gray-300 dark:border-[#5f6368] hover:bg-black/5 dark:hover:bg-white/10 disabled:opacity-50"
                 >
                   <Upload size={16} aria-hidden /> Import Google Takeout…
                 </button>
@@ -556,12 +584,44 @@ export function SettingsModal() {
                       setBusy(false);
                     }
                   }}
-                  className="flex items-center gap-2 px-3 py-2 text-sm rounded border border-gray-300 dark:border-[#5f6368] hover:bg-black/5 dark:hover:bg-white/10 disabled:opacity-50"
+                  className="w-full sm:w-auto justify-start whitespace-normal text-left flex items-center gap-2 px-3 py-2 text-sm rounded border border-gray-300 dark:border-[#5f6368] hover:bg-black/5 dark:hover:bg-white/10 disabled:opacity-50"
                 >
                   <Download size={16} aria-hidden /> Export reminders as
                   iCalendar (.ics)…
                 </button>
               </div>
+              {markdownImportSummary && (
+                <div
+                  className="mt-3 rounded border border-gray-200 dark:border-[#5f6368] px-3 py-2 text-xs text-gray-700 dark:text-gray-300"
+                  aria-live="polite"
+                >
+                  <div className="font-medium">
+                    Last Markdown import: {markdownImportSummary.notesCreated} notes,{" "}
+                    {markdownImportSummary.attachmentsCopied} attachments,{" "}
+                    {markdownImportSummary.labelsCreated} labels
+                  </div>
+                  {markdownImportSummary.collisions.length > 0 && (
+                    <div className="mt-2">
+                      <div className="font-medium">ID collisions</div>
+                      <ul className="mt-1 list-disc pl-5 space-y-1">
+                        {markdownImportSummary.collisions.slice(0, 6).map((item) => (
+                          <li key={item}>{item}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  {markdownImportSummary.skippedFiles.length > 0 && (
+                    <div className="mt-2">
+                      <div className="font-medium">Skipped files</div>
+                      <ul className="mt-1 list-disc pl-5 space-y-1">
+                        {markdownImportSummary.skippedFiles.slice(0, 6).map((item) => (
+                          <li key={item}>{item}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </div>
 
@@ -585,6 +645,12 @@ export function SettingsModal() {
   );
 }
 
+function markdownImportToast(summary: MarkdownVaultImportSummary): string {
+  const warnings = summary.collisions.length + summary.skippedFiles.length;
+  const suffix = warnings > 0 ? `, ${warnings} warnings` : "";
+  return `Imported ${summary.notesCreated} Markdown notes, ${summary.attachmentsCopied} attachments${suffix}`;
+}
+
 function Row({
   title,
   subtitle,
@@ -595,14 +661,14 @@ function Row({
   action: React.ReactNode;
 }) {
   return (
-    <div className="flex items-center justify-between gap-4">
+    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
       <div className="min-w-0">
         <div className="font-medium">{title}</div>
         <div className="text-sm text-gray-600 dark:text-gray-400 truncate">
           {subtitle}
         </div>
       </div>
-      <div className="shrink-0">{action}</div>
+      <div className="w-full sm:w-auto sm:shrink-0">{action}</div>
     </div>
   );
 }
