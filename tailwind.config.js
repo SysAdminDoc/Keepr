@@ -6,7 +6,6 @@ import { LIGHT_HEX, DARK_HEX } from "./src/keep-palette.js";
 /** @type {import('tailwindcss').Config} */
 export default {
   content: ["./index.html", "./src/**/*.{ts,tsx}"],
-  darkMode: "class",
   theme: {
     extend: {
       colors: {
