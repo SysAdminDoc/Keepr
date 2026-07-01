@@ -110,7 +110,9 @@ pub fn reconcile(
             Some(remote_updated) if remote_updated >= local_updated => {}
             _ => {
                 if let Ok(Some(sn)) = load_sync_note(conn, note_id) {
-                    pull.push(sn);
+                    if sn.note.vault != "vault" {
+                        pull.push(sn);
+                    }
                 }
             }
         }
@@ -177,6 +179,9 @@ pub fn apply_pushed_notes(
 
     for sn in notes {
         let n = &sn.note;
+        if n.vault == "vault" {
+            continue;
+        }
         let existing_updated: Option<String> = conn
             .query_row(
                 "SELECT updated_at FROM notes WHERE id = ?1",
@@ -187,11 +192,21 @@ pub fn apply_pushed_notes(
         if existing_updated.as_ref().is_some_and(|eu| eu >= &n.updated_at) {
             continue;
         }
+        let local_vault: Option<String> = conn
+            .query_row(
+                "SELECT vault FROM notes WHERE id = ?1",
+                params![n.id],
+                |r| r.get(0),
+            )
+            .ok();
+        if local_vault.as_deref() == Some("vault") {
+            continue;
+        }
 
         conn.execute(
             "INSERT INTO notes (id, kind, title, body, color, pinned, archived, trashed, \
              position, created_at, updated_at, trashed_at, vault, background_pattern) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 'plain', ?13) \
              ON CONFLICT(id) DO UPDATE SET \
              kind=excluded.kind, title=excluded.title, body=excluded.body, \
              color=excluded.color, pinned=excluded.pinned, archived=excluded.archived, \
@@ -211,7 +226,6 @@ pub fn apply_pushed_notes(
                 n.created_at,
                 n.updated_at,
                 n.trashed_at,
-                n.vault,
                 n.background_pattern,
             ],
         )
@@ -346,6 +360,29 @@ pub fn purge_old_tombstones(conn: &Connection, cutoff: &str) -> Result<usize, St
         )
         .map_err(|e| e.to_string())?;
     Ok(deleted)
+}
+
+pub fn is_safe_sync_resource_path(s: &str) -> bool {
+    if s.is_empty() || s.len() > 256 {
+        return false;
+    }
+    if s.contains('\0') || s.contains('\\') || s.contains("..") || s.contains('%') {
+        return false;
+    }
+    let parts: Vec<&str> = s.split('/').collect();
+    if parts.len() != 3 {
+        return false;
+    }
+    if parts[0].len() != 2
+        || parts[1].len() != 2
+        || !parts[0].chars().all(|c| c.is_ascii_hexdigit())
+        || !parts[1].chars().all(|c| c.is_ascii_hexdigit())
+    {
+        return false;
+    }
+    let filename = parts[2];
+    let stem = filename.split('.').next().unwrap_or("");
+    stem.len() == 64 && stem.chars().all(|c| c.is_ascii_hexdigit())
 }
 
 fn load_sync_note(conn: &Connection, note_id: &str) -> Result<Option<SyncNote>, String> {

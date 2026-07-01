@@ -102,7 +102,6 @@ pub struct AppState {
     /// Settings → Web Clipper can display the connection info the
     /// user needs to paste into their browser extension.
     pub web_clipper: web_clipper::WebClipperState,
-    pub sync_state: sync::SyncState,
 }
 
 /// Subdirectory under the data dir where the `keepr-resource://` protocol
@@ -554,6 +553,13 @@ pub fn run() {
                             |r| r.get::<_, String>(0),
                         )
                         .unwrap_or_else(|_| uuid::Uuid::new_v4().to_string());
+                    let sync_token = conn
+                        .query_row(
+                            "SELECT value FROM app_settings WHERE key = 'sync_token'",
+                            [],
+                            |r| r.get::<_, String>(0),
+                        )
+                        .unwrap_or_else(|_| uuid::Uuid::new_v4().to_string());
                     let dev_name = hostname::get()
                         .ok()
                         .and_then(|h| h.into_string().ok())
@@ -565,6 +571,7 @@ pub fn run() {
                     let status_holder = sync_state.status.clone();
                     let did = device_id.clone();
                     let dn = dev_name.clone();
+                    let tok = sync_token;
                     std::thread::spawn(move || {
                         let rt = match tokio::runtime::Builder::new_current_thread()
                             .enable_all()
@@ -582,6 +589,7 @@ pub fn run() {
                                 resources_for_sync,
                                 did.clone(),
                                 dn.clone(),
+                                tok,
                             )
                             .await
                             {
@@ -619,7 +627,6 @@ pub fn run() {
                 vault_dek: Arc::new(Mutex::new(None)),
                 shutdown,
                 web_clipper: web_clipper_info,
-                sync_state: sync::SyncState::default(),
             });
 
             // NF-06 — tray icon + menu. "Show / Hide Keepr" toggles the

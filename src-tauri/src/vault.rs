@@ -120,7 +120,7 @@ pub fn init(password: &str) -> Result<(VaultInit, Dek)> {
     let mut nonce = [0u8; NONCE_LEN];
     fill_random(&mut nonce)?;
 
-    let kek = derive_kek(password, &salt)?;
+    let mut kek = derive_kek(password, &salt)?;
     let cipher = XChaCha20Poly1305::new((&kek).into());
     let wrapped = cipher
         .encrypt(XNonce::from_slice(&nonce), dek_bytes.as_ref())
@@ -128,7 +128,7 @@ pub fn init(password: &str) -> Result<(VaultInit, Dek)> {
     let dek = Dek::from_slice(&dek_bytes)?;
     // Best-effort scrub of the local copy; Dek itself is now the owner.
     dek_bytes.zeroize();
-    drop_kek(kek);
+    drop_kek(&mut kek);
 
     Ok((
         VaultInit {
@@ -149,10 +149,10 @@ pub fn unlock(
     dek_nonce: &[u8; NONCE_LEN],
     dek_wrapped: &[u8],
 ) -> Result<Option<Dek>> {
-    let kek = derive_kek(password, salt)?;
+    let mut kek = derive_kek(password, salt)?;
     let cipher = XChaCha20Poly1305::new((&kek).into());
     let result = cipher.decrypt(XNonce::from_slice(dek_nonce), dek_wrapped);
-    drop_kek(kek);
+    drop_kek(&mut kek);
     match result {
         Ok(bytes) => {
             let dek = Dek::from_slice(&bytes)?;
@@ -176,12 +176,12 @@ pub fn rewrap(dek: &Dek, new_password: &str) -> Result<VaultInit> {
     fill_random(&mut salt)?;
     let mut nonce = [0u8; NONCE_LEN];
     fill_random(&mut nonce)?;
-    let kek = derive_kek(new_password, &salt)?;
+    let mut kek = derive_kek(new_password, &salt)?;
     let cipher = XChaCha20Poly1305::new((&kek).into());
     let wrapped = cipher
         .encrypt(XNonce::from_slice(&nonce), dek.as_bytes().as_ref())
         .map_err(|e| anyhow!("DEK rewrap failed: {e}"))?;
-    drop_kek(kek);
+    drop_kek(&mut kek);
     Ok(VaultInit {
         salt,
         dek_nonce: nonce,
@@ -271,12 +271,12 @@ fn wrap_dek_with_seed(dek: &Dek, entropy: &[u8]) -> Result<VaultInit> {
     fill_random(&mut salt)?;
     let mut nonce = [0u8; NONCE_LEN];
     fill_random(&mut nonce)?;
-    let kek = derive_kek(&hex_for_kdf(entropy), &salt)?;
+    let mut kek = derive_kek(&hex_for_kdf(entropy), &salt)?;
     let cipher = XChaCha20Poly1305::new((&kek).into());
     let wrapped = cipher
         .encrypt(XNonce::from_slice(&nonce), dek.as_bytes().as_ref())
         .map_err(|e| anyhow!("DEK seed-wrap failed: {e}"))?;
-    drop_kek(kek);
+    drop_kek(&mut kek);
     Ok(VaultInit {
         salt,
         dek_nonce: nonce,
@@ -296,10 +296,10 @@ pub fn unlock_with_seed(
     let m = bip39::Mnemonic::parse(mnemonic_phrase.trim())
         .map_err(|e| anyhow!("invalid recovery phrase: {e}"))?;
     let entropy = m.to_entropy();
-    let kek = derive_kek(&hex_for_kdf(&entropy), salt)?;
+    let mut kek = derive_kek(&hex_for_kdf(&entropy), salt)?;
     let cipher = XChaCha20Poly1305::new((&kek).into());
     let result = cipher.decrypt(XNonce::from_slice(nonce), wrapped);
-    drop_kek(kek);
+    drop_kek(&mut kek);
     match result {
         Ok(bytes) => {
             let dek = Dek::from_slice(&bytes)?;
@@ -352,7 +352,7 @@ fn hex_nibble(b: u8) -> Result<u8> {
     }
 }
 
-fn drop_kek(mut k: [u8; KEK_LEN]) {
+fn drop_kek(k: &mut [u8; KEK_LEN]) {
     k.zeroize();
 }
 
