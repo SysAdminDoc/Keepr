@@ -368,7 +368,7 @@ export function NoteCard({ note }: Props) {
 
       {daysLeft !== null && (
         <div className="px-3 pb-1 text-[11px] uppercase tracking-wide font-medium opacity-70">
-          {daysLeft === 1 ? "1 day left" : `${daysLeft} days left`}
+          {daysLeft <= 0 ? "Expiring today" : daysLeft === 1 ? "1 day left" : `${daysLeft} days left`}
         </div>
       )}
 
