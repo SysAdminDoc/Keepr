@@ -125,6 +125,14 @@ export interface Reminder {
   createdAt: string;
 }
 
+export interface MarkdownVaultImportSummary {
+  notesCreated: number;
+  attachmentsCopied: number;
+  labelsCreated: number;
+  skippedFiles: string[];
+  collisions: string[];
+}
+
 export type Section =
   | { kind: "notes" }
   | { kind: "reminders" }

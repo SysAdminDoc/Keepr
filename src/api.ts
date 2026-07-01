@@ -6,6 +6,7 @@ import type {
   NoteSnapshot,
   Label,
   Reminder,
+  MarkdownVaultImportSummary,
   SmartLabel,
   SpeechModelStatus,
   TranscriptRecord,
@@ -47,6 +48,8 @@ export const api = {
     invoke<string>("export_reminders_ics", { dest }),
   exportVault: (destDir: string) =>
     invoke<string>("export_vault", { destDir }),
+  importMarkdownVault: (srcDir: string) =>
+    invoke<MarkdownVaultImportSummary>("import_markdown_vault", { srcDir }),
   importTakeout: (src: string) =>
     invoke<number>("import_takeout", { src }),
   deleteNotePermanent: (id: string) =>

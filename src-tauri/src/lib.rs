@@ -702,6 +702,7 @@ pub fn run() {
             commands::reminders::clear_reminder,
             commands::reminders::list_reminders,
             commands::io::export_vault,
+            commands::io::import_markdown_vault,
             commands::io::import_takeout,
             commands::notes::delete_note_permanent,
             commands::notes::set_archived,

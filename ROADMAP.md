@@ -4,7 +4,7 @@
 
 **Priority legend:** P0 = data loss / crash / security / distribution-blocker · P1 = visible bug / high user value · P2 = polish / nice-to-have · P3 = future / experimental.
 
-**Status (2026-06-30):** v0.25.5 ships a local smoke command for temp database, attachment, vault, Web Clipper, and backup verification. Blocked signing/biometric/notarization items live in [Roadmap_Blocked.md](Roadmap_Blocked.md). This file lists only actionable open work.
+**Status (2026-07-01):** v0.25.6 ships Markdown vault folder import with frontmatter, label, list, attachment, and collision-report coverage. Blocked signing/biometric/notarization items live in [Roadmap_Blocked.md](Roadmap_Blocked.md). This file lists only actionable open work.
 
 ---
 
@@ -54,13 +54,6 @@ Carried forward across every research cycle:
 - **Voice transcription scope (v0.22.4):** local offline whisper.cpp is in-bounds; cloud transcription remains banned.
 
 ## Research-Driven Additions
-
-- [ ] P2 - Import Markdown vault folders
-  Why: Keepr exports Markdown vaults, but migration is one-way; Obsidian/Joplin users expect folder import with resources.
-  Evidence: `src-tauri/src/commands/io.rs::export_vault`; README migration claims; Joplin attachments docs; Obsidian local-vault model.
-  Touches: `src-tauri/src/commands/io.rs`, `src-tauri/src/commands/attachments.rs`, `src/components/SettingsModal.tsx`, tests with Markdown frontmatter and `_resources`.
-  Acceptance: importing a folder of `.md` files with YAML frontmatter and sibling resources creates notes, labels, colors where present, attachments, and a collision report without deleting existing notes.
-  Complexity: L
 
 - [ ] P2 - Plan the React/Vite/Tailwind/lucide upgrade lane
   Why: `npm outdated --long` shows React 19, Vite 8, Tailwind 4, lucide 1.x, and TypeScript 6 migration work; npm production advisories are clean, so this can be staged deliberately.

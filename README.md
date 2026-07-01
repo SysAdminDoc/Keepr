@@ -1,6 +1,6 @@
 # Keepr
 
-![Version](https://img.shields.io/badge/version-0.25.5-blue)
+![Version](https://img.shields.io/badge/version-0.25.6-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
 
@@ -22,7 +22,7 @@ Google Keep is great until the internet goes out. Keepr gives you the same look,
 
 **System integration** — System-tray icon with show-hide + new-note + quit menu, `Ctrl+Alt+N` global hotkey quick-capture, single-instance guard.
 
-**Backup & migration** — Manual ZIP export / import with zip-slip + zip-bomb defenses and `.prev` rollback, auto-backup schedule (daily / weekly to your Drive folder), Markdown vault export (one `.md` per note + YAML frontmatter + `_resources/`), Google Takeout import (preserves chronology + reminders + labels + attachments).
+**Backup & migration** — Manual ZIP export / import with zip-slip + zip-bomb defenses and `.prev` rollback, auto-backup schedule (daily / weekly to your Drive folder), Markdown vault export/import (one `.md` per note + YAML frontmatter + `_resources/`), Google Takeout import (preserves chronology + reminders + labels + attachments).
 
 **Speech** — Voice-note transcription runs locally with whisper.cpp after an explicit one-time model download. Keepr shows the source URL and expected SHA-256 digest before download, then refuses to run a model that fails verification.
 
