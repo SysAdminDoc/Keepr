@@ -150,4 +150,37 @@ export const api = {
     invoke<{ port: number | null; token: string | null }>("get_web_clipper_info"),
   regenerateWebClipperToken: () =>
     invoke<string>("regenerate_web_clipper_token"),
+  // v0.26.0 — LAN-only P2P sync.
+  getSyncSettings: () =>
+    invoke<{
+      enabled: boolean;
+      deviceId: string;
+      deviceName: string;
+      port: number | null;
+      lastSync: string | null;
+    }>("get_sync_settings"),
+  getSyncPeers: () =>
+    invoke<
+      {
+        deviceId: string;
+        deviceName: string;
+        host: string;
+        port: number;
+        lastSeen: string;
+      }[]
+    >("get_sync_peers"),
+  getSyncStatus: () =>
+    invoke<"disabled" | "idle" | "syncing" | "error">("get_sync_status"),
+  setSyncEnabled: (enabled: boolean) =>
+    invoke<void>("set_sync_enabled", { enabled }),
+  syncNow: () =>
+    invoke<
+      {
+        notesPulled: number;
+        notesPushed: number;
+        labelsMerged: number;
+        attachmentsTransferred: number;
+        peerName: string;
+      }[]
+    >("sync_now"),
 };

@@ -1,10 +1,7 @@
 mod commands;
 pub mod db;
 mod lock;
-// v0.22.1 — vault module is `pub` so the standalone `keepr-verify`
-// binary in src/bin/keepr-verify.rs can re-derive the KEK and decrypt
-// vault notes from outside the Tauri runtime. No private fields are
-// exposed beyond what was already accessible to commands.rs.
+pub mod sync;
 pub mod transcribe;
 pub mod vault;
 pub mod web_clipper;
@@ -105,6 +102,7 @@ pub struct AppState {
     /// Settings → Web Clipper can display the connection info the
     /// user needs to paste into their browser extension.
     pub web_clipper: web_clipper::WebClipperState,
+    pub sync_state: sync::SyncState,
 }
 
 /// Subdirectory under the data dir where the `keepr-resource://` protocol
@@ -535,6 +533,85 @@ pub fn run() {
                 }
             });
 
+            let sync_state = sync::SyncState::default();
+
+            // v0.26.0 — if LAN sync was enabled, start discovery + server.
+            {
+                let conn = db_arc.lock();
+                let sync_enabled: bool = conn
+                    .query_row(
+                        "SELECT value FROM app_settings WHERE key = 'sync_enabled'",
+                        [],
+                        |r| r.get::<_, String>(0),
+                    )
+                    .map(|v| v == "true")
+                    .unwrap_or(false);
+                if sync_enabled {
+                    let device_id = conn
+                        .query_row(
+                            "SELECT value FROM app_settings WHERE key = 'sync_device_id'",
+                            [],
+                            |r| r.get::<_, String>(0),
+                        )
+                        .unwrap_or_else(|_| uuid::Uuid::new_v4().to_string());
+                    let dev_name = hostname::get()
+                        .ok()
+                        .and_then(|h| h.into_string().ok())
+                        .unwrap_or_else(|| "Keepr".to_string());
+                    let db_for_sync = db_arc.clone();
+                    let resources_for_sync = data_dir.join("resources");
+                    let port_holder = sync_state.port.clone();
+                    let peers_holder = sync_state.peers.clone();
+                    let status_holder = sync_state.status.clone();
+                    let did = device_id.clone();
+                    let dn = dev_name.clone();
+                    std::thread::spawn(move || {
+                        let rt = match tokio::runtime::Builder::new_current_thread()
+                            .enable_all()
+                            .build()
+                        {
+                            Ok(r) => r,
+                            Err(e) => {
+                                log::error!("sync: could not build runtime: {e}");
+                                return;
+                            }
+                        };
+                        rt.block_on(async move {
+                            match sync::server::start(
+                                db_for_sync,
+                                resources_for_sync,
+                                did.clone(),
+                                dn.clone(),
+                            )
+                            .await
+                            {
+                                Ok(port) => {
+                                    log::info!("sync server: ready on 0.0.0.0:{port}");
+                                    *port_holder.lock() = Some(port);
+                                    *status_holder.lock() = sync::SyncStatus::Idle;
+                                    if let Err(e) =
+                                        sync::discovery::register_service(&did, &dn, port)
+                                    {
+                                        log::warn!("sync mDNS register: {e}");
+                                    }
+                                    if let Err(e) =
+                                        sync::discovery::start_browser(peers_holder, did)
+                                    {
+                                        log::warn!("sync mDNS browse: {e}");
+                                    }
+                                }
+                                Err(e) => {
+                                    log::error!("sync server start failed: {e}");
+                                    *status_holder.lock() = sync::SyncStatus::Error;
+                                }
+                            }
+                            std::future::pending::<()>().await;
+                        });
+                    });
+                }
+            }
+
+            app.manage(sync_state);
             app.manage(AppState {
                 db: db_arc,
                 importing: Arc::new(AtomicBool::new(false)),
@@ -542,6 +619,7 @@ pub fn run() {
                 vault_dek: Arc::new(Mutex::new(None)),
                 shutdown,
                 web_clipper: web_clipper_info,
+                sync_state: sync::SyncState::default(),
             });
 
             // NF-06 — tray icon + menu. "Show / Hide Keepr" toggles the
@@ -757,6 +835,12 @@ pub fn run() {
             // v0.24.0 — Web Clipper (localhost server + MV3 extension).
             commands::io::get_web_clipper_info,
             commands::io::regenerate_web_clipper_token,
+            // v0.26.0 — LAN-only P2P sync.
+            commands::sync::get_sync_settings,
+            commands::sync::get_sync_peers,
+            commands::sync::get_sync_status,
+            commands::sync::set_sync_enabled,
+            commands::sync::sync_now,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

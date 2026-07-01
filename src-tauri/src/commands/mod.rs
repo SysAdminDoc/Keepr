@@ -17,6 +17,7 @@ pub mod labels;
 pub mod notes;
 pub mod reminders;
 pub mod security;
+pub mod sync;
 
 #[cfg(test)]
 use attachments::*;
@@ -659,6 +660,7 @@ mod tests {
             vault_dek: Arc::new(Mutex::new(None)),
             shutdown: Arc::new(AtomicBool::new(false)),
             web_clipper: Arc::new(Mutex::new(crate::web_clipper::WebClipperInfo::default())),
+            sync_state: crate::sync::SyncState::default(),
         }
     }
 
