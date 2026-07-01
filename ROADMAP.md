@@ -4,7 +4,7 @@
 
 **Priority legend:** P0 = data loss / crash / security / distribution-blocker · P1 = visible bug / high user value · P2 = polish / nice-to-have · P3 = future / experimental.
 
-**Status (2026-07-01):** v0.25.8 ships the patch-safe Tauri/Vitest/tooling refresh with production npm audit clean; the remaining dev-only Vite/esbuild audit finding stays with the planned Vite 8 breaking lane. Blocked signing/biometric/notarization items live in [Roadmap_Blocked.md](Roadmap_Blocked.md). This file lists only actionable open work.
+**Status (2026-07-01):** v0.25.9 ships the React 19 renderer upgrade plus lucide 1.x peer-compatibility bump, with desktop/mobile Settings and editor Browser QA. The remaining dev-only Vite/esbuild audit finding stays with the planned Vite 8 breaking lane. Blocked signing/biometric/notarization items live in [Roadmap_Blocked.md](Roadmap_Blocked.md). This file lists only actionable open work.
 
 ---
 
@@ -55,13 +55,6 @@ Carried forward across every research cycle:
 
 ## Research-Driven Additions
 
-- [ ] P2 - React 19 renderer lane
-  Why: React/React DOM latest is 19.2.x, but the app has dense modal/editor hooks and root error-boundary behavior that need a standalone pass.
-  Evidence: `npm outdated --long`; stack-javascript hook-order regression notes; `src/App.tsx`; `src/components/ErrorBoundary.tsx`; `src/components/NoteEditor.tsx`.
-  Touches: `package.json`, `package-lock.json`, `@types/react`, `@types/react-dom`, `eslint.config.js`, rendered Settings/editor smoke screenshots.
-  Acceptance: React 19 types/runtime are upgraded together; hook lint stays error-clean; desktop and 390px Settings/editor rendered checks show no blank screen, console errors, or layout clipping.
-  Complexity: L
-
 - [ ] P2 - Vite 8 / plugin-react 6 lane
   Why: Vite latest is 8.1.x and plugin-react latest is 6.x; stack memory flags Vite 8 native optional dependency handling as a known install/build risk.
   Evidence: `npm outdated --long`; `npm audit` Vite/esbuild dev-server advisory requiring a breaking Vite upgrade; stack-javascript Vite 8 optional-native warning; `vite.config.ts`; `vitest.config.ts`.
@@ -75,13 +68,6 @@ Carried forward across every research cycle:
   Touches: `package.json`, `package-lock.json`, `tailwind.config.js`, `postcss.config.js`, `src/index.css`, visual regression screenshots.
   Acceptance: Tailwind 4 migration preserves Keep color tokens, dark mode, scrollbar/focus styles, and note card/editor/settings layout on desktop and 390px mobile.
   Complexity: L
-
-- [ ] P2 - lucide-react 1.x icon lane
-  Why: lucide latest is 1.22.x and every tool surface relies on icon imports for compact controls.
-  Evidence: `npm outdated --long`; `src/components/**/*.tsx`.
-  Touches: `package.json`, `package-lock.json`, icon import call sites if exports changed.
-  Acceptance: lucide 1.x is installed with no missing icon exports; `npm run lint`, `npm test`, and rendered Settings/editor/topbar checks remain clean.
-  Complexity: M
 
 - [ ] P2 - TypeScript 6 + ESLint 10 lane
   Why: TypeScript latest is 6.0.x and ESLint latest is 10.x; both can change diagnostics and flat-config behavior.

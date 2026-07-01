@@ -51,7 +51,7 @@ export default [
       "react-hooks": reactHooks,
     },
     settings: {
-      react: { version: "18.3" },
+      react: { version: "19.2" },
     },
     rules: {
       // The rule that would have caught v0.16.1's editor-blanks-screen bug.
