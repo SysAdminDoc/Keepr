@@ -1,6 +1,6 @@
 # Keepr
 
-![Version](https://img.shields.io/badge/version-0.25.13-blue)
+![Version](https://img.shields.io/badge/version-0.25.14-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
 
@@ -93,6 +93,7 @@ Prereqs: Node 20+, Rust 1.80+. The Tauri CLI is bundled as a dev-dependency — 
 npm install
 npm run tauri dev          # dev (HMR)
 npm run tauri build        # release MSI/NSIS in src-tauri/target/release/bundle/
+npm run build:store-installer  # Store-flavored MSI/NSIS with offline WebView2 installer
 npm run smoke              # temp DB/storage/vault/clipper/backup smoke
 npm test                   # vitest (frontend)
 cargo test --manifest-path src-tauri/Cargo.toml --lib   # rust unit tests
