@@ -2,7 +2,12 @@ use crate::sync::{SyncPeer, SyncResult, SyncSettings, SyncState, SyncStatus};
 use crate::AppState;
 use chrono::Utc;
 use rusqlite::params;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::sync_channel;
+use std::sync::Arc;
+use std::time::Duration;
 use tauri::State;
+use tokio::sync::oneshot;
 use uuid::Uuid;
 
 use crate::sync::protocol;
@@ -55,6 +60,175 @@ fn device_name() -> String {
         .unwrap_or_else(|| "Keepr".to_string())
 }
 
+/// Start the LAN sync server and mDNS discovery on a dedicated runtime.
+/// Keeping the runtime handle in `SyncState` makes the Settings toggle a
+/// real lifecycle control instead of a setting that only takes effect after
+/// the next process launch.
+pub fn start_sync_runtime(state: &AppState, sync: &SyncState) -> Result<(), String> {
+    let mut runtime_guard = sync.runtime.lock();
+    if let Some(runtime) = runtime_guard.as_ref() {
+        if !runtime
+            .thread
+            .as_ref()
+            .is_some_and(std::thread::JoinHandle::is_finished)
+        {
+            return Ok(());
+        }
+    }
+    if let Some(mut stale) = runtime_guard.take() {
+        stale.stop_browser.store(true, Ordering::SeqCst);
+        if let Some(sender) = stale.server_shutdown.take() {
+            let _ = sender.send(());
+        }
+        if let Some(thread) = stale.thread.take() {
+            let _ = thread.join();
+        }
+    }
+
+    let device_id = ensure_device_id(state);
+    let sync_token = ensure_sync_token(state);
+    let device_name = device_name();
+    let db = state.db.clone();
+    let resources_dir = state.data_dir.join("resources");
+    let port_holder = sync.port.clone();
+    let peers_holder = sync.peers.clone();
+    let status_holder = sync.status.clone();
+    let stop_browser = Arc::new(AtomicBool::new(false));
+    let stop_for_thread = stop_browser.clone();
+    let (server_shutdown, server_shutdown_rx) = oneshot::channel();
+    let (ready_tx, ready_rx) = sync_channel::<Result<u16, String>>(1);
+    let did = device_id.clone();
+    let dname = device_name.clone();
+
+    let thread = std::thread::spawn(move || {
+        let runtime = match tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+        {
+            Ok(runtime) => runtime,
+            Err(e) => {
+                let message = format!("could not build sync runtime: {e}");
+                let _ = ready_tx.send(Err(message.clone()));
+                *status_holder.lock() = SyncStatus::Error;
+                log::error!("sync: {message}");
+                return;
+            }
+        };
+
+        runtime.block_on(async move {
+            let (port, server_task) = match crate::sync::server::start(
+                db,
+                resources_dir,
+                did.clone(),
+                dname.clone(),
+                sync_token,
+                server_shutdown_rx,
+            )
+            .await
+            {
+                Ok(started) => started,
+                Err(e) => {
+                    let _ = ready_tx.send(Err(e.clone()));
+                    *status_holder.lock() = SyncStatus::Error;
+                    log::error!("sync server start failed: {e}");
+                    return;
+                }
+            };
+
+            *port_holder.lock() = Some(port);
+            *status_holder.lock() = SyncStatus::Idle;
+            let _ = ready_tx.send(Ok(port));
+            log::info!("sync server: ready on 0.0.0.0:{port}");
+
+            let service_daemon = match crate::sync::discovery::register_service(
+                &did, &dname, port,
+            ) {
+                Ok(daemon) => Some(daemon),
+                Err(e) => {
+                    log::warn!("sync mDNS register: {e}");
+                    None
+                }
+            };
+            let browser = match crate::sync::discovery::start_browser(
+                peers_holder.clone(),
+                did,
+                stop_for_thread.clone(),
+            ) {
+                Ok(handles) => Some(handles),
+                Err(e) => {
+                    log::warn!("sync mDNS browse: {e}");
+                    None
+                }
+            };
+
+            if let Err(e) = server_task.await {
+                log::error!("sync server task failed: {e}");
+            }
+
+            let requested_stop = stop_for_thread.load(Ordering::SeqCst);
+            stop_for_thread.store(true, Ordering::SeqCst);
+            if let Some(daemon) = service_daemon {
+                if let Ok(done) = daemon.shutdown() {
+                    let _ = done.recv_timeout(Duration::from_secs(2));
+                }
+            }
+            if let Some((daemon, browser_thread)) = browser {
+                if let Ok(done) = daemon.shutdown() {
+                    let _ = done.recv_timeout(Duration::from_secs(2));
+                }
+                let _ = browser_thread.join();
+            }
+
+            peers_holder.lock().clear();
+            *port_holder.lock() = None;
+            *status_holder.lock() = if requested_stop {
+                SyncStatus::Disabled
+            } else {
+                SyncStatus::Error
+            };
+        });
+    });
+
+    match ready_rx.recv_timeout(Duration::from_secs(5)) {
+        Ok(Ok(_port)) => {
+            *runtime_guard = Some(crate::sync::SyncRuntime {
+                stop_browser,
+                server_shutdown: Some(server_shutdown),
+                thread: Some(thread),
+            });
+            Ok(())
+        }
+        Ok(Err(e)) => {
+            let _ = server_shutdown.send(());
+            let _ = thread.join();
+            Err(e)
+        }
+        Err(e) => {
+            let _ = server_shutdown.send(());
+            let _ = thread.join();
+            Err(format!("sync server did not start: {e}"))
+        }
+    }
+}
+
+/// Stop the server, mDNS daemons, and their worker threads. This is safe to
+/// call repeatedly, including from the app's exit callback.
+pub fn stop_sync_runtime(sync: &SyncState) {
+    let runtime = sync.runtime.lock().take();
+    if let Some(mut runtime) = runtime {
+        runtime.stop_browser.store(true, Ordering::SeqCst);
+        if let Some(sender) = runtime.server_shutdown.take() {
+            let _ = sender.send(());
+        }
+        if let Some(thread) = runtime.thread.take() {
+            let _ = thread.join();
+        }
+    }
+    sync.peers.lock().clear();
+    *sync.port.lock() = None;
+    *sync.status.lock() = SyncStatus::Disabled;
+}
+
 #[tauri::command]
 pub fn get_sync_settings(state: State<'_, AppState>, sync: State<'_, SyncState>) -> SyncSettings {
     let device_id = ensure_device_id(&state);
@@ -90,11 +264,13 @@ pub async fn set_sync_enabled(
 ) -> Result<(), String> {
     set_setting(&state, "sync_enabled", if enabled { "true" } else { "false" })?;
     if enabled {
-        *sync.status.lock() = SyncStatus::Idle;
+        if let Err(e) = start_sync_runtime(state.inner(), sync.inner()) {
+            let _ = set_setting(&state, "sync_enabled", "false");
+            *sync.status.lock() = SyncStatus::Error;
+            return Err(e);
+        }
     } else {
-        *sync.status.lock() = SyncStatus::Disabled;
-        sync.peers.lock().clear();
-        *sync.port.lock() = None;
+        stop_sync_runtime(sync.inner());
     }
     Ok(())
 }

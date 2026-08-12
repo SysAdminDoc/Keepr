@@ -4,15 +4,6 @@ Actionable work only. Historical and completed roadmap material is archived in C
 
 ## Actionable Items
 
-- [ ] **P1 — Sync: `set_sync_enabled(true)` does not start server/mDNS at runtime** — requires app restart. Should spin up the server + mDNS on enable, tear down on disable.
-  Where: `src-tauri/src/commands/sync.rs`, `src-tauri/src/lib.rs`
-
-- [ ] **P1 — Sync: no transactions in `apply_pushed_notes`** — multi-statement note upsert is not atomic; crash mid-sync can leave notes without checklists/labels.
-  Where: `src-tauri/src/sync/protocol.rs:152-304`
-
-- [ ] **P1 — Vault: `list_notes` TOCTOU panic** — double decrypt with mutex release between passes; vault lock between them causes `expect()` panic.
-  Where: `src-tauri/src/commands/notes.rs:264-357`
-
 - [ ] **P2 — Sync: plaintext HTTP** — all sync traffic is unencrypted. Consider TLS or at least transport-layer encryption for note content.
   Where: `src-tauri/src/commands/sync.rs`, `src-tauri/src/sync/server.rs`
 

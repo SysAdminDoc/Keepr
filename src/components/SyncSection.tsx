@@ -51,7 +51,7 @@ export function SyncSection() {
       showToast(
         settings.enabled
           ? "LAN sync disabled"
-          : "LAN sync enabled — restart Keepr for discovery to begin",
+          : "LAN sync enabled — discovering peers now",
       );
       await refresh();
     } catch (e) {

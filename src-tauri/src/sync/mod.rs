@@ -5,7 +5,10 @@ pub mod server;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
+use std::thread::JoinHandle;
+use tokio::sync::oneshot;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -46,10 +49,20 @@ pub struct SyncResult {
     pub peer_name: String,
 }
 
+/// Handles the resources owned by one running LAN-sync instance. The server
+/// runs on a dedicated Tokio runtime and the mDNS daemons own their own
+/// threads, so toggling sync needs explicit cancellation for all of them.
+pub struct SyncRuntime {
+    pub stop_browser: Arc<AtomicBool>,
+    pub server_shutdown: Option<oneshot::Sender<()>>,
+    pub thread: Option<JoinHandle<()>>,
+}
+
 pub struct SyncState {
     pub peers: Arc<Mutex<HashMap<String, SyncPeer>>>,
     pub status: Arc<Mutex<SyncStatus>>,
     pub port: Arc<Mutex<Option<u16>>>,
+    pub runtime: Arc<Mutex<Option<SyncRuntime>>>,
 }
 
 impl Default for SyncState {
@@ -58,6 +71,7 @@ impl Default for SyncState {
             peers: Arc::new(Mutex::new(HashMap::new())),
             status: Arc::new(Mutex::new(SyncStatus::Disabled)),
             port: Arc::new(Mutex::new(None)),
+            runtime: Arc::new(Mutex::new(None)),
         }
     }
 }
