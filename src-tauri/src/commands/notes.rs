@@ -254,6 +254,8 @@ pub fn list_notes(state: State<'_, AppState>) -> Result<Vec<Note>, String> {
     let dek_guard = state.vault_dek.lock();
     let dek_opt = dek_guard.as_ref();
     let mut notes: Vec<Note> = Vec::new();
+    let mut decrypted_checklists: std::collections::HashMap<String, Vec<ChecklistItem>> =
+        std::collections::HashMap::new();
     let mut crows = nstmt.query([]).map_err(err)?;
     while let Some(row) = crows.next().map_err(err)? {
         let id: String = row.get(0).map_err(err)?;
@@ -269,6 +271,18 @@ pub fn list_notes(state: State<'_, AppState>) -> Result<Vec<Note>, String> {
                         if let Ok(payload) = crate::vault::decrypt_note(dek, &id, &bundle) {
                             title = payload.title;
                             body = payload.body;
+                            let items = payload
+                                .checklist
+                                .into_iter()
+                                .map(|i| ChecklistItem {
+                                    id: i.id,
+                                    text: i.text,
+                                    checked: i.checked,
+                                    position: i.position,
+                                    parent_id: i.parent_id,
+                                })
+                                .collect();
+                            decrypted_checklists.insert(id.clone(), items);
                             // Keep vault_label = "vault" so the UI knows
                             // to show the unlocked vault badge.
                         }
@@ -306,53 +320,11 @@ pub fn list_notes(state: State<'_, AppState>) -> Result<Vec<Note>, String> {
     }
     drop(crows);
     drop(nstmt);
-    let vault_unlocked = dek_opt.is_some();
     drop(dek_guard);
-    // For vault rows we also need to decrypt and pull the checklist from
-    // the encrypted payload (the rows table is empty for those notes).
-    // The plain-text loop below covers all rows, so vault checklists are
-    // already in place — only restore-time decrypt is needed when the
-    // vault is unlocked.
-    if vault_unlocked {
-        // Re-decrypt to recover checklist for "vault" rows.
-        let dek_guard = state.vault_dek.lock();
-        let dek = dek_guard.as_ref().expect("we just confirmed it");
-        let mut stmt = conn
-            .prepare("SELECT id, vault_ciphertext FROM notes WHERE vault = 'vault'")
-            .map_err(err)?;
-        let mut rows = stmt.query([]).map_err(err)?;
-        let mut decrypted: std::collections::HashMap<String, Vec<ChecklistItem>> =
-            std::collections::HashMap::new();
-        while let Some(row) = rows.next().map_err(err)? {
-            let id: String = row.get(0).map_err(err)?;
-            let hex: Option<String> = row.get(1).map_err(err)?;
-            if let Some(hex) = hex {
-                if let Ok(bundle) = crate::vault::from_hex(&hex) {
-                    if let Ok(payload) = crate::vault::decrypt_note(dek, &id, &bundle) {
-                        let items: Vec<ChecklistItem> = payload
-                            .checklist
-                            .into_iter()
-                            .map(|i| ChecklistItem {
-                                id: i.id,
-                                text: i.text,
-                                checked: i.checked,
-                                position: i.position,
-                                parent_id: i.parent_id,
-                            })
-                            .collect();
-                        decrypted.insert(id, items);
-                    }
-                }
-            }
-        }
-        drop(rows);
-        drop(stmt);
-        drop(dek_guard);
-        for n in notes.iter_mut() {
-            if n.vault == "vault" {
-                if let Some(items) = decrypted.remove(&n.id) {
-                    n.checklist = items;
-                }
+    for n in notes.iter_mut() {
+        if n.vault == "vault" {
+            if let Some(items) = decrypted_checklists.remove(&n.id) {
+                n.checklist = items;
             }
         }
     }

@@ -533,101 +533,36 @@ pub fn run() {
             });
 
             let sync_state = sync::SyncState::default();
-
-            // v0.26.0 — if LAN sync was enabled, start discovery + server.
-            {
-                let conn = db_arc.lock();
-                let sync_enabled: bool = conn
-                    .query_row(
-                        "SELECT value FROM app_settings WHERE key = 'sync_enabled'",
-                        [],
-                        |r| r.get::<_, String>(0),
-                    )
-                    .map(|v| v == "true")
-                    .unwrap_or(false);
-                if sync_enabled {
-                    let device_id = conn
-                        .query_row(
-                            "SELECT value FROM app_settings WHERE key = 'sync_device_id'",
-                            [],
-                            |r| r.get::<_, String>(0),
-                        )
-                        .unwrap_or_else(|_| uuid::Uuid::new_v4().to_string());
-                    let sync_token = conn
-                        .query_row(
-                            "SELECT value FROM app_settings WHERE key = 'sync_token'",
-                            [],
-                            |r| r.get::<_, String>(0),
-                        )
-                        .unwrap_or_else(|_| uuid::Uuid::new_v4().to_string());
-                    let dev_name = hostname::get()
-                        .ok()
-                        .and_then(|h| h.into_string().ok())
-                        .unwrap_or_else(|| "Keepr".to_string());
-                    let db_for_sync = db_arc.clone();
-                    let resources_for_sync = data_dir.join("resources");
-                    let port_holder = sync_state.port.clone();
-                    let peers_holder = sync_state.peers.clone();
-                    let status_holder = sync_state.status.clone();
-                    let did = device_id.clone();
-                    let dn = dev_name.clone();
-                    let tok = sync_token;
-                    std::thread::spawn(move || {
-                        let rt = match tokio::runtime::Builder::new_current_thread()
-                            .enable_all()
-                            .build()
-                        {
-                            Ok(r) => r,
-                            Err(e) => {
-                                log::error!("sync: could not build runtime: {e}");
-                                return;
-                            }
-                        };
-                        rt.block_on(async move {
-                            match sync::server::start(
-                                db_for_sync,
-                                resources_for_sync,
-                                did.clone(),
-                                dn.clone(),
-                                tok,
-                            )
-                            .await
-                            {
-                                Ok(port) => {
-                                    log::info!("sync server: ready on 0.0.0.0:{port}");
-                                    *port_holder.lock() = Some(port);
-                                    *status_holder.lock() = sync::SyncStatus::Idle;
-                                    if let Err(e) =
-                                        sync::discovery::register_service(&did, &dn, port)
-                                    {
-                                        log::warn!("sync mDNS register: {e}");
-                                    }
-                                    if let Err(e) =
-                                        sync::discovery::start_browser(peers_holder, did)
-                                    {
-                                        log::warn!("sync mDNS browse: {e}");
-                                    }
-                                }
-                                Err(e) => {
-                                    log::error!("sync server start failed: {e}");
-                                    *status_holder.lock() = sync::SyncStatus::Error;
-                                }
-                            }
-                            std::future::pending::<()>().await;
-                        });
-                    });
-                }
-            }
-
-            app.manage(sync_state);
-            app.manage(AppState {
+            let app_state = AppState {
                 db: db_arc,
                 importing: Arc::new(AtomicBool::new(false)),
                 data_dir,
                 vault_dek: Arc::new(Mutex::new(None)),
                 shutdown,
                 web_clipper: web_clipper_info,
-            });
+            };
+
+            // v0.26.0 — if LAN sync was enabled, start discovery + server.
+            // The same lifecycle helper is used by the Settings toggle so
+            // startup and runtime enablement cannot drift apart.
+            let sync_enabled = {
+                let conn = app_state.db.lock();
+                conn.query_row(
+                    "SELECT value FROM app_settings WHERE key = 'sync_enabled'",
+                    [],
+                    |r| r.get::<_, String>(0),
+                )
+                .map(|v| v == "true")
+                .unwrap_or(false)
+            };
+            if sync_enabled {
+                if let Err(e) = commands::sync::start_sync_runtime(&app_state, &sync_state) {
+                    log::error!("sync startup failed: {e}");
+                }
+            }
+
+            app.manage(sync_state);
+            app.manage(app_state);
 
             // NF-06 — tray icon + menu. "Show / Hide Keepr" toggles the
             // main window; "New note" focuses the window and emits the
@@ -862,6 +797,9 @@ pub fn run() {
                     state
                         .shutdown
                         .store(true, std::sync::atomic::Ordering::SeqCst);
+                }
+                if let Some(sync_state) = app_handle.try_state::<sync::SyncState>() {
+                    commands::sync::stop_sync_runtime(sync_state.inner());
                 }
             }
         });

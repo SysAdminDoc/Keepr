@@ -10,6 +10,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use subtle::ConstantTimeEq;
 use tokio::net::TcpListener;
+use tokio::sync::oneshot;
 
 use super::protocol;
 
@@ -132,7 +133,8 @@ pub async fn start(
     device_id: String,
     device_name: String,
     token: String,
-) -> Result<u16, String> {
+    shutdown: oneshot::Receiver<()>,
+) -> Result<(u16, tokio::task::JoinHandle<()>), String> {
     let state = SyncServerState {
         db,
         resources_dir,
@@ -156,13 +158,18 @@ pub async fn start(
         .map_err(|e| format!("local_addr: {e}"))?
         .port();
 
-    tokio::spawn(async move {
-        if let Err(e) = axum::serve(listener, app).await {
+    let server_task = tokio::spawn(async move {
+        let result = axum::serve(listener, app)
+            .with_graceful_shutdown(async {
+                let _ = shutdown.await;
+            })
+            .await;
+        if let Err(e) = result {
             log::error!("sync server error: {e}");
         }
     });
 
-    Ok(port)
+    Ok((port, server_task))
 }
 
 #[cfg(test)]

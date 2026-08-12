@@ -3,7 +3,10 @@ use chrono::Utc;
 use mdns_sd::{ServiceDaemon, ServiceEvent, ServiceInfo};
 use parking_lot::Mutex;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::thread::JoinHandle;
+use std::time::Duration;
 
 const SERVICE_TYPE: &str = "_keepr-sync._tcp.local.";
 
@@ -36,14 +39,24 @@ pub fn register_service(
 pub fn start_browser(
     peers: Arc<Mutex<HashMap<String, SyncPeer>>>,
     own_device_id: String,
-) -> Result<ServiceDaemon, String> {
+    stop: Arc<AtomicBool>,
+) -> Result<(ServiceDaemon, JoinHandle<()>), String> {
     let daemon = ServiceDaemon::new()
         .map_err(|e| format!("mDNS browser daemon failed: {e}"))?;
     let receiver = daemon
         .browse(SERVICE_TYPE)
         .map_err(|e| format!("browse: {e}"))?;
-    std::thread::spawn(move || {
-        while let Ok(event) = receiver.recv() {
+    let thread = std::thread::spawn(move || {
+        while !stop.load(Ordering::SeqCst) {
+            let event = match receiver.recv_timeout(Duration::from_millis(250)) {
+                Ok(event) => event,
+                Err(_) => {
+                    if receiver.is_disconnected() {
+                        break;
+                    }
+                    continue;
+                }
+            };
             match event {
                 ServiceEvent::ServiceResolved(info) => {
                     let device_id = info
@@ -87,5 +100,5 @@ pub fn start_browser(
             }
         }
     });
-    Ok(daemon)
+    Ok((daemon, thread))
 }

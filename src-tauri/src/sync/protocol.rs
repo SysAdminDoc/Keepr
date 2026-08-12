@@ -156,11 +156,17 @@ pub fn apply_pushed_notes(
     notes: &[SyncNote],
     labels: &[Label],
 ) -> Result<(usize, usize), String> {
+    // A pushed note spans the notes, checklist, labels, and reminders tables.
+    // Use an unchecked transaction because this function intentionally accepts
+    // a shared immutable Connection while the caller serializes access with
+    // its mutex. Any error rolls back the complete push instead of leaving a
+    // partially-applied note behind.
+    let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
     let mut notes_applied = 0;
     let mut labels_merged = 0;
 
     for label in labels {
-        let existing: Option<String> = conn
+        let existing: Option<String> = tx
             .query_row(
                 "SELECT id FROM labels WHERE name = ?1 COLLATE NOCASE",
                 params![label.name],
@@ -168,7 +174,7 @@ pub fn apply_pushed_notes(
             )
             .ok();
         if existing.is_none() {
-            conn.execute(
+            tx.execute(
                 "INSERT OR IGNORE INTO labels (id, name) VALUES (?1, ?2)",
                 params![label.id, label.name],
             )
@@ -182,7 +188,7 @@ pub fn apply_pushed_notes(
         if n.vault == "vault" {
             continue;
         }
-        let existing_updated: Option<String> = conn
+        let existing_updated: Option<String> = tx
             .query_row(
                 "SELECT updated_at FROM notes WHERE id = ?1",
                 params![n.id],
@@ -192,7 +198,7 @@ pub fn apply_pushed_notes(
         if existing_updated.as_ref().is_some_and(|eu| eu >= &n.updated_at) {
             continue;
         }
-        let local_vault: Option<String> = conn
+        let local_vault: Option<String> = tx
             .query_row(
                 "SELECT vault FROM notes WHERE id = ?1",
                 params![n.id],
@@ -203,7 +209,7 @@ pub fn apply_pushed_notes(
             continue;
         }
 
-        conn.execute(
+        tx.execute(
             "INSERT INTO notes (id, kind, title, body, color, pinned, archived, trashed, \
              position, created_at, updated_at, trashed_at, vault, background_pattern) \
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 'plain', ?13) \
@@ -231,13 +237,13 @@ pub fn apply_pushed_notes(
         )
         .map_err(|e| e.to_string())?;
 
-        conn.execute(
+        tx.execute(
             "DELETE FROM checklist_items WHERE note_id = ?1",
             params![n.id],
         )
         .map_err(|e| e.to_string())?;
         for ci in &n.checklist {
-            conn.execute(
+            tx.execute(
                 "INSERT INTO checklist_items (id, note_id, text, checked, position, parent_id) \
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
                 params![ci.id, n.id, ci.text, ci.checked, ci.position, ci.parent_id],
@@ -245,13 +251,13 @@ pub fn apply_pushed_notes(
             .map_err(|e| e.to_string())?;
         }
 
-        conn.execute(
+        tx.execute(
             "DELETE FROM note_labels WHERE note_id = ?1",
             params![n.id],
         )
         .map_err(|e| e.to_string())?;
         for label_name in &sn.labels_names {
-            let label_id: Option<String> = conn
+            let label_id: Option<String> = tx
                 .query_row(
                     "SELECT id FROM labels WHERE name = ?1 COLLATE NOCASE",
                     params![label_name],
@@ -262,7 +268,7 @@ pub fn apply_pushed_notes(
                 Some(id) => id,
                 None => {
                     let new_id = uuid::Uuid::new_v4().to_string();
-                    conn.execute(
+                    tx.execute(
                         "INSERT OR IGNORE INTO labels (id, name) VALUES (?1, ?2)",
                         params![new_id, label_name],
                     )
@@ -270,7 +276,7 @@ pub fn apply_pushed_notes(
                     new_id
                 }
             };
-            conn.execute(
+            tx.execute(
                 "INSERT OR IGNORE INTO note_labels (note_id, label_id) VALUES (?1, ?2)",
                 params![n.id, lid],
             )
@@ -278,7 +284,7 @@ pub fn apply_pushed_notes(
         }
 
         if let Some(rem) = &sn.reminder {
-            conn.execute(
+            tx.execute(
                 "INSERT INTO reminders (note_id, fire_at, rrule, snooze_until, fired_at, dismissed_at, created_at) \
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) \
                  ON CONFLICT(note_id) DO UPDATE SET \
@@ -301,6 +307,7 @@ pub fn apply_pushed_notes(
         notes_applied += 1;
     }
 
+    tx.commit().map_err(|e| e.to_string())?;
     Ok((notes_applied, labels_merged))
 }
 
@@ -622,6 +629,69 @@ mod tests {
             .query_row("SELECT title FROM notes WHERE id = 'n1'", [], |r| r.get(0))
             .unwrap();
         assert_eq!(title, "Remote");
+    }
+
+    #[test]
+    fn apply_pushed_notes_rolls_back_the_whole_batch_on_error() {
+        let conn = test_conn();
+        let note = |id: &str, checklist: Vec<ChecklistItem>| Note {
+            id: id.into(),
+            kind: "list".into(),
+            title: id.into(),
+            body: String::new(),
+            color: "default".into(),
+            pinned: false,
+            archived: false,
+            trashed: false,
+            position: 0,
+            created_at: "2026-01-01T00:00:00Z".into(),
+            updated_at: "2026-01-02T00:00:00Z".into(),
+            trashed_at: None,
+            checklist,
+            labels: vec![],
+            attachments: vec![],
+            vault_attachment_count: 0,
+            vault: "plain".into(),
+            background_pattern: String::new(),
+        };
+        let first = SyncNote {
+            note: note(
+                "n1",
+                vec![ChecklistItem {
+                    id: "duplicate-checklist-id".into(),
+                    text: "first".into(),
+                    checked: false,
+                    position: 0,
+                    parent_id: None,
+                }],
+            ),
+            labels_names: vec!["batched".into()],
+            reminder: None,
+        };
+        let second = SyncNote {
+            note: note(
+                "n2",
+                vec![ChecklistItem {
+                    id: "duplicate-checklist-id".into(),
+                    text: "second".into(),
+                    checked: false,
+                    position: 0,
+                    parent_id: None,
+                }],
+            ),
+            labels_names: vec![],
+            reminder: None,
+        };
+
+        assert!(apply_pushed_notes(&conn, &[first, second], &[]).is_err());
+        let notes: i64 = conn
+            .query_row("SELECT COUNT(*) FROM notes", [], |r| r.get(0))
+            .unwrap();
+        let labels: i64 = conn
+            .query_row("SELECT COUNT(*) FROM labels", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(notes, 0);
+        assert_eq!(labels, 0);
     }
 
     #[test]
