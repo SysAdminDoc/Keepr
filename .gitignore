@@ -49,3 +49,6 @@ AGENTS.md
 .ai/
 PROJECT_CONTEXT.md
 CONTINUATION_PROMPT.md
+
+# Personal exports never belong in the repo
+*.mhtml
